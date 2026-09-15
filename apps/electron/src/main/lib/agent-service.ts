@@ -487,7 +487,7 @@ export async function runAgentHeadless(
           })
         }
       },
-      onRunStarted: ({ startedAt: persistedStartedAt, runGeneration }) => {
+      onRunStarted: ({ startedAt: persistedStartedAt, runGeneration, userMessage, userMessageUuid }) => {
         const session = getAgentSessionMeta(runInput.sessionId)
         eventBus.emit(runInput.sessionId, {
           kind: 'proma_event',
@@ -501,6 +501,8 @@ export async function runAgentHeadless(
             startedAt: persistedStartedAt,
             runGeneration,
             ...(session ? { session } : {}),
+            ...(userMessage !== undefined ? { userMessage } : {}),
+            ...(userMessageUuid ? { userMessageUuid } : {}),
           },
         })
       },
