@@ -44,7 +44,7 @@ import { AgentOrchestrator } from './agent-orchestrator'
 import { getAgentSessionWorkspacePath } from './config-paths'
 import { getAgentWorkspaceBySlug, getProjectFilesPath } from './agent-workspace-manager'
 import { getLocalProjectRootStatus } from './project-root-health'
-import { getAgentSessionMeta, updateAgentSessionMeta } from './agent-session-manager'
+import { getAgentSessionMeta, markAgentSessionDeleting, updateAgentSessionMeta } from './agent-session-manager'
 import { setAgentStopper, setHeadlessAgentRunner } from './agent-headless-runner-registry'
 import { getHeadlessAgentRunTarget } from './agent-headless-run-target'
 import { sendAgentStreamComplete } from './agent-completion-payload'
@@ -554,13 +554,19 @@ export function stopAgent(sessionId: string): void {
   // SEND_MESSAGE reserves this slot before the async bridge setup reaches the
   // orchestrator. Remember a stop in that window so the later run is never
   // allowed to create an uncancellable adapter query.
-  orchestrator.stop(
+  void orchestrator.stop(
     sessionId,
     shouldStopBeforeAgentRun(
       startingAgentSessions.has(sessionId),
       agentQueueCoordinator.isDispatching(sessionId),
     ),
   )
+}
+
+/** DELETE_SESSION 专用：先写入墓碑，再等待已有 utility abort 收束。 */
+export async function stopAgentAndDrain(sessionId: string): Promise<void> {
+  markAgentSessionDeleting(sessionId)
+  await orchestrator.stopAndDrain(sessionId)
 }
 
 setHeadlessAgentRunner(runAgentHeadless)
