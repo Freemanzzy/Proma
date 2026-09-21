@@ -79,6 +79,7 @@ import {
 } from './pi-message-adapter'
 import { DEFAULT_CONTEXT_WINDOW, buildModel } from './pi-model-registry'
 import { PendingPromptSkillActivationTracker } from './pi-skill-activation-tracker'
+import { normalizePiToolResultDetails, serializePiToolResultPayload } from './pi-tool-result-json'
 import { createPiRetryTerminalGate, mapPiNativeRetryEvent } from './pi-retry-control'
 import {
   closePiRequestProxyDispatcher,
@@ -93,8 +94,11 @@ type BashToolOptions = import('@earendil-works/pi-coding-agent').BashToolOptions
 type PowerShellToolOptions = import('@earendil-works/pi-coding-agent').PowerShellToolOptions
 type SkillLoadResult = ReturnType<ResourceLoader['getSkills']>
 
-const PI_NATIVE_MAX_RETRIES = 8
+// Pi 0.86 将单次 agent retry 退避限制为 maxAgentDelayMs（默认 60 秒）。
+// Proma 保持约十分钟的重试预算：1 + 2 + 4 + 8 + 16 + 32 + (8 × 60) = 543 秒。
+const PI_NATIVE_MAX_RETRIES = 14
 const PI_NATIVE_RETRY_BASE_DELAY_MS = 1_000
+const PI_NATIVE_MAX_DELAY_MS = 60_000
 const MAX_AUTOMATIC_COMPACTION_CONTINUATIONS = 20
 
 export function shouldMarkCompactionAfterCompletedTurn(
@@ -698,16 +702,17 @@ function wrapToolWithPermission<TParams extends TSchema, TDetails, TState>(
 }
 
 function createJsonToolResult(payload: unknown): AgentToolResult<unknown> {
+  const serialized = serializePiToolResultPayload(payload)
   return {
-    content: [{ type: 'text', text: JSON.stringify(payload) }],
-    details: payload,
+    content: [{ type: 'text', text: serialized.text }],
+    details: serialized.details,
   } as AgentToolResult<unknown>
 }
 
 function createTextToolResult(text: string, details?: unknown): AgentToolResult<unknown> {
   return {
     content: [{ type: 'text', text }],
-    details,
+    ...(details === undefined ? {} : { details: normalizePiToolResultDetails(details) }),
   } as AgentToolResult<unknown>
 }
 
@@ -1352,6 +1357,7 @@ export function installRuntimeGuardHooks(session: AgentSession, guard: AgentRunt
     return {
       ...previousResult,
       content: sanitizedContent,
+      details: normalizePiToolResultDetails(resultAfterPreviousHooks.details),
       terminate: guardedResult.terminate,
     }
   }
@@ -1462,7 +1468,10 @@ export class PiAgentAdapter implements AgentProviderAdapter {
           enabled: true,
           maxRetries: PI_NATIVE_MAX_RETRIES,
           baseDelayMs: PI_NATIVE_RETRY_BASE_DELAY_MS,
+          maxAgentDelayMs: PI_NATIVE_MAX_DELAY_MS,
         },
+        // Cache warming 会额外发送 provider 请求；在提供显式开关前不应静默增加消耗。
+        cacheWarming: 'off',
         ...buildPiRemoteConnectionSettings(input),
       })
       const openAIReasoningProfile = (input.provider === 'openai-codex' || input.provider === 'xai' || input.provider === 'openai-responses')
@@ -1541,19 +1550,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
       session.agent.transformContext = async (messages, signal) => sanitizePiMessageImageContent(
         await previousTransformContext?.(messages, signal) ?? messages,
       )
-      if (projectInstructionScope) {
-        const previousPrepareNextTurnWithContext = session.agent.prepareNextTurnWithContext
-        session.agent.prepareNextTurnWithContext = async (context, signal) => {
-          const previousSnapshot = await previousPrepareNextTurnWithContext?.(context, signal)
-          const nextContext = previousSnapshot?.context ?? context.context
-          const systemPrompt = projectInstructionScope.appendPendingInstructions(nextContext.systemPrompt)
-          if (systemPrompt === nextContext.systemPrompt) return previousSnapshot
-          return {
-            ...previousSnapshot,
-            context: { ...nextContext, systemPrompt },
-          }
-        }
-      }
+      // Pi 0.86 的 transcript-aware before_agent_start extension 会在下一轮注入动态项目指令。
       if (piAi && input.codexFastMode && input.provider === 'openai-codex' && isCodexFastModeSupportedModel(input.model)) {
         // Pi 的通用 streamSimple 会丢弃 provider 专属 serviceTier；这里直接走
         // provider stream，确保 request body 与 usage.cost 都使用 priority tier。
