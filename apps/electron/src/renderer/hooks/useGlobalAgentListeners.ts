@@ -1319,7 +1319,23 @@ export function useGlobalAgentListeners(): void {
 
         if (payload.kind === 'sdk_message') {
           const msgRecord = payload.message as Record<string, unknown>
-          // 仅在 Agent 发出变更工具调用时展示对应项目组件；右侧 Tab 严格归属产生变更的 session，
+          const currentRun = store.get(agentSessionStreamingStateAtomFamily(sessionId))
+          const messageRunGeneration = msgRecord._promaLiveRunGeneration
+          const messageRunStartedAt = msgRecord._promaLiveRunStartedAt
+          // 与 Delta 相同地隔离运行代际。旧 run 的 SDK 消息可能在用户快速续跑后迟到，
+          // 若直接写进 liveMessages，会把此前的 TaskUpdate 误显示在新任务中。
+          if (
+            currentRun?.runGeneration != null
+            && typeof messageRunGeneration === 'number'
+            && messageRunGeneration !== currentRun.runGeneration
+          ) return
+          if (
+            (currentRun?.runGeneration == null || typeof messageRunGeneration !== 'number')
+            && currentRun?.startedAt != null
+            && typeof messageRunStartedAt === 'number'
+            && messageRunStartedAt !== currentRun.startedAt
+          ) return
+          // 仅在 Agent 发出变更工具调用时展示对应项目组件；右侧 Tab 严格归属产生变更的 session,
           // 同一 workspace 的其他活跃会话不得被后台变更抢走焦点。
           if (!msgRecord.isReplay) {
             const changedComponent = getChangedWorkspaceComponentFromSdkMessage(payload.message)
@@ -1347,7 +1363,8 @@ export function useGlobalAgentListeners(): void {
 
             // 队列自动派发会在上一轮实时消息尚未落盘刷新时开始下一轮。
             // 标记每条实时消息所属 run，渲染层即可把上一轮立即视为完成并自动收起过程块。
-            if (activeRunStartedAt != null) {
+            if (activeRunStartedAt != null && typeof msgRecord._promaLiveRunStartedAt !== 'number') {
+              // 旧 EventBus 协议没有携带 run 标记时保留兼容；新协议已在主进程打标，不能覆盖。
               msgRecord._promaLiveRunStartedAt = activeRunStartedAt
             }
 
