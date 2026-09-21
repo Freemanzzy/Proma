@@ -1705,6 +1705,18 @@ export class AgentOrchestrator {
       // 14. 遍历 Adapter 事件流。Pi adapter 自行处理传输层重试；此处仅允许一次 resume artifact 回退。
       const MAX_QUERY_ATTEMPTS = 2
       const queryStartedAt = Date.now()
+      // 运行期标记只随 EventBus 的浅拷贝发送到 renderer，绝不污染待持久化的 SDKMessage。
+      // renderer 据此拒绝旧 run 的迟到消息，避免其覆盖当前任务进度。
+      const emitLiveSdkMessage = (message: SDKMessage): void => {
+        this.eventBus.emit(sessionId, {
+          kind: 'sdk_message',
+          message: {
+            ...(message as Record<string, unknown>),
+            _promaLiveRunStartedAt: streamStartedAt,
+            _promaLiveRunGeneration: runGeneration,
+          } as unknown as SDKMessage,
+        })
+      }
 
       for (let attempt = 1; attempt <= MAX_QUERY_ATTEMPTS; attempt++) {
         // stop() releases the active slot before aborting the adapter. It can win
@@ -1906,7 +1918,7 @@ export class AgentOrchestrator {
                   }
                   accumulatedMessages.push(partialOutput)
                   // Reuse the Pi UUID to replace the latest partial frame with normal markdown output.
-                  this.eventBus.emit(sessionId, { kind: 'sdk_message', message: partialOutput })
+                  emitLiveSdkMessage(partialOutput)
                 }
                 this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
                 accumulatedMessages.length = 0
@@ -1938,7 +1950,7 @@ export class AgentOrchestrator {
                 console.log(`[Agent 编排] 已保存 TypedError 消息: ${typedError.code} - ${typedError.title}`)
 
                 // 透传归一化后的错误消息到前端，避免 SDK 原始 API Error 直接暴露给用户。
-                this.eventBus.emit(sessionId, { kind: 'sdk_message', message: errorSDKMsg })
+                emitLiveSdkMessage(errorSDKMsg)
                 try { updateAgentSessionMeta(sessionId, {}) } catch { /* 忽略 */ }
                 completeRun(getAgentSessionMessages(sessionId), { startedAt: streamStartedAt })
                 return
@@ -2056,7 +2068,7 @@ export class AgentOrchestrator {
             if (!shouldEmit) {
               // 跳过 SDK 内部 user 消息的前端推送
             } else {
-              this.eventBus.emit(sessionId, { kind: 'sdk_message', message: msg })
+              emitLiveSdkMessage(msg)
             }
           }
 

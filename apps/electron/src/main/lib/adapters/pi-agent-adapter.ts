@@ -896,6 +896,14 @@ function stringFromInput(input: Record<string, unknown>, keys: string[], fallbac
   return fallback
 }
 
+/**
+ * 使用 Pi 的 toolCallId 作为默认任务 ID，让 tool_use 和 TaskCreate 结果从流开始就稳定关联。
+ * 显式 ID 仅为旧调用格式保留兼容，不应覆盖正常的 opaque toolCallId。
+ */
+export function resolvePromaTaskId(input: Record<string, unknown>, toolCallId: string): string {
+  return stringFromInput(input, ['id', 'taskId', 'task_id'], toolCallId)
+}
+
 function normalizeTaskStatus(value: unknown, fallback: PromaTaskItem['status']): PromaTaskItem['status'] {
   if (
     value === 'pending' ||
@@ -919,7 +927,6 @@ function normalizeStringArray(value: unknown): string[] | undefined {
 
 function buildPromaProductToolDefinitions(sdk: PiSdk, canUseTool: PiAgentQueryOptions['canUseTool']): ToolDefinition[] {
   const tasks = new Map<string, PromaTaskItem>()
-  let nextTaskId = 1
 
   const definitions = [
     sdk.defineTool({
@@ -985,9 +992,9 @@ function buildPromaProductToolDefinitions(sdk: PiSdk, canUseTool: PiAgentQueryOp
         activeForm: Type.Optional(Type.String({ description: '当前活动形态或阶段。' })),
         blocks: Type.Optional(Type.Array(Type.String({ description: '关联区块 ID。' }))),
       }),
-      async execute(_toolCallId, params) {
+      async execute(toolCallId, params) {
         const input = params as Record<string, unknown>
-        const id = stringFromInput(input, ['id', 'taskId', 'task_id'], String(nextTaskId++))
+        const id = resolvePromaTaskId(input, toolCallId)
         const task: PromaTaskItem = {
           id,
           subject: stringFromInput(input, ['subject', 'title', 'name'], `任务 #${id}`),
