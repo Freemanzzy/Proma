@@ -192,6 +192,15 @@ const PRESET_MODEL_CANDIDATE_UPDATES: readonly {
       ],
     },
   },
+  {
+    id: 'openai-codex-gpt-6-sol-luna-v1',
+    candidates: {
+      'openai-codex': [
+        { id: 'gpt-6-sol', name: 'GPT-6 Sol', enabled: true },
+        { id: 'gpt-6-luna', name: 'GPT-6 Luna', enabled: true },
+      ],
+    },
+  },
 ]
 
 /**
@@ -1916,8 +1925,9 @@ export async function fetchModels(input: FetchModelsInput): Promise<FetchModelsR
       case 'github-copilot':
       case 'xai':
         if (provider === 'openai-codex') {
-          // ChatGPT (Codex) 走 Pi SDK 内置模型目录，不依赖 baseUrl/apiKey。
-          const codexModels = await listCodexModels()
+          const credentials = parseCodexCredentials(input.apiKey)
+          if (!credentials) throw new Error('ChatGPT 登录凭据无效或缺失，请重新登录')
+          const codexModels = await listCodexModels(credentials)
           return {
             success: true,
             message: `已加载 ${codexModels.length} 个 ChatGPT (Codex) 模型`,
