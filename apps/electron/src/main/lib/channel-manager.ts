@@ -64,7 +64,14 @@ import { writeJsonFileAtomic } from './safe-file'
 import pkg from '../../../package.json' with { type: 'json' }
 
 /** 当前配置版本 */
-const CONFIG_VERSION = 5
+const CONFIG_VERSION = 6
+const RETIRED_OPENCODE_PROVIDER = 'opencode-go-openai'
+const RETIRED_OPENCODE_MESSAGE = 'OpenCode Go 渠道已停止支持，请选择其他供应商或自定义渠道'
+
+function assertSupportedProvider(provider: ProviderType): void {
+  if (provider === RETIRED_OPENCODE_PROVIDER) throw new Error(RETIRED_OPENCODE_MESSAGE)
+}
+
 /** 连接测试 / 模型拉取的统一超时时间 */
 const CHANNEL_TEST_TIMEOUT_MS = 15_000
 // ChatGPT backend 首次经代理 / Cloudflare 建连可能超过普通模型探测的 15 秒。
@@ -140,9 +147,6 @@ const PRESET_MODEL_CANDIDATE_UPDATES: readonly {
         { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
       ],
       doubao: [
-        { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
-      ],
-      'opencode-go-openai': [
         { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
       ],
       zhipu: [
@@ -299,15 +303,25 @@ function inferProviderFromBaseUrl(provider: ProviderType, baseUrl: string): Prov
  * v4 → v5：将使用默认 DashScope Anthropic 兼容端点的通义千问渠道切换为 OpenAI 兼容端点。
  * 自定义 Anthropic 端点不自动迁移，避免改变用户明确配置的请求协议。
  *
+ * v5 → v6：删除存量 OpenCode Go 渠道；即使配置由更高版本写入，也每次读取时清理。
+ *
  * @returns 迁移后的配置；`changed` 标记是否发生实际变更（决定是否需要回写文件）
  */
 function migrateConfig(config: ChannelsConfig): { config: ChannelsConfig; changed: boolean } {
   const version = config.version ?? 1
+  const retainedChannels = config.channels.filter((channel) => {
+    if (channel.provider !== RETIRED_OPENCODE_PROVIDER) return true
+    console.warn(`[渠道管理] 已移除不再支持的 OpenCode Go 渠道: ${channel.name} (${channel.id})`)
+    return false
+  })
+  const removedLegacyChannel = retainedChannels.length !== config.channels.length
   if (version >= CONFIG_VERSION) {
-    return { config, changed: false }
+    return removedLegacyChannel
+      ? { config: { ...config, channels: retainedChannels }, changed: true }
+      : { config, changed: false }
   }
 
-  const channels = config.channels.map((channel) => {
+  const channels = retainedChannels.map((channel) => {
     let migratedChannel = channel
     if (version < 2 && (channel.provider === 'custom' || channel.provider === 'anthropic-compatible')) {
       const migratedUrl = migrateCompatibleChannelBaseUrl(channel.baseUrl, channel.provider)
@@ -342,7 +356,7 @@ function migrateConfig(config: ChannelsConfig): { config: ChannelsConfig; change
     return migratedChannel
   })
 
-  return { config: { ...config, version: CONFIG_VERSION, channels }, changed: true }
+  return { config: { ...config, version: Math.max(version, CONFIG_VERSION), channels }, changed: true }
 }
 
 /**
@@ -546,6 +560,7 @@ export function getChannelById(id: string): Channel | undefined {
  * @returns 创建后的渠道（apiKey 为加密态）
  */
 export function createChannel(input: ChannelCreateInput): Channel {
+  assertSupportedProvider(input.provider)
   const config = readConfig()
   const now = Date.now()
 
@@ -585,6 +600,7 @@ export function updateChannel(id: string, input: ChannelUpdateInput): Channel {
 
   const existing = config.channels[index]!
 
+  assertSupportedProvider(input.provider ?? existing.provider)
   const updated: Channel = {
     ...existing,
     name: input.name ?? existing.name,
@@ -896,7 +912,6 @@ export async function testChannel(channelId: string): Promise<ChannelTestResult>
         return await testAnthropicCompatible(channel.baseUrl, apiKey, proxyUrl, provider)
       case 'openai':
       case 'openai-responses':
-      case 'opencode-go-openai':
       case 'zhipu':
       case 'doubao':
       case 'doubao-api':
@@ -1808,6 +1823,7 @@ export async function getChannelPlanQuota(channelId: string): Promise<ChannelPla
  * 适用于创建/编辑渠道时用户在保存前先验证连接。
  */
 export async function testChannelDirect(input: ChannelDirectTestInput): Promise<ChannelTestResult> {
+  if (input.provider === RETIRED_OPENCODE_PROVIDER) return { success: false, message: RETIRED_OPENCODE_MESSAGE }
   const proxyUrl = await getEffectiveProxyUrl()
   const provider = inferProviderFromBaseUrl(input.provider, input.baseUrl)
 
@@ -1877,7 +1893,6 @@ export async function testChannelDirect(input: ChannelDirectTestInput): Promise<
         return await testAnthropicCompatible(input.baseUrl, input.apiKey, proxyUrl, provider)
       case 'openai':
       case 'openai-responses':
-      case 'opencode-go-openai':
       case 'zhipu':
       case 'doubao':
       case 'doubao-api':
@@ -1903,6 +1918,7 @@ export async function testChannelDirect(input: ChannelDirectTestInput): Promise<
  * 针对不同供应商使用不同的 API 端点和响应解析。
  */
 export async function fetchModels(input: FetchModelsInput): Promise<FetchModelsResult> {
+  if (input.provider === RETIRED_OPENCODE_PROVIDER) return { success: false, message: RETIRED_OPENCODE_MESSAGE, models: [] }
   const proxyUrl = await getEffectiveProxyUrl()
   const provider = inferProviderFromBaseUrl(input.provider, input.baseUrl)
 
@@ -1977,7 +1993,6 @@ export async function fetchModels(input: FetchModelsInput): Promise<FetchModelsR
         return await fetchAnthropicCompatibleModels(input.baseUrl, input.apiKey, proxyUrl, provider)
       case 'openai':
       case 'openai-responses':
-      case 'opencode-go-openai':
       case 'zhipu':
       case 'doubao':
       case 'doubao-api':

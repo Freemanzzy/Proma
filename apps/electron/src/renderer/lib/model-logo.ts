@@ -247,7 +247,7 @@ const PROVIDER_LOGO_MAP: Record<ProviderType, string> = {
   google: GeminiLogo,
   'kimi-api': KimiLogo,
   'kimi-coding': KimiLogo,
-  'opencode-go-openai': DefaultLogo,
+  'opencode-go-openai': DefaultLogo, // 存量类型的展示映射，不提供渠道支持。
   zhipu: ZhipuLogo,
   'zhipu-coding': ZhipuLogo,
   'zhipu-coding-team': ZhipuLogo,
