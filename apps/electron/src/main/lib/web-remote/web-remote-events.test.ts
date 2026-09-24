@@ -46,4 +46,13 @@ describe('WebRemoteEventHub', () => {
     expect(JSON.parse(client.sent.at(-1)!).type).toBe('refresh_required')
     hub.dispose()
   })
+
+  test('撤销设备时断开该设备的连接', () => {
+    const hub = new WebRemoteEventHub(() => [])
+    const client = connection()
+    hub.addConnection(client)
+    hub.disconnectDevice('d')
+    expect(client.closed).toBe(true)
+    hub.dispose()
+  })
 })
