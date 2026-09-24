@@ -139,6 +139,9 @@ export function toWebRemoteEvent(sessionId: string, payload: AgentStreamPayload)
       if (delta.type === 'toolcall_start' && delta.toolCall) {
         events.push({ type: 'tool_status', toolName: delta.toolCall.name, status: 'started', input: jsonPreview(delta.toolCall.arguments, TOOL_INPUT_LIMIT) })
       }
+      if (delta.type === 'toolcall_end' && delta.toolCall) {
+        events.push({ type: 'tool_status', toolName: delta.toolCall.name, status: 'completed', input: jsonPreview(delta.toolCall.arguments, TOOL_INPUT_LIMIT) })
+      }
     }
     return events
   }

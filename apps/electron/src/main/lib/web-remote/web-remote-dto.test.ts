@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { toWebRemoteMessage, toWebRemotePermissionRequest, truncate } from './web-remote-dto'
+import { toWebRemoteEvent, toWebRemoteMessage, toWebRemotePermissionRequest, truncate } from './web-remote-dto'
 
 describe('web remote DTO', () => {
   test('工具参数最多 500 字符，工具结果最多 1000 字符', () => {
@@ -15,6 +15,14 @@ describe('web remote DTO', () => {
       requestId: 'r', sessionId: 's', toolName: 'Bash', toolInput: { command: 'echo hi' }, description: 'desc', dangerLevel: 'normal', allowAlways: true,
     })
     expect(request.allowAlways).toBe(false)
+  })
+
+  test('工具调用开始与结束都转换为状态事件', () => {
+    const start = toWebRemoteEvent('s', { kind: 'sdk_delta', delta: { uuid: 'u', deltas: [{ type: 'toolcall_start', contentIndex: 0, toolCall: { id: 't', name: 'Bash' } }] } })
+    const end = toWebRemoteEvent('s', { kind: 'sdk_delta', delta: { uuid: 'u', deltas: [{ type: 'toolcall_end', contentIndex: 0, toolCall: { id: 't', name: 'Bash' } }] } })
+    expect(start[0]?.type).toBe('tool_status')
+    expect(end[0]?.type).toBe('tool_status')
+    expect((end[0] as { status?: string } | undefined)?.status).toBe('completed')
   })
 
   test('截断保留可读提示', () => {

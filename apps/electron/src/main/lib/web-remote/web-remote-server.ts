@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { randomBytes } from 'node:crypto'
 import type { Duplex } from 'node:stream'
 import WebSocket from 'ws'
 import { agentEventBus, isAgentSessionActive, listActiveAgentSessionSnapshots, queueAgentMessage, runAgentHeadless, stopAgent } from '../agent-service'
@@ -7,7 +8,7 @@ import { listAgentWorkspaces } from '../agent-workspace-manager'
 import { permissionService } from '../agent-permission-service'
 import { redactSensitiveLogValue } from '../bridge-log-redaction'
 import type { PermissionRequest } from '@proma/shared'
-import { WebRemoteAuth, makeAuthCookie, parseCookieHeader, type WebRemoteConfig } from './web-remote-auth'
+import { WebRemoteAuth, expectedWebRemoteOrigin, makeAuthCookie, parseCookieHeader, type WebRemoteConfig } from './web-remote-auth'
 import { WebRemoteEventHub } from './web-remote-events'
 import { toWebRemoteMessage, toWebRemotePermissionRequest, type WebRemoteEvent } from './web-remote-dto'
 import { renderWebRemoteStatic } from './web-remote-static'
@@ -31,7 +32,7 @@ interface AuthenticatedRequest {
 
 export interface WebRemoteServerOptions {
   config: WebRemoteConfig
-  auth?: WebRemoteAuth
+  auth: WebRemoteAuth
   eventHub?: WebRemoteEventHub
   sendMessage?: (sessionId: string, message: string) => Promise<'started' | 'injected'>
   stopSession?: (sessionId: string) => void
@@ -83,7 +84,7 @@ export class WebRemoteServer {
   private listening = false
 
   constructor(private readonly options: WebRemoteServerOptions) {
-    this.auth = options.auth ?? new WebRemoteAuth(options.config)
+    this.auth = options.auth
     this.eventHub = options.eventHub ?? new WebRemoteEventHub()
     this.httpServer = createServer((req, res) => { void this.handleHttp(req, res) })
     this.wsServer = new WebSocketServer({ noServer: true })
@@ -130,7 +131,7 @@ export class WebRemoteServer {
     const device = this.auth.authenticateToken(token)
     if (!device) return null
     if (requireOrigin && !this.auth.isAllowedOrigin(typeof req.headers.origin === 'string' ? req.headers.origin : undefined)) return null
-    if (!this.auth.isAllowedTailscaleLogin(typeof req.headers['x-tailscale-user-login'] === 'string' ? req.headers['x-tailscale-user-login'] : undefined)) return null
+    if (!this.auth.isAllowedTailscaleLogin(typeof req.headers['tailscale-user-login'] === 'string' ? req.headers['tailscale-user-login'] : undefined)) return null
     return { deviceId: device.id }
   }
 
@@ -149,14 +150,26 @@ export class WebRemoteServer {
     const path = url.pathname
 
     if (method === 'GET' && path === '/') {
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
-      res.end(renderWebRemoteStatic())
+      const nonce = randomBytes(16).toString('base64url')
+      const configuredOrigin = expectedWebRemoteOrigin(this.options.config)
+      let websocketOrigin = ''
+      if (configuredOrigin) {
+        try { websocketOrigin = ` wss://${new URL(configuredOrigin).host}` } catch { websocketOrigin = '' }
+      }
+      res.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Content-Security-Policy': `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'${websocketOrigin}; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+        'X-Content-Type-Options': 'nosniff',
+        'Referrer-Policy': 'no-referrer',
+      })
+      res.end(renderWebRemoteStatic(nonce))
       return
     }
 
     if (method === 'POST' && path === '/api/pair') {
       if (!this.auth.isAllowedOrigin(typeof req.headers.origin === 'string' ? req.headers.origin : undefined)
-        || !this.auth.isAllowedTailscaleLogin(typeof req.headers['x-tailscale-user-login'] === 'string' ? req.headers['x-tailscale-user-login'] : undefined)) {
+        || !this.auth.isAllowedTailscaleLogin(typeof req.headers['tailscale-user-login'] === 'string' ? req.headers['tailscale-user-login'] : undefined)) {
         json(res, 403, { error: 'origin or identity rejected' })
         return
       }
@@ -209,7 +222,10 @@ export class WebRemoteServer {
     if (method === 'GET' && messagesMatch) {
       const session = this.sessionAllowed(decodeURIComponent(messagesMatch[1]!))
       if (!session) { json(res, 404, { error: 'session not found' }); return }
-      json(res, 200, getAgentSessionSDKMessages(session.id).map((message) => toWebRemoteMessage(message)))
+      const rawLimit = Number(url.searchParams.get('limit') ?? '200')
+      const limit = Number.isInteger(rawLimit) && rawLimit >= 1 && rawLimit <= 1000 ? rawLimit : 200
+      const messages = getAgentSessionSDKMessages(session.id)
+      json(res, 200, messages.slice(Math.max(0, messages.length - limit)).map((message) => toWebRemoteMessage(message)))
       return
     }
 
