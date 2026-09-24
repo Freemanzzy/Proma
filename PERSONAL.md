@@ -172,7 +172,7 @@ python3 scripts/personal/import-proma-backup.py \\
 
 - `apps/electron/src/renderer/components/settings/GeneralSettings.tsx` 隐藏 macOS 与 Windows 的 Agent Island/状态通知开关。
 - `apps/electron/src/main/index.ts` 启动流程不再初始化 Agent Island 状态机或 macOS 原生 helper；保留 IPC handler、旧设置字段和退出清理调用，旧 `agentIsland.enabled=true` 也不会启动 helper，renderer 上报已查看时安全空操作。
-- `apps/electron/electron-builder.yml` 从 macOS `extraResources` 与 `binaries` 移除 `agent-island/macos-agent-island-helper`；helper 源码和 `build:agent-island-native` 开发脚本未删除。
+- `apps/electron/electron-builder.yml` 从 macOS `extraResources` 与 `binaries` 移除 `agent-island/macos-agent-island-helper`；helper 源码和 `build:agent-island-native` 开发脚本未删除。更正：macOS `binaries` 仍保留 `resources/eventkit/macos-eventkit.node`，仅移除 Agent Island helper，确保 hardenedRuntime 下 EventKit 可加载。
 
 ## 2026-09-24: 隐藏 Chat 模式入口
 
@@ -182,3 +182,8 @@ python3 scripts/personal/import-proma-backup.py \\
 - `apps/electron/src/renderer/main.tsx` 恢复标签时只恢复 Agent 标签；旧 Chat 标签不展示，启动时 `appMode` 强制回到 Agent，Chat 对话数据不删除。
 - `apps/electron/src/renderer/components/shortcuts/GlobalShortcuts.tsx` 移除模式切换快捷键处理，Cmd/Ctrl+N 与旧托盘创建事件统一创建 Agent；`shortcut-defaults.ts` 删除模式切换定义，Tips 不再宣传该快捷键。
 - `apps/electron/src/renderer/components/settings/SettingsPanel.tsx` 隐藏 Chat 专属的提示词管理入口；渠道与 Agent 模型设置保持不变。Chat 组件、数据、IPC 和运行时源码均保留。
+
+## 2026-09-24: 恢复 EventKit 签名清单
+
+- 修正 `apps/electron/electron-builder.yml`：将 `resources/eventkit/macos-eventkit.node` 恢复到 macOS `binaries`，位置放在 `officecli` 之前。
+- Agent Island 精简仍只移除 helper 的 `extraResources` 条目和 `binaries` 条目；EventKit 的打包与单独签名保持不变。

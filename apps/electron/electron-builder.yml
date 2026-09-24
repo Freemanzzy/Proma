@@ -102,6 +102,7 @@ mac:
     - from: resources/eventkit/macos-eventkit.node
       to: eventkit/macos-eventkit.node
   binaries:
+    - resources/eventkit/macos-eventkit.node
     - resources/officecli/officecli
   hardenedRuntime: true
   gatekeeperAssess: false
