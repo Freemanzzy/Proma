@@ -181,10 +181,8 @@ registerBridge({
 
 registerBridge({
   name: '钉钉 BridgeManager',
-  shouldAutoStart: () => {
-    const config = getDingTalkMultiBotConfig()
-    return config.bots.some((b) => b.enabled && b.clientId && b.clientSecret)
-  },
+  // 个人版隐藏钉钉入口；保留 IPC/源码兼容旧数据，但禁止启动时连接。
+  shouldAutoStart: () => false,
   needsRecovery: () => {
     const config = getDingTalkMultiBotConfig()
     const states = dingtalkBridgeManager.getStates()
@@ -202,10 +200,8 @@ registerBridge({
 
 registerBridge({
   name: 'Slack BridgeManager',
-  shouldAutoStart: () => {
-    const config = getSlackConfig()
-    return config.bots.some((bot) => bot.enabled && bot.botToken && bot.appToken)
-  },
+  // 个人版隐藏 Slack 入口；保留 IPC/源码兼容旧数据，但禁止启动时连接。
+  shouldAutoStart: () => false,
   needsRecovery: () => {
     const config = getSlackConfig()
     const states = slackBridgeManager.getStates()
