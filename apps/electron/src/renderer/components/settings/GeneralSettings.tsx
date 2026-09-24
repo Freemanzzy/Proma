@@ -48,7 +48,6 @@ import {
   updateSessionHoverPreviewEnabled,
 } from '@/atoms/ui-preferences'
 import { cn } from '@/lib/utils'
-import { detectIsMac, detectIsWindows } from '@/lib/platform'
 import { getEffectiveSoundPackId } from '@/lib/notification-sound-selection'
 import type { NotificationSoundId, NotificationSoundType, NotificationSoundSettings, ProductivityToolsSettings } from '@/types/settings'
 
@@ -77,9 +76,6 @@ export function GeneralSettings(): React.ReactElement {
   const [archiveAfterDays, setArchiveAfterDays] = React.useState<number>(7)
   /** Git/PR 推广标识：默认开启 */
   const [gitAttributionEnabled, setGitAttributionEnabled] = React.useState(true)
-  const [agentIslandEnabled, setAgentIslandEnabled] = React.useState(true)
-  const isMac = React.useMemo(() => detectIsMac(), [])
-  const isWindows = React.useMemo(() => detectIsWindows(), [])
   const fileInputRef = React.useRef<HTMLInputElement>(null)
 
   // 加载归档天数与 Git/PR 标识设置
@@ -87,7 +83,6 @@ export function GeneralSettings(): React.ReactElement {
     window.electronAPI.getSettings().then((settings) => {
       setArchiveAfterDays(settings.archiveAfterDays ?? 7)
       setGitAttributionEnabled(settings.gitAttributionEnabled ?? true)
-      setAgentIslandEnabled(settings.agentIsland?.enabled ?? true)
     }).catch(console.error)
   }, [])
 
@@ -111,17 +106,6 @@ export function GeneralSettings(): React.ReactElement {
     } catch (error) {
       console.error('[通用设置] 更新 Git/PR 标识失败:', error)
       setGitAttributionEnabled(!checked)
-    }
-  }
-
-  /** 更新灵动岛开关 */
-  const handleAgentIslandChange = async (checked: boolean): Promise<void> => {
-    setAgentIslandEnabled(checked)
-    try {
-      await window.electronAPI.updateSettings({ agentIsland: { enabled: checked } })
-    } catch (error) {
-      console.error('[通用设置] 更新 Agent 灵动岛失败:', error)
-      setAgentIslandEnabled(!checked)
     }
   }
 
@@ -358,17 +342,6 @@ export function GeneralSettings(): React.ReactElement {
               <ExternalLink className="size-3" />
             </a>
           </div>
-          {isWindows && (
-            <SettingsToggle
-              label="Agent 状态通知"
-              description="在任务栏托盘显示 Agent 运行状态，悬停查看会话详情"
-              checked={agentIslandEnabled}
-              disabled={!notificationsEnabled}
-              onCheckedChange={(checked) => {
-                void handleAgentIslandChange(checked)
-              }}
-            />
-          )}
           <SettingsRow
             label="自动归档"
             description="超过指定天数未更新的对话将自动归档（置顶对话除外）"
@@ -413,16 +386,6 @@ export function GeneralSettings(): React.ReactElement {
               updateSessionHoverPreviewEnabled(checked)
             }}
           />
-          {isMac && (
-            <SettingsToggle
-              label="Agent 灵动岛"
-              description="在 macOS 刘海屏显示需要接手的 Agent 与 1 小时内的待办/日程"
-              checked={agentIslandEnabled}
-              onCheckedChange={(checked) => {
-                void handleAgentIslandChange(checked)
-              }}
-            />
-          )}
           <SettingsToggle
             label="Git/PR 标识"
             description="Agent 代你提交 commit 或创建 PR 时，附加 Made-with: Proma 与官网链接，便于推广；可随时关闭"
