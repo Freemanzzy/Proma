@@ -1,11 +1,17 @@
-import { WebRemoteAuth, readWebRemoteConfig } from './web-remote-auth'
+import { getConfigDirName } from '../config-paths'
+import { getWebRemoteDataDir, WebRemoteAuth, readWebRemoteConfig } from './web-remote-auth'
 
-const auth = new WebRemoteAuth(readWebRemoteConfig())
+if (getConfigDirName() !== '.proma-dev' && process.env.PROMA_WEB_REMOTE_ALLOW_PROD !== '1') {
+  console.error('[Web Remote] 已拒绝：管理脚本仅允许在 PROMA_DEV=1 的个人开发实例运行。')
+  process.exit(1)
+}
+
+const config = readWebRemoteConfig()
+const auth = new WebRemoteAuth(config, getWebRemoteDataDir())
 const command = process.argv[2] ?? 'pair'
 
 if (command === 'pair') {
   const pairing = auth.createPairingCode()
-  const config = auth.getConfig()
   const port = Number.isInteger(config.port) ? config.port : 17888
   console.log(`配对码: ${pairing.code}`)
   console.log(`有效期至: ${new Date(pairing.expiresAt).toISOString()}`)

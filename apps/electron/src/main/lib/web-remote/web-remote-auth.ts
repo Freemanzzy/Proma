@@ -51,13 +51,13 @@ function readJson<T>(path: string, fallback: T): T {
 }
 
 function writeJson(path: string, value: unknown): void {
+  const parent = join(path, '..')
+  if (!existsSync(parent)) mkdirSync(parent, { recursive: true, mode: 0o700 })
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 })
 }
 
 export function getWebRemoteDataDir(): string {
-  const dir = join(getConfigDir(), 'web-remote')
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 })
-  return dir
+  return join(getConfigDir(), 'web-remote')
 }
 
 export function getWebRemoteConfigPath(): string {
@@ -97,11 +97,12 @@ export class WebRemoteAuth {
   private pairing: PairingState | null
   private devices: DeviceFile
 
+  private lastPersistedAt = Number.NEGATIVE_INFINITY
+
   constructor(
-    private readonly config: WebRemoteConfig = readWebRemoteConfig(),
-    private readonly dataDir: string = getWebRemoteDataDir(),
+    private readonly config: WebRemoteConfig,
+    private readonly dataDir: string,
   ) {
-    if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true, mode: 0o700 })
     this.pairing = readJson<PairingState | null>(join(dataDir, 'pairing.json'), null)
     this.devices = readJson<DeviceFile>(join(dataDir, 'devices.json'), { version: 1, devices: [] })
   }
@@ -162,8 +163,11 @@ export class WebRemoteAuth {
     const tokenHash = sha256(token)
     const device = this.devices.devices.find((candidate) => candidate.tokenHash === tokenHash && !candidate.revokedAt)
     if (!device) return null
-    device.lastUsedAt = now
-    writeJson(join(this.dataDir, 'devices.json'), this.devices)
+    if (now - this.lastPersistedAt >= 60_000) {
+      device.lastUsedAt = now
+      writeJson(join(this.dataDir, 'devices.json'), this.devices)
+      this.lastPersistedAt = now
+    }
     return { ...device }
   }
 

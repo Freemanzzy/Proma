@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -55,6 +55,23 @@ describe('WebRemoteAuth', () => {
     expect(auth.isWorkspaceAllowed('ws-2')).toBe(false)
     expect(auth.revokeDevice(paired.deviceId)).toBe(true)
     expect(auth.authenticateToken(paired.token)).toBeNull()
+  })
+
+  test('只读构造不创建数据目录，写入时才创建', () => {
+    const dir = join(mkdtempSync(join(tmpdir(), 'proma-web-remote-auth-')), 'missing')
+    const auth = new WebRemoteAuth({}, dir)
+    expect(existsSync(dir)).toBe(false)
+    auth.createPairingCode()
+    expect(existsSync(dir)).toBe(true)
+  })
+
+  test('令牌最近一分钟内认证不重复写入 lastUsedAt', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'proma-web-remote-auth-'))
+    const auth = new WebRemoteAuth({}, dir)
+    const paired = auth.pair(auth.createPairingCode(1000).code, 'phone', 1001)!
+    expect(auth.authenticateToken(paired.token, 1_000)?.lastUsedAt).toBe(1_000)
+    expect(auth.authenticateToken(paired.token, 2_000)?.lastUsedAt).toBe(1_000)
+    expect(auth.authenticateToken(paired.token, 62_000)?.lastUsedAt).toBe(62_000)
   })
 
   test('Cookie 使用 HttpOnly Secure Strict', () => {
