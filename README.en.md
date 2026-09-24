@@ -1,3 +1,11 @@
+<!-- personal-fork:start -->
+> **Personal fork** — Freemanzzy's personal-test fork of [proma-ai/Proma](https://github.com/proma-ai/Proma), kept alongside the official edition under the AGPL-3.0 license.
+>
+> **Baseline:** official `v0.19.57`.
+>
+> This fork removes the bundled browser, adds the optional EgoBrowser native tool (first use per session requires approval), simplifies appearance to light/dark/system, and includes isolated personal import/development scripts under `scripts/personal/`. Run `scripts/personal/dev.sh` for `~/.proma-dev`; see [`PERSONAL.md`](./PERSONAL.md) for the complete change log.
+<!-- personal-fork:end -->
+
 # Proma
 
 ![Proma Poster](https://img.erlich.fun/personal-blog/uPic/pb.png)
