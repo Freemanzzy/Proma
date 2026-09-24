@@ -10,8 +10,8 @@ import { redactSensitiveLogValue } from '../bridge-log-redaction'
 import type { PermissionRequest } from '@proma/shared'
 import { WebRemoteAuth, expectedWebRemoteOrigin, makeAuthCookie, parseCookieHeader, type WebRemoteConfig } from './web-remote-auth'
 import { WebRemoteEventHub } from './web-remote-events'
-import { toWebRemoteMessage, toWebRemotePermissionRequest, type WebRemoteEvent } from './web-remote-dto'
-import { renderWebRemoteStatic } from './web-remote-static'
+import { toWebRemoteHistory, toWebRemotePermissionRequest, type WebRemoteEvent } from './web-remote-dto'
+import { renderWebRemoteIcon, renderWebRemoteManifest, renderWebRemoteStatic } from './web-remote-static'
 
 const MAX_BODY_BYTES = 100_000
 const MAX_MESSAGE_CHARS = 50_000
@@ -139,6 +139,18 @@ export class WebRemoteServer {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
     const path = url.pathname
 
+    if (method === 'GET' && path === '/manifest.webmanifest') {
+      res.writeHead(200, { 'Content-Type': 'application/manifest+json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' })
+      res.end(renderWebRemoteManifest())
+      return
+    }
+
+    if (method === 'GET' && path === '/icon.svg') {
+      res.writeHead(200, { 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' })
+      res.end(renderWebRemoteIcon())
+      return
+    }
+
     if (method === 'GET' && path === '/') {
       const nonce = randomBytes(16).toString('base64url')
       const configuredOrigin = expectedWebRemoteOrigin(this.options.config)
@@ -149,7 +161,7 @@ export class WebRemoteServer {
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
         'Cache-Control': 'no-store',
-        'Content-Security-Policy': `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'${websocketOrigin}; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+        'Content-Security-Policy': `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'${websocketOrigin}; img-src 'self' data:; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
         'X-Content-Type-Options': 'nosniff',
         'Referrer-Policy': 'no-referrer',
       })
@@ -214,8 +226,8 @@ export class WebRemoteServer {
       if (!session) { json(res, 404, { error: 'session not found' }); return }
       const rawLimit = Number(url.searchParams.get('limit') ?? '200')
       const limit = Number.isInteger(rawLimit) && rawLimit >= 1 && rawLimit <= 1000 ? rawLimit : 200
-      const messages = getAgentSessionSDKMessages(session.id)
-      json(res, 200, messages.slice(Math.max(0, messages.length - limit)).map((message) => toWebRemoteMessage(message)))
+      const messages = toWebRemoteHistory(getAgentSessionSDKMessages(session.id))
+      json(res, 200, messages.slice(Math.max(0, messages.length - limit)) )
       return
     }
 
@@ -279,12 +291,12 @@ export class WebRemoteServer {
     const connection = {
       deviceId: device.id,
       get bufferedAmount() { return (ws as unknown as { bufferedAmount: number }).bufferedAmount ?? 0 },
-      send: (payload: string) => { if (ws.readyState !== WebSocket.OPEN) return false; ws.send(Buffer.from(payload)); return true },
+      send: (payload: string) => { if (ws.readyState !== WebSocket.OPEN) return false; (ws as unknown as { send(data: string): void }).send(payload); return true },
       close: (code?: number, reason?: string) => ws.close(code, reason),
     }
     const remove = this.eventHub.addConnection(connection)
     this.connections.set(ws, remove)
-    ws.send(Buffer.from(JSON.stringify({ type: 'ready' })))
+    ;(ws as unknown as { send(data: string): void }).send(JSON.stringify({ type: 'ready' }))
     ws.on('message', (raw: Buffer) => {
       try {
         const body = JSON.parse(raw.toString()) as Record<string, unknown>

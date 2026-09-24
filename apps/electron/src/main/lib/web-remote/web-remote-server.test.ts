@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test'
 import { connect } from 'node:net'
+import WebSocket from 'ws'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -58,6 +59,7 @@ describe('WebRemoteServer loopback integration', () => {
     expect(csp).toContain(`style-src 'nonce-${scriptNonce}'`)
     expect(csp).toContain("frame-ancestors 'none'")
     expect(csp).toContain('wss://proma.example')
+    expect(csp).toContain("manifest-src 'self'")
     expect(response.headers.get('x-content-type-options')).toBe('nosniff')
     expect(response.headers.get('referrer-policy')).toBe('no-referrer')
     expect(html).not.toContain('onclick=')
@@ -65,6 +67,29 @@ describe('WebRemoteServer loopback integration', () => {
     expect(html).toContain('allowedRoles')
     expect(html).toContain('run_completed')
     expect(html).toContain('visibilitychange')
+    const script = html.match(/<script nonce="[^"]+">([\s\S]*)<\/script>/)?.[1]
+    expect(script).toBeString()
+    expect(() => new Function(script!)).not.toThrow()
+  })
+
+  test('WS ready 使用文本帧而非二进制帧', async () => {
+    const received = await new Promise<{ text: string; isBinary: boolean }>((resolve, reject) => {
+      const client = new WebSocket(`ws://127.0.0.1:${port}/api/stream`, { headers: { Cookie: cookie, Origin: 'https://proma.example', 'Tailscale-User-Login': 'lee@example.com' } })
+      const timer = setTimeout(() => { client.close(); reject(new Error('WS ready 超时')) }, 2_000)
+      client.once('message', (data: Buffer, isBinary: boolean) => { clearTimeout(timer); resolve({ text: data.toString(), isBinary }); client.close() })
+      client.once('error', reject)
+    })
+    expect(received.isBinary).toBe(false)
+    expect(JSON.parse(received.text).type).toBe('ready')
+  })
+
+  test('manifest 与图标路由无需登录且不泄露会话数据', async () => {
+    const manifest = await fetch(`http://127.0.0.1:${port}/manifest.webmanifest`)
+    expect(manifest.status).toBe(200)
+    expect((await manifest.json()).name).toBe('Proma 远程')
+    const icon = await fetch(`http://127.0.0.1:${port}/icon.svg`)
+    expect(icon.status).toBe(200)
+    expect(await icon.text()).toContain('<svg')
   })
 
   test('无令牌 API 返回 401', async () => {
