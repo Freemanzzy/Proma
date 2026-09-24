@@ -7,7 +7,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { getSettingsPath } from './config-paths'
-import { DEFAULT_THEME_MODE, normalizeProductivityToolsSettings } from '../../types'
+import { DEFAULT_THEME_MODE, normalizeProductivityToolsSettings, normalizeThemeSettings } from '../../types'
 import type { AgentIslandSettings, AppSettings } from '../../types'
 import { getTerminalProfilesForPlatform, isTerminalProfile } from '@proma/shared'
 
@@ -34,6 +34,7 @@ export function getSettings(): AppSettings {
   if (!existsSync(filePath)) {
     return {
       themeMode: DEFAULT_THEME_MODE,
+      themeStyle: 'default',
       onboardingCompleted: false,
       environmentCheckSkipped: false,
       notificationsEnabled: true,
@@ -71,7 +72,7 @@ export function getSettings(): AppSettings {
     } = data
     return {
       ...settings,
-      themeMode: data.themeMode || DEFAULT_THEME_MODE,
+      ...normalizeThemeSettings(data.themeMode, data.themeStyle),
       onboardingCompleted: data.onboardingCompleted ?? false,
       environmentCheckSkipped: data.environmentCheckSkipped ?? false,
       notificationsEnabled: data.notificationsEnabled ?? true,
@@ -95,6 +96,7 @@ export function getSettings(): AppSettings {
     console.error('[设置] 读取失败:', error)
     return {
       themeMode: DEFAULT_THEME_MODE,
+      themeStyle: 'default',
       onboardingCompleted: false,
       environmentCheckSkipped: false,
       notificationsEnabled: true,
@@ -120,6 +122,7 @@ export function updateSettings(updates: Partial<AppSettings>): AppSettings {
   const updated: AppSettings = {
     ...current,
     ...updates,
+    ...normalizeThemeSettings(updates.themeMode ?? current.themeMode, updates.themeStyle ?? current.themeStyle),
     // 仅保留 macOS 原生 Island 开关，避免旧非原生 surface 字段被继续回写。
     agentIsland: updates.agentIsland === undefined
       ? sanitizeAgentIslandSettings(current.agentIsland)

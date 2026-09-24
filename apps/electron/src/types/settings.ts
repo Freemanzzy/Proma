@@ -245,6 +245,27 @@ export const DEFAULT_THEME_MODE: ThemeMode = 'dark'
 /** 默认特殊风格 */
 export const DEFAULT_THEME_STYLE: ThemeStyle = 'default'
 
+/** 将旧版特殊风格设置迁移为跟随系统，并统一使用默认风格。 */
+/** 个人版对外展示的三种主题模式；旧 special 仅用于读取迁移。 */
+export const THEME_MODE_OPTIONS = [
+  { value: 'light', label: '浅色' },
+  { value: 'dark', label: '深色' },
+  { value: 'system', label: '跟随系统' },
+] as const
+
+export function normalizeThemeSettings(themeMode: unknown, themeStyle: unknown): { themeMode: ThemeMode; themeStyle: ThemeStyle } {
+  const mode: ThemeMode = themeMode === 'light' || themeMode === 'dark' || themeMode === 'system' || themeMode === 'special'
+    ? themeMode
+    : DEFAULT_THEME_MODE
+  const style: ThemeStyle = (THEME_STYLES as readonly unknown[]).includes(themeStyle)
+    ? themeStyle as ThemeStyle
+    : DEFAULT_THEME_STYLE
+  if (mode === 'special' || style !== DEFAULT_THEME_STYLE) {
+    return { themeMode: 'system', themeStyle: DEFAULT_THEME_STYLE }
+  }
+  return { themeMode: mode, themeStyle: DEFAULT_THEME_STYLE }
+}
+
 /** Markdown 预览字号档位 */
 export type MarkdownFontSize = 'small' | 'medium' | 'large'
 
