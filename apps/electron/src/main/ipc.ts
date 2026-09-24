@@ -294,6 +294,7 @@ import {
 } from './lib/agent-session-manager'
 import { runAgent, stopAgent, stopAgentAndDrain, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, isAgentSessionBusy, listActiveAgentSessionSnapshots, listQueuedAgentMessages, reserveAgentSessionStart, queueAgentMessage, submitOrEnqueueAgentMessage, enqueueAgentQueuedMessage, cancelAgentQueuedMessage, moveAgentQueuedMessage, clearAgentQueuedMessages, updateAgentPermissionMode, rewindAgentSession, setVisibleAgentSession } from './lib/agent-service'
 import { permissionService } from './lib/agent-permission-service'
+import { notifyWebRemoteInteractionResolved } from './lib/web-remote/web-remote-service'
 import { resolvePathAgainstAgentCwd } from './lib/agent-file-path'
 import { askUserService } from './lib/agent-ask-user-service'
 import { exitPlanService } from './lib/agent-exit-plan-service'
@@ -3536,6 +3537,7 @@ export function registerIpcHandlers(): void {
           sessionId,
           payload: { kind: 'proma_event', event: { type: 'permission_resolved', requestId, behavior } },
         })
+        notifyWebRemoteInteractionResolved(sessionId, requestId, behavior)
       }
     }
   )
