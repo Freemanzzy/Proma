@@ -10,6 +10,8 @@ export const SAFE_TOOLS: readonly string[] = [
   'Read',            // 文件读取
   'Glob',            // 文件名搜索
   'Grep',            // 内容搜索
+  // v0.19.57 中 Browser* 工具归入 SAFE_TOOLS；EgoBrowser 保持相同的网页操作归类。
+  'EgoBrowser',
   'TodoRead',        // Todo 列表读取
 
   'TaskOutput',      // 后台任务输出
