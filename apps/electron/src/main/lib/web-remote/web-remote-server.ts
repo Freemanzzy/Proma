@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { randomBytes } from 'node:crypto'
 import type { Duplex } from 'node:stream'
-import WebSocket from 'ws'
+import WebSocket, { WebSocketServer } from 'ws'
 import { agentEventBus, isAgentSessionActive, listActiveAgentSessionSnapshots, queueAgentMessage, runAgentHeadless, stopAgent } from '../agent-service'
 import { getAgentSessionMeta, getAgentSessionSDKMessages, listAgentSessions } from '../agent-session-manager'
 import { listAgentWorkspaces } from '../agent-workspace-manager'
@@ -12,16 +12,6 @@ import { WebRemoteAuth, expectedWebRemoteOrigin, makeAuthCookie, parseCookieHead
 import { WebRemoteEventHub } from './web-remote-events'
 import { toWebRemoteMessage, toWebRemotePermissionRequest, type WebRemoteEvent } from './web-remote-dto'
 import { renderWebRemoteStatic } from './web-remote-static'
-
-interface WebSocketServerLike {
-  on(event: string, handler: (...args: any[]) => void): this
-  emit(event: string, ...args: any[]): boolean
-  handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer, callback: (ws: WebSocket) => void): void
-}
-const WebSocketServer = (WebSocket as unknown as {
-  WebSocketServer?: new (options: { noServer: boolean }) => WebSocketServerLike
-  Server?: new (options: { noServer: boolean }) => WebSocketServerLike
-}).WebSocketServer ?? (WebSocket as unknown as { Server: new (options: { noServer: boolean }) => WebSocketServerLike }).Server
 
 const MAX_BODY_BYTES = 100_000
 const MAX_MESSAGE_CHARS = 50_000
@@ -76,7 +66,7 @@ function sendUpgradeError(socket: Duplex, status: number, message: string): void
 
 export class WebRemoteServer {
   readonly httpServer: Server
-  readonly wsServer: WebSocketServerLike
+  readonly wsServer: WebSocketServer
   private readonly auth: WebRemoteAuth
   private readonly eventHub: WebRemoteEventHub
   private readonly connections = new Map<WebSocket, () => void>()
@@ -89,7 +79,7 @@ export class WebRemoteServer {
     this.httpServer = createServer((req, res) => { void this.handleHttp(req, res) })
     this.wsServer = new WebSocketServer({ noServer: true })
     this.httpServer.on('upgrade', (req, socket, head) => this.handleUpgrade(req, socket, head))
-    this.wsServer.on('connection', (...args: any[]) => this.handleWebSocket(args[0] as WebSocket, args[1] as IncomingMessage))
+    this.wsServer.on('connection', (ws: WebSocket, req: IncomingMessage) => this.handleWebSocket(ws, req))
   }
 
   getAuth(): WebRemoteAuth {
