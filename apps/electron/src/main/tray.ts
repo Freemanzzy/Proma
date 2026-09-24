@@ -104,10 +104,6 @@ function buildTrayMenu(actions: TrayActions): Menu {
       : []),
     { type: 'separator' },
     {
-      label: '新建对话',
-      click: () => actions.createChatSession(),
-    },
-    {
       label: '新建 Agent 会话',
       click: () => actions.createAgentSession(),
     },

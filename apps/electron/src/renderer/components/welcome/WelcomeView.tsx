@@ -12,14 +12,14 @@
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { Loader2 } from 'lucide-react'
-import { appModeAtom } from '@/atoms/app-mode'
 import { currentAgentWorkspaceIdAtom, agentSettingsReadyAtom } from '@/atoms/agent-atoms'
 import { tabsAtom, activeTabIdAtom, openTab } from '@/atoms/tab-atoms'
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
 import { useCreateSession } from '@/hooks/useCreateSession'
 
 export function WelcomeView(): React.ReactElement {
-  const mode = useAtomValue(appModeAtom)
+  // 个人版隐藏 Chat 入口；保留 Chat 数据兼容逻辑，但空状态始终进入 Agent。
+  const mode = 'agent' as 'chat' | 'agent'
   const currentWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
   const agentSettingsReady = useAtomValue(agentSettingsReadyAtom)
   const draftSessionIds = useAtomValue(draftSessionIdsAtom)

@@ -73,7 +73,6 @@ import {
  * 挂载后从 settings 加载自定义配置，并注册所有应用级快捷键。
  */
 export function GlobalShortcuts(): null {
-  const [appMode, setAppMode] = useAtom(appModeAtom)
   const [settingsOpen, setSettingsOpen] = useAtom(settingsOpenAtom)
   const channelFormDirty = useAtomValue(channelFormDirtyAtom)
   const setSettingsCloseRequested = useSetAtom(settingsCloseRequestedAtom)
@@ -83,7 +82,7 @@ export function GlobalShortcuts(): null {
   const setShortcutOverrides = useSetAtom(shortcutOverridesAtom)
   const shortcutOverrides = useAtomValue(shortcutOverridesAtom)
   const setSendWithCmdEnter = useSetAtom(sendWithCmdEnterAtom)
-  const { createChat, createAgent } = useCreateSession()
+  const { createAgent } = useCreateSession()
 
   // Tab 管理（用于关闭标签页）
   const activeTabId = useAtomValue(activeTabIdAtom)
@@ -180,16 +179,12 @@ export function GlobalShortcuts(): null {
     useCallback(() => setSearchOpen(true), [setSearchOpen]),
   )
 
-  // Cmd+N → 新建对话/会话（根据当前模式）
+  // Cmd+N → 新建 Agent 会话；Chat 入口在个人版隐藏。
   useShortcut(
     'new-session',
     useCallback(() => {
-      if (appMode === 'agent') {
-        createAgent({ draft: true })
-      } else {
-        createChat({ draft: true })
-      }
-    }, [appMode, createAgent, createChat]),
+      createAgent({ draft: true })
+    }, [createAgent]),
   )
 
   // Cmd+B → 切换侧边栏
@@ -198,15 +193,6 @@ export function GlobalShortcuts(): null {
     useCallback(
       () => setSidebarCollapsed(!sidebarCollapsed),
       [sidebarCollapsed, setSidebarCollapsed],
-    ),
-  )
-
-  // Cmd+Shift+M → 切换模式
-  useShortcut(
-    'toggle-mode',
-    useCallback(
-      () => setAppMode(appMode === 'chat' ? 'agent' : 'chat'),
-      [appMode, setAppMode],
     ),
   )
 
@@ -547,20 +533,17 @@ export function GlobalShortcuts(): null {
       }
     })
 
-    const cleanupCreate = window.electronAPI.onTrayCreateSession(async (data) => {
-      store.set(appModeAtom, data.mode)
+    const cleanupCreate = window.electronAPI.onTrayCreateSession(async (_data) => {
+      store.set(appModeAtom, 'agent')
       store.set(activeViewAtom, 'conversations')
-      if (data.mode === 'agent') {
-        await createAgent()
-      } else {
-        await createChat()
-      }
+      // 个人版隐藏托盘中的 Chat 新建入口；即使收到旧事件也只创建 Agent。
+      await createAgent()
     })
 
     return () => {
       cleanupOpen()
       cleanupCreate()
     }
-  }, [store, createAgent, createChat])
+  }, [store, createAgent])
   return null
 }

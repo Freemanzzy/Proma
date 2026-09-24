@@ -34,7 +34,7 @@
 
 ## 与上游的差异清单
 
-个人版不改动上游运行逻辑；新增以下本地维护脚本和文档区块：
+个人版保留上游功能源码与旧数据兼容路径；仅对下列入口、初始化和打包项做精简，并维护本地脚本和文档区块：
 
 - `scripts/personal/import-proma-backup.py`：从备份 zip 导入到隔离目录，改写 Proma 自身索引路径，停用 Automation/桥接并提供核验。
 - `scripts/personal/dev.sh`：检查官方版与个人开发版进程隔离后，以 `~/.proma-dev` 启动开发版。
@@ -42,6 +42,7 @@
 - 钉钉、Slack 桥接：设置入口隐藏；桥接源码与 IPC 保留以兼容旧数据，但启动注册明确禁止自动连接。
 - GitHub Copilot 订阅渠道：从新增渠道类型列表隐藏；编辑已有 Copilot 渠道时仍保留选项，不影响旧数据使用。
 - Agent Island：设置入口隐藏；启动时不初始化状态机或 macOS helper；electron-builder 不再打包 helper，相关源码和开发构建脚本保留。
+- Chat 模式：隐藏 Agent/Chat 切换、新建 Chat、快捷任务 Chat 选项和欢迎页 Chat 引导；启动恢复强制回到 Agent；Chat 对话数据与源码保留。
 
 ## 数据导入
 
@@ -172,3 +173,12 @@ python3 scripts/personal/import-proma-backup.py \\
 - `apps/electron/src/renderer/components/settings/GeneralSettings.tsx` 隐藏 macOS 与 Windows 的 Agent Island/状态通知开关。
 - `apps/electron/src/main/index.ts` 启动流程不再初始化 Agent Island 状态机或 macOS 原生 helper；保留 IPC handler、旧设置字段和退出清理调用，旧 `agentIsland.enabled=true` 也不会启动 helper，renderer 上报已查看时安全空操作。
 - `apps/electron/electron-builder.yml` 从 macOS `extraResources` 与 `binaries` 移除 `agent-island/macos-agent-island-helper`；helper 源码和 `build:agent-island-native` 开发脚本未删除。
+
+## 2026-09-24: 隐藏 Chat 模式入口
+
+- `apps/electron/src/renderer/components/app-shell/LeftSidebar.tsx` 隐藏展开/收起侧栏中的 Chat 模式按钮，顶部不再渲染 Agent/Chat 切换器，新建入口统一创建 Agent 任务。
+- `apps/electron/src/renderer/components/quick-task/QuickTaskApp.tsx` 移除 Chat 选项与 `Cmd/Ctrl+1` 绑定，保留 Chat 处理源码但快速任务默认且唯一可见模式为 Agent。
+- `apps/electron/src/renderer/components/welcome/WelcomeEmptyState.tsx` 移除 Chat/Agent 引导切换；`WelcomeView.tsx` 空状态启动固定进入 Agent。
+- `apps/electron/src/renderer/main.tsx` 恢复标签时只恢复 Agent 标签；旧 Chat 标签不展示，启动时 `appMode` 强制回到 Agent，Chat 对话数据不删除。
+- `apps/electron/src/renderer/components/shortcuts/GlobalShortcuts.tsx` 移除模式切换快捷键处理，Cmd/Ctrl+N 与旧托盘创建事件统一创建 Agent；`shortcut-defaults.ts` 删除模式切换定义，Tips 不再宣传该快捷键。
+- `apps/electron/src/renderer/components/settings/SettingsPanel.tsx` 隐藏 Chat 专属的提示词管理入口；渠道与 Agent 模型设置保持不变。Chat 组件、数据、IPC 和运行时源码均保留。

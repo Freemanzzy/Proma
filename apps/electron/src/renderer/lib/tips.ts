@@ -25,12 +25,11 @@ export function getPlatform(): Platform {
 /** 所有 Tips 数据 */
 export const TIPS: Tip[] = [
   // macOS 快捷键
-  { id: 'mac-shortcut-new', text: '按 ⌘N 快速创建新对话', platform: 'mac' },
+  { id: 'mac-shortcut-new', text: '按 ⌘N 快速创建 Agent 任务', platform: 'mac' },
   { id: 'mac-shortcut-search', text: '按 ⌘⇧F 搜索历史对话', platform: 'mac' },
   { id: 'mac-shortcut-file-find', text: '按 ⌘F 可在对话中搜索消息，预览面板中则查找文件内容', platform: 'mac' },
   { id: 'mac-shortcut-settings', text: '按 ⌘, 打开设置', platform: 'mac' },
   { id: 'mac-shortcut-sidebar', text: '按 ⌘B 切换侧边栏显示', platform: 'mac' },
-  { id: 'mac-shortcut-mode', text: '按 ⌘⇧M 快速切换 Chat / Agent 模式', platform: 'mac' },
   { id: 'mac-shortcut-focus', text: '按 ⌘L 快速跳转到输入框', platform: 'mac' },
   { id: 'mac-shortcut-clear', text: '按 ⌘K 清除当前对话上下文', platform: 'mac' },
   { id: 'mac-shortcut-stop', text: '按 ⌘. 中断 AI 响应', platform: 'mac' },
@@ -39,12 +38,11 @@ export const TIPS: Tip[] = [
   { id: 'mac-shortcut-tab-switch', text: '按 Ctrl+Tab 快速切换标签，长按 Ctrl 反复按 Tab 可在标签间循环选择', platform: 'mac' },
 
   // Windows 快捷键
-  { id: 'win-shortcut-new', text: '按 Ctrl+N 快速创建新对话', platform: 'windows' },
+  { id: 'win-shortcut-new', text: '按 Ctrl+N 快速创建 Agent 任务', platform: 'windows' },
   { id: 'win-shortcut-search', text: '按 Ctrl+Shift+F 搜索历史对话', platform: 'windows' },
   { id: 'win-shortcut-file-find', text: '按 Ctrl+F 可在对话中搜索消息，预览面板中则查找文件内容', platform: 'windows' },
   { id: 'win-shortcut-settings', text: '按 Ctrl+, 打开设置', platform: 'windows' },
   { id: 'win-shortcut-sidebar', text: '按 Ctrl+Shift+E 切换侧边栏显示', platform: 'windows' },
-  { id: 'win-shortcut-mode', text: '按 Ctrl+Shift+M 快速切换 Chat / Agent 模式', platform: 'windows' },
   { id: 'win-shortcut-focus', text: '按 Ctrl+L 快速跳转到输入框', platform: 'windows' },
   { id: 'win-shortcut-clear', text: '按 Ctrl+K 清除当前对话上下文', platform: 'windows' },
   { id: 'win-shortcut-stop', text: '按 Ctrl+Shift+Backspace 中断 AI 响应', platform: 'windows' },

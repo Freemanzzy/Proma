@@ -131,11 +131,6 @@ export function QuickTaskApp(): React.ReactElement {
       const isMac = navigator.userAgent.includes('Mac')
       const mod = isMac ? e.metaKey : e.ctrlKey
 
-      if (mod && e.key === '1') {
-        e.preventDefault()
-        setMode('chat')
-        return
-      }
       if (mod && e.key === '2') {
         e.preventDefault()
         setMode('agent')
@@ -298,31 +293,9 @@ export function QuickTaskApp(): React.ReactElement {
         {/* 顶栏：模式切换 + 模型信息 */}
         <div className="flex items-center justify-between px-4 pt-3 pb-1">
           <div className="flex items-center gap-2">
-            {/* 模式切换器 */}
-            <div className="flex gap-0.5 rounded-lg bg-muted/60 p-0.5">
-              <button
-                type="button"
-                className={`rounded-md px-2.5 py-1 text-xs font-medium transition-all ${
-                  mode === 'chat'
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-                onClick={() => setMode('chat')}
-              >
-                Chat
-              </button>
-              <button
-                type="button"
-                className={`rounded-md px-2.5 py-1 text-xs font-medium transition-all ${
-                  mode === 'agent'
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-                onClick={() => setMode('agent')}
-              >
-                Agent
-              </button>
-            </div>
+            <span className="rounded-md bg-muted/60 px-2.5 py-1 text-xs font-medium text-foreground">
+              Agent
+            </span>
 
             {/* 模型信息 */}
             {modelInfo && (
@@ -334,7 +307,6 @@ export function QuickTaskApp(): React.ReactElement {
 
           {/* 快捷键提示 */}
           <div className="flex items-center gap-2 text-[10px] text-muted-foreground/40">
-            <span>⌘1 Chat</span>
             <span>⌘2 Agent</span>
             <span>Esc 关闭</span>
           </div>
@@ -348,7 +320,7 @@ export function QuickTaskApp(): React.ReactElement {
             onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            placeholder={mode === 'agent' ? '向 Proma 描述你的任务，Enter 发送...' : '向 Proma 发送消息，Enter 发送...'}
+            placeholder="向 Proma 描述你的任务，Enter 发送..."
             className="w-full resize-none bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground/50 leading-relaxed"
             style={{ minHeight: '60px', maxHeight: '160px' }}
             disabled={isSubmitting}
