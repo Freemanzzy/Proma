@@ -81,6 +81,7 @@ import { initializeRuntime } from './lib/runtime-init'
 import { seedDefaultSkills } from './lib/config-paths'
 import { upgradeDefaultSkillsInWorkspaces } from './lib/agent-workspace-manager'
 import { hasActiveAgentSessions, stopAllAgents } from './lib/agent-service'
+import { startWebRemoteIfEnabled, stopWebRemote } from './lib/web-remote/web-remote-service'
 import { stopAllTerminals } from './lib/terminal-service'
 import { disposePiMcpConnections } from './lib/adapters/pi-mcp-tools'
 import { markRunningDelegationsAsInterrupted } from './lib/agent-session-manager'
@@ -820,6 +821,9 @@ async function bootstrap(): Promise<void> {
   safeRun('startPlanningReminderScheduler', startPlanningReminderScheduler)
   safeRun('startPlanningNativeSyncCoordinator', startPlanningNativeSyncCoordinator)
 
+  // 个人版实验功能：仅在 PROMA_WEB_REMOTE=1 且 web-remote/config.json 明确启用时监听回环端口。
+  await safeAwait('startWebRemoteIfEnabled', startWebRemoteIfEnabled)
+
   app.on('activate', () => {
     if (shouldSuppressVoiceDictationActivate()) {
       return
@@ -927,6 +931,8 @@ app.on('before-quit', () => {
   disposeAgentIslandService()
   // 关闭 Pi MCP 桥接连接（释放 stdio 子进程）
   disposePiMcpConnections().catch(() => {})
+  // 停止个人版实验远程网页服务
+  void stopWebRemote()
   // Clean up system tray before quitting
   destroyTray()
 })
