@@ -34,10 +34,11 @@
 
 ## 与上游的差异清单
 
-个人版不改动上游运行逻辑；新增以下本地维护脚本：
+个人版不改动上游运行逻辑；新增以下本地维护脚本和文档区块：
 
 - `scripts/personal/import-proma-backup.py`：从备份 zip 导入到隔离目录，改写 Proma 自身索引路径，停用 Automation/桥接并提供核验。
 - `scripts/personal/dev.sh`：检查官方版与个人开发版进程隔离后，以 `~/.proma-dev` 启动开发版。
+- `README.md` 与 `README.en.md` 顶部的 `<!-- personal-fork:start -->` / `<!-- personal-fork:end -->` 独立区块：标明个人 Fork、基线和主要改动，便于读者识别且便于后续同步。
 
 ## 数据导入
 
@@ -59,6 +60,8 @@ python3 scripts/personal/import-proma-backup.py \\
 恢复某个 Automation 前，先确认官方版仍停用或个人版是唯一运行实例，再在个人版 GUI 的 Automation 设置中启用；也可以仅对隔离目录执行一次受控 JSON 修改，然后重新运行 `--verify-only`（核验会因 active 任务而失败，这是预期的安全提醒）。不要把个人版导入目录或 manifest 提交到公开仓库。
 
 ## 同步记录
+
+合并上游时若 README 冲突，保留 `personal-fork` 区块，其余内容采用上游版本。
 
 | 日期 | 分支 | 上游基线 | 结果 | 备注 |
 |---|---|---|---|---|
@@ -130,7 +133,7 @@ python3 scripts/personal/import-proma-backup.py \\
 - 新增 `apps/electron/src/main/lib/adapters/pi-ego-browser-tool.ts` 与 `pi-ego-browser-tool.test.ts`：解析 `EGO_BROWSER_BIN`、PATH 和 `~/.local/bin/ego-browser`，通过 stdin 执行 `ego-browser nodejs`，合并输出、抽取升级提示、处理 50KB 截断、超时和 AbortSignal。
 - `apps/electron/src/main/lib/adapters/pi-builtin-tools.ts`：仅在可执行文件存在时注册 `EgoBrowser`。
 - `apps/electron/src/main/lib/agent-prompt-builder.ts`：仅检测到 ego-browser 时注入 TaskSpace、官方 Skill、用户接管和升级确认规则。
-- `packages/shared/src/constants/permission-rules.ts`：将 `EgoBrowser` 归入 `SAFE_TOOLS`；依据上游 `v0.19.57` 同文件中 Browser* 工具的归类。
+- `packages/shared/src/constants/permission-rules.ts`：`EgoBrowser` 不再归入 `SAFE_TOOLS`，因此智能模式首次调用走正常权限请求；`agent-permission-service.ts` 对该请求保留 `allowAlways`，用户选择“始终允许”后仅加入当前会话工具白名单，新会话重新确认。
 - `apps/electron/src/renderer/components/agent/tool-utils.ts`：增加地球图标、中文显示名和脚本 goto/首行摘要。
 
 ## 2026-09-24: 新增 EgoBrowser 原生工具取代内置浏览器
@@ -138,3 +141,14 @@ python3 scripts/personal/import-proma-backup.py \\
 - 从 `personal` 分支创建 `feature/ego-browser-tool`，实现方案 B；新增测试 6 项全部通过。
 - 验证结果：改动后 `bun run typecheck` 通过；定向 `bun test apps/electron/src/main/lib/adapters/pi-ego-browser-tool.test.ts` 为 7 pass / 0 fail。全量 `bun test` 为 471 pass / 5 fail / 1 error（476 tests），相对基线 464 pass / 5 fail / 1 error 仅增加 7 个通过测试，失败与错误仍为官方已有 OAuth 代理、Electron mock、planning 数据库和代理设置问题。
 - 已知限制：个人工作区 Skill `ego-browser-research` 仍为旧版 API，需另行更新；本次工具只执行官方说明中的 Node.js API，不复制旧 Skill 内容。
+
+## 2026-09-24: EgoBrowser 改为每会话确认一次
+
+- 从 `SAFE_TOOLS` 移除 `EgoBrowser`，避免智能模式把可读写本机文件、启动进程的 ego-browser Node 脚本误判为只读工具。
+- 正常权限请求对 `EgoBrowser` 保留“始终允许”选项；用户确认后写入当前会话白名单，同一会话后续调用免询问，新会话重新确认。`bypassPermissions`、计划模式拒绝和子代理自动批准规则保持不变。
+- 新增 `agent-permission-service.test.ts` 覆盖首次询问、同会话白名单和跨会话重新询问。
+
+## 2026-09-24: README 增加个人版说明
+
+- 在 `README.md` 与 `README.en.md` 顶部标题之前加入 `personal-fork:start` / `personal-fork:end` 独立区块，说明个人 Fork、官方 `v0.19.57` 基线、主要差异、隔离开发启动方式和 `PERSONAL.md` 入口。
+- 区块与官方 README 正文分离，后续同步冲突时保留标记区块，其余正文采用上游内容。
