@@ -119,9 +119,8 @@ import { wechatBridge } from './lib/wechat-bridge'
 import { getWeChatConfig } from './lib/wechat-config'
 import { createQuickTaskWindow, toggleQuickTaskWindow, destroyQuickTaskWindow } from './lib/quick-task-window'
 import { getAgentStatusHoverWindow, destroyAgentStatusHoverWindow } from './agent-status-hover-window'
-import { handleNativeAgentIslandEvent, initAgentIslandService, disposeAgentIslandService, publishAgentIslandNow } from './lib/agent-island-service'
-import { disposeMacAgentIslandNativeHost, startMacAgentIslandNativeHost, isMacAgentIslandNativeHostReady } from './lib/mac-agent-island-native-host'
-import { isAgentIslandServiceSupported, isMacAgentIslandSurfaceSupported } from './lib/macos-version'
+import { disposeAgentIslandService } from './lib/agent-island-service'
+import { disposeMacAgentIslandNativeHost } from './lib/mac-agent-island-native-host'
 import { getWindowsAgentIslandSurface, processNotification, type SurfaceDeps } from './lib/windows-agent-island-surface'
 import {
   createVoiceDictationWindow,
@@ -133,28 +132,6 @@ import { registerGlobalShortcut, unregisterAllGlobalShortcuts } from './lib/glob
 import { setPromaVersion } from '@proma/core'
 import { canRecoverRenderer, RENDERER_RECOVERY_WINDOW_MS } from './lib/renderer-process-recovery'
 import { TRAY_IPC_CHANNELS, WINDOWS_AGENT_ISLAND_IPC_CHANNELS } from '../types'
-
-/** macOS 26+ 使用 Swift/AppKit NSPanel；其他平台不创建 Agent Island surface。 */
-function startAgentIslandSurface(): void {
-  if (!isMacAgentIslandSurfaceSupported()) {
-    console.info('[agent-island] 当前平台或 macOS 版本不支持，已禁用')
-    return
-  }
-
-  const startedNative = startMacAgentIslandNativeHost({
-    onReady: () => {
-      console.info('[agent-island] macOS 原生 NSPanel helper 已就绪')
-      publishAgentIslandNow()
-    },
-    onEvent: handleNativeAgentIslandEvent,
-    onUnavailable: (reason) => {
-      console.warn(`[agent-island] macOS 原生 helper 不可用，已禁用：${reason}`)
-    },
-  })
-  if (!startedNative) {
-    console.warn('[agent-island] macOS 原生 helper 启动失败，已禁用')
-  }
-}
 
 // ===== Bridge 注册（新增 Bridge 只需在此添加一个 registerBridge 调用） =====
 
@@ -816,22 +793,7 @@ async function bootstrap(): Promise<void> {
     safeRun('createVoiceDictationWindow', createVoiceDictationWindow)
   }
 
-  // Agent Island 状态机在 macOS 和 Windows 都初始化；Swift surface 仅 macOS 26+。
-  if (isAgentIslandServiceSupported()) {
-    safeRun('initAgentIslandService', () => {
-      initAgentIslandService({
-        showAndFocusMainWindow,
-        openAgentSession: (sessionId, title) => {
-          sendToMainWindow(TRAY_IPC_CHANNELS.OPEN_AGENT_SESSION, { sessionId, title })
-        },
-        enabled: () => getSettings().agentIsland?.enabled !== false,
-      })
-    })
-  }
-
-  if (isMacAgentIslandSurfaceSupported()) {
-    safeRun('startAgentIslandSurface', startAgentIslandSurface)
-  }
+  // 个人版停用 Agent Island：不初始化状态机，也不启动 macOS 原生 helper；保留源码、IPC 和旧设置以兼容数据。
 
   // 飞书实时同步开启时，默认阻止系统自动休眠，保证远程群内继续可用。
   safeRun('syncFeishuSyncSleepBlocker', () => syncFeishuSyncSleepBlocker(getSettings()))
