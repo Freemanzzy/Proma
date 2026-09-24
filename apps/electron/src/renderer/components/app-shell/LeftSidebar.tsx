@@ -2,7 +2,7 @@
  * LeftSidebar - 左侧导航栏
  *
  * 包含：
- * - Agent 导航与会话列表
+ * - Chat/Agent 模式切换器
  * - 导航菜单项（点击切换主内容区视图）
  * - 置顶对话区域（可展开/收起）
  * - 对话列表（新对话按钮 + 右键菜单 + 按 updatedAt 降序排列）
@@ -14,6 +14,7 @@ import { toast } from 'sonner'
 import { Pin, PinOff, Star, Settings, Plus, CirclePlus, Trash2, Pencil, PanelLeft, PanelRight, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, Clock, CalendarDays, ChevronRight, ChevronDown, ChevronUp, ChevronsDownUp, Blocks, Brain, ListTodo, GitBranch, Download, Loader2, RotateCw, Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+import { ModeSwitcher } from './ModeSwitcher'
 import { SearchDialog } from './SearchDialog'
 import { UserAvatar } from '@/components/chat/UserAvatar'
 import { activeViewAtom, agentSkillsTabAtom } from '@/atoms/active-view'
@@ -649,8 +650,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   const [relativeTimeNow, setRelativeTimeNow] = React.useState(() => Date.now())
   const [userProfile, setUserProfile] = useAtom(userProfileAtom)
   const streamingIds = useAtomValue(streamingConversationIdsAtom)
-  // 个人版隐藏 Chat 入口；Chat 数据与组件仍保留以兼容旧会话。
-  const mode = 'agent' as AppMode
+  const mode = useAtomValue(appModeAtom)
   const isMac = React.useMemo(() => detectIsMac(), [])
   const hasUpdate = useAtomValue(hasUpdateAtom)
   const updateStatus = useAtomValue(updateStatusAtom)
@@ -3265,15 +3265,42 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
             </button>
           </CollapsedWorkspacePopover>
 
-                    <div className="my-1 h-px w-6 bg-border/70" />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label="切换到 Chat 模式"
+                onClick={() => handleRailModeSwitch("chat")}
+                className="group relative flex size-10 items-center justify-center p-1 titlebar-no-drag"
+              >
+                <span
+                  className={cn(
+                    "flex size-8 items-center justify-center rounded-[10px] transition-[background-color,color,box-shadow] duration-150",
+                    mode === "chat"
+                      ? "bg-primary/10 text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]"
+                      : "text-foreground/45 group-hover:bg-foreground/[0.06] group-hover:text-foreground/75",
+                  )}
+                >
+                  <MessageSquare size={15} />
+                </span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">Chat 模式</TooltipContent>
+          </Tooltip>
+
+          <div className="my-1 h-px w-6 bg-border/70" />
 
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
-                aria-label="新建 Agent 会话"
+                aria-label={
+                  mode === "agent" ? "新建 Agent 会话" : "新建 Chat 对话"
+                }
                 onClick={() => {
-                  void createAgentSessionInWorkspace()
+                  void (mode === "agent"
+                    ? createAgentSessionInWorkspace()
+                    : createChat());
                 }}
                 className="group flex size-10 items-center justify-center p-1 titlebar-no-drag"
               >
@@ -3284,7 +3311,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
             </TooltipTrigger>
             <TooltipContent side="right">
               <span className="flex items-center gap-2">
-                <span>新会话</span>
+                <span>{mode === "agent" ? "新会话" : "新对话"}</span>
                 <ShortcutKeycaps
                   shortcutId="new-session"
                   keycapClassName="h-5 min-w-5 px-1 text-[11px]"
@@ -3411,6 +3438,9 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
 
       {/* 模式切换器 + 折叠按钮 */}
       <div className={cn('titlebar-drag-region flex items-start gap-1.5 px-3', isMac && 'pt-[5px]')}>
+        <div className="flex-1 min-w-0">
+          <ModeSwitcher />
+        </div>
         <Tooltip>
           <TooltipTrigger asChild>
             <button
@@ -3442,12 +3472,12 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
           <TooltipTrigger asChild>
             <button
               type="button"
-              aria-label="新建任务"
-              onClick={() => { void createAgentSessionInWorkspace() }}
+              aria-label={mode === 'agent' ? '新建任务' : '新建对话'}
+              onClick={() => { void (mode === 'agent' ? createAgentSessionInWorkspace() : createChat()) }}
               className="group flex h-9 min-w-0 flex-1 items-center gap-3 rounded-lg px-3 text-[13px] text-[hsl(var(--sidebar-primary-foreground))] transition-[background-color,color,transform] hover:bg-foreground/[0.055] hover:text-[hsl(var(--sidebar-primary-foreground))] active:scale-[0.96] titlebar-no-drag"
             >
               <CirclePlus size={16} className="shrink-0" />
-              <span>新建任务</span>
+              <span>{mode === 'agent' ? '新建任务' : '新建对话'}</span>
               <span className="ml-auto flex shrink-0 items-center opacity-70 group-hover:opacity-100">
                 <ShortcutKeycaps
                   shortcutId="new-session"
@@ -3459,7 +3489,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
           </TooltipTrigger>
           <TooltipContent side="bottom">
             <span className="flex items-center gap-2">
-              <span>新建任务</span>
+              <span>{mode === 'agent' ? '新建任务' : '新建对话'}</span>
               <ShortcutKeycaps shortcutId="new-session" keycapClassName="h-5 min-w-5 px-1 text-[11px]" separatorClassName="text-[10px]" />
             </span>
           </TooltipContent>
