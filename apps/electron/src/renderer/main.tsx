@@ -874,8 +874,6 @@ function TabStatePersistenceInitializer(): null {
         window.electronAPI.listActiveAgentSessions(),
       ])
       const tabState = settings.tabState
-      // 个人版 Chat 入口隐藏；无论 localStorage 或旧 tabState 是否停留在 Chat，启动都回到 Agent。
-      store.set(appModeAtom, 'agent')
       if (!tabState?.tabs?.length) return
 
       // 已归档会话仅在上次打开的标签引用它时才读取，以兼容恢复该标签。
@@ -903,14 +901,10 @@ function TabStatePersistenceInitializer(): null {
           'sessionId' in t &&
           'type' in t &&
           'title' in t &&
-          t.type === 'agent' &&
+          (t.type === 'chat' || t.type === 'agent') &&
           validSessionIds.has(t.sessionId),
       )
-      if (validTabs.length === 0) {
-        store.set(tabsAtom, [])
-        store.set(activeTabIdAtom, null)
-        return
-      }
+      if (validTabs.length === 0) return
 
       const validTabIds = new Set(validTabs.map((t) => t.id))
 

@@ -63,7 +63,7 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
   {
     id: 'new-session',
     name: '新建对话',
-    description: '创建 Agent 会话',
+    description: '根据当前模式创建 Chat 对话或 Agent 会话',
     defaultMac: 'Cmd+N',
     defaultWin: 'Ctrl+N',
     category: 'app',
@@ -103,6 +103,14 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     defaultWin: 'Ctrl+0',
     category: 'app',
     readonly: true,
+  },
+  {
+    id: 'toggle-mode',
+    name: '切换模式',
+    description: '在 Chat 和 Agent 模式之间切换',
+    defaultMac: 'Cmd+Shift+M',
+    defaultWin: 'Ctrl+Shift+M',
+    category: 'app',
   },
   {
     id: 'global-search',

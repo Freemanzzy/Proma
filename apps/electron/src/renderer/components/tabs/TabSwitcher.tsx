@@ -133,8 +133,7 @@ export function TabSwitcher(): ReactElement | null {
       .filter((session) => !session.archived && !session.isDraft && !draftSessionIds.has(session.id))
       .map(buildAgentCandidate)
 
-    // 个人版隐藏 Chat 入口；保留 chatCandidates 解析以兼容旧数据，但切换器只展示 Agent。
-    const allCandidates = [...agentCandidates]
+    const allCandidates = [...chatCandidates, ...agentCandidates]
 
     const candidateById = new Map(allCandidates.map((candidate) => [candidate.id, candidate]))
     const activeAgentSession = activeSessionId

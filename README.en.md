@@ -4,8 +4,7 @@
 > **Baseline:** official `v0.19.57`.
 >
 > This fork removes the bundled browser, adds the optional EgoBrowser native tool (first use per session requires approval), simplifies appearance to light/dark/system, and includes isolated personal import/development scripts under `scripts/personal/`. Run `scripts/personal/dev.sh` for `~/.proma-dev`; see [`PERSONAL.md`](./PERSONAL.md) for the complete change log.
->
-> - **Trim unused integrations:** hide Chat entry points, DingTalk/Slack bridges, the Copilot channel, and Agent Island while retaining the source and legacy-data compatibility paths.
+> It also hides unused integrations—DingTalk/Slack bridges, the Copilot channel, and Agent Island—while retaining their source code and legacy-data compatibility paths.
 <!-- personal-fork:end -->
 
 # Proma
