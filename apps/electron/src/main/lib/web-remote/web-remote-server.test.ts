@@ -57,6 +57,7 @@ describe('WebRemoteServer loopback integration', () => {
     expect(csp).toContain(`script-src 'nonce-${scriptNonce}'`)
     expect(csp).toContain(`style-src 'nonce-${scriptNonce}'`)
     expect(csp).toContain("frame-ancestors 'none'")
+    expect(csp).toContain('wss://proma.example')
     expect(response.headers.get('x-content-type-options')).toBe('nosniff')
     expect(response.headers.get('referrer-policy')).toBe('no-referrer')
     expect(html).not.toContain('onclick=')
