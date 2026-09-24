@@ -62,3 +62,14 @@ pnpm-workspace.yaml
 # Proma 会话/工作区文档（不应入仓，见 AGENTS.md 红线）
 .context/
 .bitfun/
+
+# 个人版运行数据与本地凭据：只保留源码，禁止提交运行目录、环境变量和备份
+.proma/
+.proma-dev/
+.proma-personal/
+*.env
+.env*
+!.env.example
+!**/.env.example
+proma-backup-*.zip
+*.proma-backup
