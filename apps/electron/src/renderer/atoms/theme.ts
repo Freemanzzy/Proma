@@ -11,59 +11,45 @@
  */
 
 import { atom } from 'jotai'
-import { THEME_STYLES, type ThemeMode, type ThemeStyle } from '../../types'
+import { THEME_STYLES, normalizeThemeSettings, type ThemeMode, type ThemeStyle } from '../../types'
 
 /** localStorage 缓存键 */
 const THEME_CACHE_KEY = 'proma-theme-mode'
 const THEME_STYLE_CACHE_KEY = 'proma-theme-style'
 
-/**
- * 从 localStorage 读取缓存的主题模式
- */
+/** 从 localStorage 读取并迁移主题设置；特殊风格永远不会参与首帧渲染。 */
+function getCachedThemeSettings(): { themeMode: ThemeMode; themeStyle: ThemeStyle } {
+  try {
+    return normalizeThemeSettings(
+      localStorage.getItem(THEME_CACHE_KEY),
+      localStorage.getItem(THEME_STYLE_CACHE_KEY),
+    )
+  } catch {
+    return normalizeThemeSettings(undefined, undefined)
+  }
+}
+
 function getCachedThemeMode(): ThemeMode {
-  try {
-    const cached = localStorage.getItem(THEME_CACHE_KEY)
-    if (cached === 'light' || cached === 'dark' || cached === 'system' || cached === 'special') {
-      return cached
-    }
-  } catch {
-    // localStorage 不可用时忽略
-  }
-  return 'dark'
+  return getCachedThemeSettings().themeMode
 }
 
-/**
- * 从 localStorage 读取缓存的特殊风格
- */
 function getCachedThemeStyle(): ThemeStyle {
-  try {
-    const cached = localStorage.getItem(THEME_STYLE_CACHE_KEY)
-    if ((THEME_STYLES as readonly string[]).includes(cached ?? '')) {
-      return cached as ThemeStyle
-    }
-  } catch {
-    // localStorage 不可用时忽略
-  }
-  return 'default'
+  return getCachedThemeSettings().themeStyle
 }
 
-/**
- * 缓存主题模式到 localStorage
- */
+/** 缓存主题模式到 localStorage */
 function cacheThemeMode(mode: ThemeMode): void {
   try {
-    localStorage.setItem(THEME_CACHE_KEY, mode)
+    localStorage.setItem(THEME_CACHE_KEY, normalizeThemeSettings(mode, 'default').themeMode)
   } catch {
     // localStorage 不可用时忽略
   }
 }
 
-/**
- * 缓存特殊风格到 localStorage
- */
+/** 缓存特殊风格到 localStorage；个人版始终写入默认风格。 */
 function cacheThemeStyle(style: ThemeStyle): void {
   try {
-    localStorage.setItem(THEME_STYLE_CACHE_KEY, style)
+    localStorage.setItem(THEME_STYLE_CACHE_KEY, normalizeThemeSettings('system', style).themeStyle)
   } catch {
     // localStorage 不可用时忽略
   }
@@ -80,16 +66,11 @@ export const systemIsDarkAtom = atom<boolean>(true)
 
 /** 派生：最终解析的主题（light | dark） */
 export const resolvedThemeAtom = atom<'light' | 'dark'>((get) => {
-  const mode = get(themeModeAtom)
-  if (mode === 'system') {
+  const normalized = normalizeThemeSettings(get(themeModeAtom), get(themeStyleAtom))
+  if (normalized.themeMode === 'system') {
     return get(systemIsDarkAtom) ? 'dark' : 'light'
   }
-  if (mode === 'special') {
-    const style = get(themeStyleAtom)
-    // 根据特殊风格决定是浅色还是深色基调
-    return style.endsWith('-light') ? 'light' : 'dark'
-  }
-  return mode
+  return normalized.themeMode === 'dark' ? 'dark' : 'light'
 })
 
 /** 所有特殊风格 class（用于清理旧值）— 从 THEME_STYLES 单一源派生，排除 'default' */
@@ -109,17 +90,15 @@ const ALL_THEME_STYLE_CLASSES = THEME_STYLES
 export function applyThemeToDOM(themeMode: ThemeMode, themeStyle: ThemeStyle = 'default', systemIsDark: boolean = true): void {
   const html = document.documentElement
 
-  // 计算目标状态
+  // 计算目标状态；旧特殊风格一律迁移为 system/default。
+  const normalized = normalizeThemeSettings(themeMode, themeStyle)
   let targetStyleClass: string | null = null
   let targetIsDark: boolean
 
-  if (themeMode === 'special' && themeStyle !== 'default') {
-    targetStyleClass = `theme-${themeStyle}`
-    targetIsDark = themeStyle.endsWith('-dark')
-  } else if (themeMode === 'system') {
+  if (normalized.themeMode === 'system') {
     targetIsDark = systemIsDark
   } else {
-    targetIsDark = themeMode === 'dark'
+    targetIsDark = normalized.themeMode === 'dark'
   }
 
   // 读取当前状态
@@ -163,13 +142,12 @@ export async function initializeTheme(
 ): Promise<() => void> {
   // 从主进程加载持久化设置
   const settings = await window.electronAPI.getSettings()
-  setThemeMode(settings.themeMode)
-  cacheThemeMode(settings.themeMode)
-
-  // 加载特殊风格
-  if (setThemeStyle && settings.themeStyle) {
-    setThemeStyle(settings.themeStyle)
-    cacheThemeStyle(settings.themeStyle)
+  const normalized = normalizeThemeSettings(settings.themeMode, settings.themeStyle)
+  setThemeMode(normalized.themeMode)
+  cacheThemeMode(normalized.themeMode)
+  if (setThemeStyle) {
+    setThemeStyle(normalized.themeStyle)
+    cacheThemeStyle(normalized.themeStyle)
   }
 
   // 获取系统主题
@@ -183,13 +161,12 @@ export async function initializeTheme(
 
   // 监听用户手动切换主题（跨窗口同步，如 Quick Task 面板）
   const cleanupThemeSettings = window.electronAPI.onThemeSettingsChanged((payload) => {
-    const mode = payload.themeMode as ThemeMode
-    const style = (payload.themeStyle || 'default') as ThemeStyle
-    setThemeMode(mode)
-    cacheThemeMode(mode)
+    const normalized = normalizeThemeSettings(payload.themeMode, payload.themeStyle)
+    setThemeMode(normalized.themeMode)
+    cacheThemeMode(normalized.themeMode)
     if (setThemeStyle) {
-      setThemeStyle(style)
-      cacheThemeStyle(style)
+      setThemeStyle(normalized.themeStyle)
+      cacheThemeStyle(normalized.themeStyle)
     }
   })
 
@@ -205,14 +182,17 @@ export async function initializeTheme(
  * 同时更新 localStorage 缓存和主进程配置文件。
  */
 export async function updateThemeMode(mode: ThemeMode): Promise<void> {
-  cacheThemeMode(mode)
-  await window.electronAPI.updateSettings({ themeMode: mode })
+  const normalized = normalizeThemeSettings(mode, 'default')
+  cacheThemeMode(normalized.themeMode)
+  cacheThemeStyle(normalized.themeStyle)
+  await window.electronAPI.updateSettings(normalized)
 }
 
 /**
  * 更新特殊风格并持久化
  */
 export async function updateThemeStyle(style: ThemeStyle): Promise<void> {
-  cacheThemeStyle(style)
-  await window.electronAPI.updateSettings({ themeStyle: style })
+  const normalized = normalizeThemeSettings('system', style)
+  cacheThemeStyle(normalized.themeStyle)
+  await window.electronAPI.updateSettings({ themeStyle: normalized.themeStyle })
 }
