@@ -83,7 +83,6 @@ import { upgradeDefaultSkillsInWorkspaces } from './lib/agent-workspace-manager'
 import { hasActiveAgentSessions, stopAllAgents } from './lib/agent-service'
 import { stopAllTerminals } from './lib/terminal-service'
 import { disposePiMcpConnections } from './lib/adapters/pi-mcp-tools'
-import { browserController } from './lib/browser-controller'
 import { markRunningDelegationsAsInterrupted } from './lib/agent-session-manager'
 import { stopAllGenerations } from './lib/chat-service'
 import { configureUpdater, initAutoUpdater, cleanupUpdater } from './lib/updater/auto-updater'
@@ -502,7 +501,6 @@ function createWindow(): void {
   })
   setStoredMainWindow(mainWindow)
   installWindowsZoomInFallback(mainWindow)
-  browserController.setOwnerWindow(mainWindow)
 
   // Load the renderer
   const isDev = !app.isPackaged
@@ -686,7 +684,6 @@ function createWindow(): void {
 
   mainWindow.on('closed', () => {
     setStoredMainWindow(null)
-    browserController.dispose()
     mainWindow = null
   })
 }
@@ -945,7 +942,6 @@ app.on('before-quit', () => {
   // 中止所有活跃的 Agent 和 Chat 子进程
   stopAllAgents()
   void stopAllTerminals()
-  browserController.dispose()
   stopAllGenerations()
   // 清理更新器定时器
   cleanupUpdater()

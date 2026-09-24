@@ -10,26 +10,6 @@ export const SAFE_TOOLS: readonly string[] = [
   'Read',            // 文件读取
   'Glob',            // 文件名搜索
   'Grep',            // 内容搜索
-  // Pi 受管浏览器：网页隔离、下载与弹窗策略已在主进程处理，网页权限默认拒绝。
-  'BrowserObserve',
-  'BrowserFind',
-  'BrowserNavigate',
-  'BrowserClick',
-  'BrowserAct',
-  'BrowserFill',
-  'BrowserPress',
-  'BrowserHover',
-  'BrowserDrag',
-  'BrowserScroll',
-  'BrowserExtract',
-  'BrowserSelectOption',
-  'BrowserScreenshot',
-  'BrowserListTabs',
-  'BrowserNewTab',
-  'BrowserSelectTab',
-  'BrowserCloseTab',
-  'BrowserClose',
-  'BrowserPreviewOpen',
   'TodoRead',        // Todo 列表读取
 
   'TaskOutput',      // 后台任务输出

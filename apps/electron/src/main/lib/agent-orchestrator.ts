@@ -80,7 +80,6 @@ import { resolvePiReasoningCapability } from './adapters/pi-model-registry'
 import { generateCodexTitle } from './adapters/pi-codex-title-generator'
 import { createFallbackTitle, sanitizeGeneratedTitle, TITLE_PROMPT } from './title-generation'
 import { claimWorkspaceMemoryRefreshOpportunity } from './agent-memory-refresh-service'
-import { browserController } from './browser-controller'
 import { resolveRuntimeAdditionalDirectories } from './agent-orchestrator-vault-access'
 
 // ===== 类型定义 =====
@@ -1050,11 +1049,6 @@ export class AgentOrchestrator {
         attachedDirectories,
         productivityTools.obsidianEnabled ? getAgentVaultRoots() : [],
       )
-      const browserAllowedRoots = [...new Set([
-        workspaceId ? agentCwd : undefined,
-        workspaceSlug ? getProjectFilesPath(workspaceSlug) : undefined,
-        ...allAdditionalDirectories,
-      ].filter((root): root is string => typeof root === 'string' && root.length > 0))]
       // 原因：listSessions({ dir }) 基于 cwd 路径哈希查找，但 session 级别的 cwd
       // （如 ~/.proma/agent-workspaces/workspace-xxx/sessionId）与 SDK 内部存储的路径哈希可能不匹配，
       // 导致 listSessions 始终返回 0 个会话，误杀有效的 resume。
@@ -1075,7 +1069,7 @@ export class AgentOrchestrator {
         workspaceId,
         workspaceSlug,
         agentCwd,
-        allowedRoots: browserAllowedRoots,
+        allowedRoots: allAdditionalDirectories,
         permissionMode: permissionModeOverride ?? sessionMeta?.permissionMode ?? PROMA_DEFAULT_PERMISSION_MODE,
         triggeredBy: input.triggeredBy,
         windowsShellAvailable: process.platform !== 'win32' || runtimeEnv.shellKind != null,
@@ -1101,7 +1095,6 @@ export class AgentOrchestrator {
         workspaceName: workspace?.name,
         workspaceSlug,
         agentCwd,
-        userBrowserContext: browserController.getUserContext(sessionId),
         userVaultContext: vaultUserContext,
       })
       // 11.5 注入 mention 引用指令（Skill/MCP/会话）— 仅影响 prompt，不影响持久化
@@ -1277,7 +1270,6 @@ export class AgentOrchestrator {
         'mcp__planning__list_active_reminders',
       ])
       // Pi-native 浏览器工具不是 MCP：必须显式分类，避免被通用 mcp__ 调研放行规则遗漏。
-      const PLAN_MODE_READ_ONLY_BROWSER_TOOLS = new Set(['BrowserObserve', 'BrowserFind', 'BrowserExtract', 'BrowserScreenshot', 'BrowserListTabs', 'BrowserPreviewOpen'])
       const runTriggeredBy = input.triggeredBy
 
       /** Plan 模式是否已被 Agent 进入（初始 plan 模式时天然为 true，其他模式需 EnterPlanMode 触发） */
@@ -1382,30 +1374,10 @@ export class AgentOrchestrator {
           return { behavior: 'allow' as const }
         }
 
-        // 选择 file input 后，站点可能自动把本地文件上传到第三方；即使路径已在会话授权目录内，
-        // 仍需逐次确认该外发边界，不能被通用 Browser 放行规则覆盖。
-        if (toolName === 'BrowserUpload') {
-          if (currentMode === 'plan') return { behavior: 'deny' as const, message: '计划模式下不能选择网页上传文件，请在计划获批后执行。' }
-          return permissionService.requestSingleApproval(sessionId, toolName, input, options, (request) => {
-            this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'permission_request', request } })
-          })
-        }
-
         // 终端元数据与已缓冲的输出可在计划阶段只读检查；创建、执行、打断或关闭 PTY 都属于可见的本地副作用。
         if (toolName === 'TerminalList' || toolName === 'TerminalRead') return { behavior: 'allow' as const, updatedInput: input }
         if (toolName.startsWith('Terminal') && currentMode === 'plan') {
           return { behavior: 'deny' as const, message: '计划模式下不能创建或操作本地终端，请在计划获批后执行。' }
-        }
-
-        // 所有 Pi 会话均可使用受管浏览器。主进程仍隔离网页来源并默认拒绝网页权限；下载和弹窗留在受管浏览器内，
-        // 页面内容始终视为不可信输入。计划模式仅允许只读浏览器操作。
-        if (toolName.startsWith('Browser')) {
-          if (currentMode === 'plan') {
-            return PLAN_MODE_READ_ONLY_BROWSER_TOOLS.has(toolName)
-              ? { behavior: 'allow' as const, updatedInput: input }
-              : { behavior: 'deny' as const, message: '计划模式下只能观察受管浏览器，请在计划获批后再进行网页交互。' }
-          }
-          return { behavior: 'allow' as const, updatedInput: input }
         }
 
         const planningDeletionPermission = resolvePlanningDeletionPermission(
@@ -2286,7 +2258,6 @@ export class AgentOrchestrator {
     this.activeSessions.delete(sessionId)
     this.activeSessionStartedAt.delete(sessionId)
     this.sessionPermissionModes.delete(sessionId)
-    browserController.cancelSession(sessionId)
     if (runGeneration != null) {
       this.stoppedBySessions.set(sessionId, runGeneration)
     } else if (stopBeforeRun) {
@@ -2438,12 +2409,11 @@ export class AgentOrchestrator {
       ? getAgentWorkspace(meta.workspaceId)?.slug
       : undefined
 
-    const userBrowserContext = browserController.getUserContext(sessionId)
     const userVaultContext = getVaultUserContext(sessionId)
     // 运行中的 Agent 收到队列消息时也必须看到用户刚刚主动打开的页面。
     // 未打开浏览器时保持既有消息形态，避免给每条插队消息重复注入无关环境块。
-    let enrichedText = userBrowserContext || userVaultContext
-      ? `${buildDynamicContext({ userBrowserContext, userVaultContext })}\n\n${text}`
+    let enrichedText = userVaultContext
+      ? `${buildDynamicContext({ userVaultContext })}\n\n${text}`
       : text
     const referencedSessionsBlock = buildReferencedSessionsPrompt(sessionId, mentionedSessionIds, workspaceSlug)
     if (referencedSessionsBlock) {

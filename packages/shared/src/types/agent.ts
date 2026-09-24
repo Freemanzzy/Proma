@@ -1867,7 +1867,7 @@ export const AGENT_IPC_CHANNELS = {
   /** 中止 Agent 执行 */
   STOP_AGENT: 'agent:stop',
 
-  // Pi 受管浏览器（网页内容与 CDP 仅驻留主进程）
+  // Legacy channel declarations retained for type-checking of unreferenced source files.
   OPEN_BROWSER: 'agent:open-browser',
   LIST_BROWSER_TABS: 'agent:list-browser-tabs',
   CREATE_BROWSER_TAB: 'agent:create-browser-tab',

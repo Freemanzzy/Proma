@@ -6,7 +6,7 @@
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { Blocks, Brain, CalendarDays, Clock, Columns2, FolderOpen, Globe, ListTodo, MessageCircle, PanelRight, Plus, Repeat2, ServerCog, SquareTerminal, X } from 'lucide-react'
+import { Blocks, Brain, CalendarDays, Clock, Columns2, FolderOpen, ListTodo, MessageCircle, PanelRight, Plus, Repeat2, ServerCog, SquareTerminal, X } from 'lucide-react'
 import { OBSIDIAN_NAME, ObsidianIcon } from '@/components/obsidian/obsidian-brand'
 import { cn } from '@/lib/utils'
 import { getScrollLeftToRevealTab } from '@/lib/tab-visibility'
@@ -50,9 +50,6 @@ interface DiffPanelTabBarProps {
   activeTab: AgentSidePanelTab
   onTabChange: (tab: AgentSidePanelTab) => void
   onCloseTab: (tab: AgentSidePanelTab) => void
-  onOpenBrowser: () => void
-  /** 加号菜单是否展开；供原生浏览器视图临时避让。 */
-  onAddTabMenuOpenChange?: (open: boolean) => void
   onOpenFile: () => void
   onOpenTerminal?: () => void
   onOpenWorkspaceComponent?: (component: WorkspaceComponentTab) => void
@@ -75,8 +72,6 @@ export function DiffPanelTabBar({
   activeTab,
   onTabChange,
   onCloseTab,
-  onOpenBrowser,
-  onAddTabMenuOpenChange,
   onOpenFile,
   onOpenTerminal,
   onOpenWorkspaceComponent,
@@ -109,7 +104,6 @@ export function DiffPanelTabBar({
   const suppressClickTabRef = React.useRef<AgentSidePanelTab | null>(null)
   const activeTabDragCancelRef = React.useRef<(() => void) | null>(null)
 
-  React.useEffect(() => () => onAddTabMenuOpenChange?.(false), [onAddTabMenuOpenChange])
   React.useEffect(() => () => activeTabDragCancelRef.current?.(), [])
   React.useEffect(() => {
     if (!visibleTabs?.left || !visibleTabs.right) setIsSplitTabGroupHovered(false)
@@ -118,8 +112,7 @@ export function DiffPanelTabBar({
   const handleAddTabMenuOpenChange = React.useCallback((open: boolean) => {
     if (open) suppressPointerDismissFocusRestoreRef.current = false
     setIsAddTabMenuOpen(open)
-    onAddTabMenuOpenChange?.(open)
-  }, [onAddTabMenuOpenChange])
+  }, [])
 
   const syncScrollbarThumb = React.useCallback(() => {
     const tabList = tabListRef.current
@@ -465,10 +458,6 @@ export function DiffPanelTabBar({
               event.preventDefault()
             }}
           >
-            <DropdownMenuItem onSelect={onOpenBrowser}>
-              <Globe className="size-3.5" />
-              新建浏览器标签
-            </DropdownMenuItem>
             <DropdownMenuItem onSelect={onOpenFile}>
               <FolderOpen className="size-3.5" />
               打开文件

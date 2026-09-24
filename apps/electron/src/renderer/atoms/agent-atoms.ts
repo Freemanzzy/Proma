@@ -702,8 +702,8 @@ export function getDelegationTabLabel(title: string | null | undefined): string 
 }
 
 export type AgentSidePanelBaseTab = 'files' | 'changes' | 'chat' | 'temporary-agent' | 'delegation' | WorkspaceComponentTab
-/** 工作区组件、每个 Pi 探索分支、协作子 Agent、浏览器网页和文件预览都处于右侧工作区顶栏。 */
-export type AgentSidePanelTab = AgentSidePanelBaseTab | `exploration:${string}` | `browser:${string}` | `preview:${string}` | `terminal:${string}`
+/** 工作区组件、每个 Pi 探索分支、协作子 Agent 和文件预览都处于右侧工作区顶栏。 */
+export type AgentSidePanelTab = AgentSidePanelBaseTab | `exploration:${string}` | `preview:${string}` | `terminal:${string}`
 
 /** 用户主动进入这些项目级能力时，Agent 后续的改动提示不得抢走当前视图。 */
 export function isUserPriorityWorkspaceComponentTab(
@@ -745,18 +745,6 @@ export function getExplorationSessionIdFromSidePanelTab(tab: AgentSidePanelTab |
 
 export function isExplorationSidePanelTab(tab: AgentSidePanelTab | 'exploration'): tab is `exploration:${string}` {
   return tab.startsWith('exploration:')
-}
-
-export function getBrowserSidePanelTab(tabId: string): AgentSidePanelTab {
-  return `browser:${tabId}`
-}
-
-export function getBrowserTabIdFromSidePanelTab(tab: AgentSidePanelTab | 'browser'): string | null {
-  return tab.startsWith('browser:') ? tab.slice('browser:'.length) : null
-}
-
-export function isBrowserSidePanelTab(tab: AgentSidePanelTab | 'browser' | 'preview'): tab is `browser:${string}` {
-  return tab.startsWith('browser:')
 }
 
 export function getPreviewSidePanelTab(previewId: string): AgentSidePanelTab {
@@ -821,7 +809,7 @@ export const agentSessionComponentTabsAtomFamily = atomFamily((sessionId: string
 ))
 
 /** 侧面板当前工作区：基础视图或某个浏览器网页（per-session Map）。 */
-export const agentDiffPanelTabAtom = atom<Map<string, AgentSidePanelTab | 'browser' | 'preview'>>(new Map())
+export const agentDiffPanelTabAtom = atom<Map<string, AgentSidePanelTab | 'preview'>>(new Map())
 
 /** 当前 renderer 运行期内的右侧双 Pane 状态；动态 Tab 失效时由 SidePanel 主动清理。 */
 export const agentSidePanelSplitMapAtom = atom<Map<string, RightWorkspaceSplitState>>(new Map())
