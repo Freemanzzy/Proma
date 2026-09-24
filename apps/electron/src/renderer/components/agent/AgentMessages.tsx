@@ -41,7 +41,6 @@ import { Spinner } from '@/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { groupIntoTurns, AssistantLogo, MessageGroupRenderer, getGroupId, getGroupPreview, extractUserText, buildTaskProgressDataForTurn, type MessageGroup } from './SDKMessageRenderer'
 import { buildLiveGroupSet } from './live-group-set'
-import { AgentBrowserLinkProvider } from '@/components/browser/AgentBrowserLinkProvider'
 import { AgentHistorySelectionLayer } from './AgentHistorySelectionLayer'
 import { TaskProgressOverlay, type ContextCompactionProgress } from './TaskProgressOverlay'
 import { createMessageGroupRenderCache, groupMessagesForRendering } from './message-group-rendering'
@@ -1186,7 +1185,6 @@ export const AgentMessages = React.memo(function AgentMessages({
 
   return (
     <BasePathsProvider basePaths={messageBasePaths} sessionId={sessionId}>
-      <AgentBrowserLinkProvider sessionId={sessionId}>
         <div ref={historySelectionRootRef} className="relative flex min-h-0 flex-1 flex-col">
       <style>{`
         ::highlight(${AGENT_HISTORY_QUOTE_HIGHLIGHT_NAME}) {
@@ -1267,7 +1265,6 @@ export const AgentMessages = React.memo(function AgentMessages({
             explorationEnabled={explorationEnabled}
           />
         </div>
-      </AgentBrowserLinkProvider>
     </BasePathsProvider>
   )
 })

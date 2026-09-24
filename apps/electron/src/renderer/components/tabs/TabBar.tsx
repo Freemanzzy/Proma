@@ -10,7 +10,7 @@
 
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
-import { HelpCircle, Keyboard, Globe, PanelRight } from 'lucide-react'
+import { HelpCircle, Keyboard, PanelRight } from 'lucide-react'
 import {
   tabsAtom,
   activeTabIdAtom,
@@ -26,8 +26,6 @@ import {
   agentWorkspacesAtom,
   currentAgentSessionIdAtom,
   currentAgentWorkspaceIdAtom,
-  agentDiffPanelTabAtom,
-  getBrowserSidePanelTab,
   unviewedCompletedSessionIdsAtom,
 } from '@/atoms/agent-atoms'
 import { appModeAtom } from '@/atoms/app-mode'
@@ -41,8 +39,6 @@ import { useCloseTab } from '@/hooks/useCloseTab'
 import { cn } from '@/lib/utils'
 import { shortcutGuideOpenAtom } from '@/atoms/shortcut-guide'
 import { faqDialogOpenAtom } from '@/atoms/faq-dialog'
-import { browserPanelMinimizedMapAtom, browserPanelOpenMapAtom, browserStateMapAtom } from '@/atoms/browser-atoms'
-// 浏览器入口对所有 Agent 会话开放；来源限制由主进程浏览器策略处理。
 
 export function TabBar(): React.ReactElement {
   const tabs = useAtomValue(tabsAtom)
@@ -230,40 +226,13 @@ function TabBarInner({
   const setFaqDialogOpen = useSetAtom(faqDialogOpenAtom)
   const activeTab = React.useMemo(() => tabs.find((t) => t.id === activeTabId), [tabs, activeTabId])
   const agentSessions = useAtomValue(agentSessionsAtom)
-  const activeAgentSession = activeTab?.type === 'agent'
-    ? agentSessions.find((session) => session.id === activeTab.sessionId)
-    : undefined
-  const showBrowserButton = Boolean(activeAgentSession)
   const showOpenPanelButton = !isPanelOpen && activeTab?.type === 'agent'
-  const [browserOpenMap, setBrowserOpenMap] = useAtom(browserPanelOpenMapAtom)
-  const browserMinimizedMap = useAtomValue(browserPanelMinimizedMapAtom)
-  const setBrowserMinimizedMap = useSetAtom(browserPanelMinimizedMapAtom)
-  const browserStateMap = useAtomValue(browserStateMapAtom)
-  const setBrowserStateMap = useSetAtom(browserStateMapAtom)
-  const setSidePanelTabMap = useSetAtom(agentDiffPanelTabAtom)
-  const hasMinimizedBrowser = Boolean(activeAgentSession && browserStateMap.has(activeAgentSession.id) && browserMinimizedMap.get(activeAgentSession.id) === true)
-  const actionLayout = getTabBarActionLayout(showOpenPanelButton, showBrowserButton)
+  const actionLayout = getTabBarActionLayout(showOpenPanelButton)
 
   const togglePanel = React.useCallback(() => {
     if (!isAgentContextTab(activeTab)) return
     setSidePanelOpen(!isPanelOpen)
   }, [activeTab, isPanelOpen, setSidePanelOpen])
-
-  const openBrowser = React.useCallback(async () => {
-    if (!activeAgentSession) return
-    const open = (window.electronAPI as Partial<typeof window.electronAPI>).openAgentBrowser
-    if (typeof open !== 'function') return
-    const state = await open(activeAgentSession.id)
-    setBrowserStateMap((previous) => { const next = new Map(previous); next.set(activeAgentSession.id, state); return next })
-    setBrowserMinimizedMap((previous) => { const next = new Map(previous); next.delete(activeAgentSession.id); return next })
-    setBrowserOpenMap((previous) => { const next = new Map(previous); next.set(activeAgentSession.id, true); return next })
-    setSidePanelOpen(true)
-    setSidePanelTabMap((previous) => {
-      const next = new Map(previous)
-      next.set(activeAgentSession.id, getBrowserSidePanelTab(state.activeTabId))
-      return next
-    })
-  }, [activeAgentSession, setBrowserMinimizedMap, setBrowserOpenMap, setBrowserStateMap, setSidePanelOpen, setSidePanelTabMap])
 
   const openShortcutGuide = React.useCallback(() => {
     setShortcutGuideOpen(true)
@@ -445,9 +414,6 @@ function TabBarInner({
 
       <ShortcutGuideButton
         positionClassName={actionLayout.shortcutPositionClassName}
-        showBrowserButton={showBrowserButton}
-        hasMinimizedBrowser={hasMinimizedBrowser}
-        onOpenBrowser={openBrowser}
         onOpen={openShortcutGuide}
         onOpenFaq={openFaqDialog}
       />
@@ -463,16 +429,10 @@ function TabBarInner({
 
 function ShortcutGuideButton({
   positionClassName,
-  showBrowserButton,
-  hasMinimizedBrowser,
-  onOpenBrowser,
   onOpen,
   onOpenFaq,
 }: {
   positionClassName: string
-  showBrowserButton: boolean
-  hasMinimizedBrowser: boolean
-  onOpenBrowser: () => void
   onOpen: () => void
   onOpenFaq: () => void
 }): React.ReactElement {
@@ -502,28 +462,6 @@ function ShortcutGuideButton({
         </TooltipContent>
       </Tooltip>
 
-      {showBrowserButton && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className={cn(
-                'h-7 w-7',
-                hasMinimizedBrowser && 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary',
-              )}
-              onClick={() => void onOpenBrowser()}
-            >
-              <Globe className="size-3.5" />
-              <span className="sr-only">打开受管浏览器</span>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            <p>打开受管浏览器</p>
-          </TooltipContent>
-        </Tooltip>
-      )}
       <Tooltip>
         <TooltipTrigger asChild>
           <Button

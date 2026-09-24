@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import { X, ExternalLink, ChevronRight, MoreHorizontal, FolderSearch, Pencil, FolderInput, GitBranch, GitMerge, MessageSquarePlus, FileDiff, FileText, FolderOpen, Globe, MessageCircle, Brain, Split, Blocks, CalendarDays, ListTodo, Clock, ServerCog, SquareTerminal, Terminal } from 'lucide-react'
+import { X, ExternalLink, ChevronRight, MoreHorizontal, FolderSearch, Pencil, FolderInput, GitBranch, GitMerge, MessageSquarePlus, FileDiff, FileText, FolderOpen, MessageCircle, Brain, Split, Blocks, CalendarDays, ListTodo, Clock, ServerCog, SquareTerminal, Terminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -71,8 +71,6 @@ import {
   agentSidePanelSplitRatioMapAtom,
 } from '@/atoms/agent-atoms'
 import {
-  getBrowserSidePanelTab,
-  getBrowserTabIdFromSidePanelTab,
   getDelegationSidePanelTab,
   getExplorationSessionIdFromSidePanelTab,
   getExplorationSidePanelTab,
@@ -89,13 +87,6 @@ import { AutomationFormView } from '@/components/automation/AutomationFormView'
 import { automationFormAtom } from '@/atoms/automation-atoms'
 import { memoryFileNavigationAtom, workspaceMemoryChangesAtom } from '@/atoms/memory-change-atoms'
 import { agentSideChatMapAtom } from '@/atoms/chat-atoms'
-import {
-  browserPanelMinimizedMapAtom,
-  browserPanelOpenMapAtom,
-  browserPendingNavigationMapAtom,
-  browserStateMapAtom,
-} from '@/atoms/browser-atoms'
-import { BrowserPanel } from '@/components/browser/BrowserPanel'
 import {
   getPreviewFileId,
   previewContentRefreshVersionAtom,
@@ -132,14 +123,6 @@ import {
   selectRightWorkspaceSplitTab,
 } from '@/lib/right-workspace-split'
 import type { RightWorkspacePane, RightWorkspaceSplitState } from '@/lib/right-workspace-split'
-
-function BrowserTabIcon({ favicon }: { favicon?: string }): React.ReactElement {
-  const [loadFailed, setLoadFailed] = React.useState(false)
-  React.useEffect(() => setLoadFailed(false), [favicon])
-
-  if (!favicon || loadFailed) return <Globe className="size-3.5" />
-  return <img src={favicon} alt="" aria-hidden="true" referrerPolicy="no-referrer" className="size-3.5 shrink-0 rounded-sm object-contain" onError={() => setLoadFailed(true)} />
-}
 
 function MeasuredWorkspacePane({ children }: { children: (width: number) => React.ReactNode }): React.ReactElement {
   const ref = React.useRef<HTMLDivElement>(null)
@@ -505,8 +488,6 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   const selectedFilePath = currentPreviewFile?.filePath
 
   const openPreview = useOpenPreview()
-  const setBrowserOpenMap = useSetAtom(browserPanelOpenMapAtom)
-  const setBrowserMinimizedMap = useSetAtom(browserPanelMinimizedMapAtom)
 
   // 用 ref 存 basePaths 相关值，避免声明顺序问题
   const basePathsRef = React.useRef<string[]>([])
@@ -1059,90 +1040,6 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     }
   }, [activeTab, returnToPreviousTabAfterClose, sessionId, sessions, setSideDelegationMap, sideDelegationSessionId])
 
-  // 浏览器状态由 MainArea 的全局订阅同步到 atom；右侧工作区只负责呈现和显式打开。
-  // 这样切换文件/改动时 BrowserSlot 会正确隐藏原生 WebContentsView，而不会销毁网页会话。
-  const browserStateMap = useAtomValue(browserStateMapAtom)
-  const setBrowserStateMap = useSetAtom(browserStateMapAtom)
-  const setPendingNavigationMap = useSetAtom(browserPendingNavigationMapAtom)
-  const browserState = browserStateMap.get(sessionId) ?? null
-  const openingBrowserSessionRef = React.useRef<string | null>(null)
-  // 右侧 Tab 可被快速连续点击。队列必须同时按 Session/epoch 隔离；SidePanel
-  // 组件会跨 Session 复用，旧 Session 的异步 IPC 绝不能消费新 Session 的 tabId。
-  const browserSelectionQueueRef = React.useRef({ sessionId, epoch: 0, desiredTabId: null as string | null, running: false })
-  if (browserSelectionQueueRef.current.sessionId !== sessionId) {
-    browserSelectionQueueRef.current = {
-      sessionId,
-      epoch: browserSelectionQueueRef.current.epoch + 1,
-      desiredTabId: null,
-      running: false,
-    }
-  }
-
-  const publishBrowserState = React.useCallback((state: NonNullable<typeof browserState>) => {
-    setBrowserStateMap((previous) => {
-      const next = new Map(previous)
-      next.set(sessionId, state)
-      return next
-    })
-    setBrowserMinimizedMap((previous) => {
-      const next = new Map(previous)
-      next.delete(sessionId)
-      return next
-    })
-    setBrowserOpenMap((previous) => {
-      const next = new Map(previous)
-      next.set(sessionId, true)
-      return next
-    })
-  }, [sessionId, setBrowserMinimizedMap, setBrowserOpenMap, setBrowserStateMap])
-
-  const ensureBrowserOpen = React.useCallback(async () => {
-    if (openingBrowserSessionRef.current === sessionId) return null
-    const open = (window.electronAPI as Partial<typeof window.electronAPI>).openAgentBrowser
-    if (typeof open !== 'function') return null
-    openingBrowserSessionRef.current = sessionId
-    try {
-      const state = await open(sessionId)
-      publishBrowserState(state)
-      return state
-    } catch (error) {
-      console.error('[SidePanel] 打开受管浏览器失败:', error)
-      return null
-    } finally {
-      if (openingBrowserSessionRef.current === sessionId) openingBrowserSessionRef.current = null
-    }
-  }, [publishBrowserState, sessionId])
-
-  const flushBrowserTabSelection = React.useCallback(() => {
-    const queue = browserSelectionQueueRef.current
-    if (queue.sessionId !== sessionId || queue.running) return
-    queue.running = true
-    const runEpoch = queue.epoch
-    void (async () => {
-      try {
-        while (true) {
-          const current = browserSelectionQueueRef.current
-          if (current.sessionId !== sessionId || current.epoch !== runEpoch) return
-          const targetTabId = current.desiredTabId
-          if (!targetTabId) return
-          current.desiredTabId = null
-          const state = await window.electronAPI.selectAgentBrowserTab({ sessionId, tabId: targetTabId })
-          const latest = browserSelectionQueueRef.current
-          if (latest.sessionId !== sessionId || latest.epoch !== runEpoch) return
-          publishBrowserState(state)
-        }
-      } catch (error) {
-        console.error('[SidePanel] 切换受管浏览器标签失败:', error)
-      } finally {
-        const current = browserSelectionQueueRef.current
-        if (current.sessionId !== sessionId || current.epoch !== runEpoch) return
-        current.running = false
-        // 请求完成的瞬间可能又点击了其他标签，继续落到最终目标。
-        if (current.desiredTabId) flushBrowserTabSelection()
-      }
-    })()
-  }, [publishBrowserState, sessionId])
-
   const markDelegationSessionViewed = React.useCallback((childSessionId: string) => {
     setUnviewedDelegatedCompleted((prev) => markSessionCompletionViewed(prev, childSessionId))
   }, [setUnviewedDelegatedCompleted])
@@ -1178,34 +1075,13 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
         })
       }
     }
-    const browserTabId = getBrowserTabIdFromSidePanelTab(tab)
-    if (split) updateSplit(selectRightWorkspaceSplitTab(split, tab))
-    onTabChange(tab)
-    if (!browserTabId) return
-    const queue = browserSelectionQueueRef.current
-    if (queue.sessionId !== sessionId) return
-    queue.desiredTabId = browserTabId
-    flushBrowserTabSelection()
-  }, [flushBrowserTabSelection, markDelegationSessionViewed, onTabChange, previewFiles, sessionId, setPreviewFileMap, sideChatConversationId, sideDelegationSessionId, sideTemporaryAgents, split, updateSplit])
+  }, [markDelegationSessionViewed, onTabChange, previewFiles, sessionId, setPreviewFileMap, sideChatConversationId, sideDelegationSessionId, sideTemporaryAgents])
 
-  // Agent/浏览器等外部事件仍只更新兼容 activeTab；分屏时把新目标落到当前焦点 Pane。
+  // 外部事件仍只更新兼容 activeTab；分屏时把新目标落到当前焦点 Pane。
   React.useEffect(() => {
     if (!split || getFocusedRightWorkspaceTab(split) === effectiveActiveTab) return
     updateSplit(selectRightWorkspaceSplitTab(split, effectiveActiveTab))
   }, [effectiveActiveTab, split, updateSplit])
-
-  const handleOpenBrowserTab = React.useCallback(async () => {
-    try {
-      const state = browserState
-        ? await window.electronAPI.createAgentBrowserTab({ sessionId })
-        : await ensureBrowserOpen()
-      if (!state) return
-      publishBrowserState(state)
-      handleWorkspaceTabChange(getBrowserSidePanelTab(state.activeTabId))
-    } catch (error) {
-      console.error('[SidePanel] 新建受管浏览器标签失败:', error)
-    }
-  }, [browserState, ensureBrowserOpen, handleWorkspaceTabChange, publishBrowserState, sessionId])
 
   const handleOpenTerminal = React.useCallback((cwd?: string, title = '终端') => {
     const terminalId = crypto.randomUUID()
@@ -1225,62 +1101,11 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     handleOpenTerminal(directoryPath, `终端 · ${directoryName}`)
   }, [handleOpenTerminal])
 
-  const handleCloseBrowserTab = React.useCallback(async (browserTabId: string): Promise<boolean> => {
-    try {
-      const state = await window.electronAPI.closeAgentBrowserTab({ sessionId, tabId: browserTabId })
-      if (state) {
-        publishBrowserState(state)
-        if (getBrowserTabIdFromSidePanelTab(activeTab) === browserTabId) {
-          handleWorkspaceTabChange(getPreviousTabBeforeClose(getBrowserSidePanelTab(browserTabId)))
-        } else {
-          getPreviousTabBeforeClose(getBrowserSidePanelTab(browserTabId))
-        }
-        return true
-      }
-      setBrowserOpenMap((previous) => {
-        const next = new Map(previous)
-        next.set(sessionId, false)
-        return next
-      })
-      setBrowserMinimizedMap((previous) => {
-        const next = new Map(previous)
-        next.delete(sessionId)
-        return next
-      })
-      setBrowserStateMap((previous) => {
-        const next = new Map(previous)
-        next.delete(sessionId)
-        return next
-      })
-      setPendingNavigationMap((previous) => {
-        const next = new Map(previous)
-        next.delete(sessionId)
-        return next
-      })
-      returnToPreviousTabAfterClose(getBrowserSidePanelTab(browserTabId))
-      return true
-    } catch (error) {
-      console.error('[SidePanel] 关闭受管浏览器标签失败:', error)
-      return false
-    }
-  }, [activeTab, getPreviousTabBeforeClose, handleWorkspaceTabChange, publishBrowserState, returnToPreviousTabAfterClose, sessionId, setBrowserMinimizedMap, setBrowserOpenMap, setBrowserStateMap, setPendingNavigationMap])
-
-  const activeBrowserTabId = getBrowserTabIdFromSidePanelTab(effectiveActiveTab)
-  React.useEffect(() => {
-    if (activeBrowserTabId && !browserState?.tabs.some((tab) => tab.tabId === activeBrowserTabId)) {
-      returnToPreviousTabAfterClose(getBrowserSidePanelTab(activeBrowserTabId))
-    }
-  }, [activeBrowserTabId, browserState?.tabs, returnToPreviousTabAfterClose])
-
-  const showBrowserActivity = Boolean(browserState?.activity && browserState.executionSource !== 'user')
-  // WebContentsView 是原生子视图，会盖住 renderer 的 portal。加号菜单打开时，
-  // BrowserPanel 为它保留一个固定避让区，而非 setVisible(false)。
   React.useEffect(() => {
     if (activeTab !== 'todos' && activeTab !== 'calendar' && activeTab !== 'vault') return
     if (!isWorkspaceComponentEnabled(activeTab)) onTabChange('files')
   }, [activeTab, isWorkspaceComponentEnabled, onTabChange])
 
-  const [isAddTabMenuOpen, setIsAddTabMenuOpen] = React.useState(false)
   const workspaceTabs = React.useMemo<WorkspacePanelTab[]>(() => [
     { id: 'files', label: '文件', icon: <FolderOpen className="size-3.5" /> },
     { id: 'changes', label: '改动', icon: <FileDiff className="size-3.5" /> },
@@ -1322,15 +1147,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       status: selectedDelegationStatus,
       closable: true,
     }] : []),
-    ...(browserState?.tabs.map((tab) => ({
-      id: getBrowserSidePanelTab(tab.tabId),
-      label: tab.title || '新建标签页',
-      icon: <BrowserTabIcon favicon={tab.favicon} />,
-      // 用户可关闭任何浏览器标签；关闭 Agent 工作标签后，后续未指定 tabId 的工具会提示新建或选择工作标签。
-      closable: true,
-      activity: showBrowserActivity && activeBrowserTabId !== tab.tabId && browserState.activeTabId === tab.tabId,
-    })) ?? []),
-  ], [activeBrowserTabId, browserState, previewFiles, selectedDelegationSession, selectedDelegationStatus, sessions, showBrowserActivity, sideChatConversationId, sideTemporaryAgents, terminalTabs, workspaceComponentTabs])
+  ], [previewFiles, selectedDelegationSession, selectedDelegationStatus, sessions, sideChatConversationId, sideTemporaryAgents, terminalTabs, workspaceComponentTabs])
   workspaceTabsRef.current = workspaceTabs
 
   React.useEffect(() => {
@@ -1379,9 +1196,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     const explorationSessionId = getExplorationSessionIdFromSidePanelTab(tab)
     if (explorationSessionId) { handleCloseExplorationTab(explorationSessionId); return }
     if (tab === 'delegation') { handleCloseDelegationTab(); return }
-    const browserTabId = getBrowserTabIdFromSidePanelTab(tab)
-    if (browserTabId) void handleCloseBrowserTab(browserTabId)
-  }, [exitSplitInsteadOfClosingBoundTab, handleCloseBrowserTab, handleCloseChatTab, handleCloseDelegationTab, handleCloseExplorationTab, handleClosePreviewTab, returnToPreviousTabAfterClose, sessionId, setTerminalTabsMap, setWorkspaceComponentTabs])
+  }, [exitSplitInsteadOfClosingBoundTab, handleCloseChatTab, handleCloseDelegationTab, handleCloseExplorationTab, handleClosePreviewTab, returnToPreviousTabAfterClose, sessionId, setTerminalTabsMap, setWorkspaceComponentTabs])
 
   React.useEffect(() => {
     const handleCloseActiveWorkspaceTab = (event: Event) => {
@@ -1548,7 +1363,6 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     const panePreviewId = getPreviewIdFromSidePanelTab(paneTab)
     const panePreviewFile = (panePreviewId ? previewFiles.find((file) => getPreviewFileId(file) === panePreviewId) : null)
       ?? previewFileMap.get(sessionId) ?? null
-    const paneBrowserTabId = getBrowserTabIdFromSidePanelTab(paneTab)
     const paneExplorationSessionId = getExplorationSessionIdFromSidePanelTab(paneTab)
     const paneExplorationBranch = paneExplorationSessionId
       ? sideTemporaryAgents.find((branch) => branch.sessionId === paneExplorationSessionId) ?? null
@@ -1581,23 +1395,6 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     return (
     panePreviewId && panePreviewFile ? (
       <div className="min-h-0 flex-1 overflow-hidden"><PreviewPanel sessionId={sessionId} file={panePreviewFile} onClose={() => handleClosePreviewTab(panePreviewId)} /></div>
-    ) : paneBrowserTabId ? (
-      browserState && browserState.tabs.some((tab) => tab.tabId === paneBrowserTabId) ? (
-        tabDrag ? (
-          <div className="flex flex-1 items-center justify-center bg-muted/15 text-xs text-muted-foreground">释放后恢复浏览器视图</div>
-        ) : (
-          <div className="min-h-0 flex-1 overflow-hidden">
-            <BrowserPanel
-              sessionId={sessionId}
-              tabId={paneBrowserTabId}
-              state={browserState}
-              isAddTabMenuOpen={isAddTabMenuOpen}
-            />
-          </div>
-        )
-      ) : (
-        <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">浏览器标签已关闭</div>
-      )
     ) : paneTab === 'chat' ? (
       sideChatConversationId ? (
         <div className="min-h-0 flex-1 overflow-hidden">
@@ -1790,8 +1587,6 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
             activeTab={effectiveActiveTab}
             onTabChange={handleWorkspaceTabChange}
             onCloseTab={handleCloseWorkspaceTab}
-            onOpenBrowser={() => void handleOpenBrowserTab()}
-            onAddTabMenuOpenChange={setIsAddTabMenuOpen}
             onOpenFile={() => handleWorkspaceTabChange('files')}
             onOpenTerminal={handleOpenTerminal}
             onOpenWorkspaceComponent={(component) => {

@@ -44,7 +44,6 @@ import { buildAgentHistoryQuoteLabel, parseAgentHistoryQuoteMention } from '@/li
 import { createMentionPattern } from '@/lib/mention-patterns'
 import { resolveSkillMentionName } from '@/lib/skill-mention-name'
 import { useSkillMentionNames } from '@/components/agent/SkillMentionNamesProvider'
-import { useAgentBrowserLink } from '@/components/browser/AgentBrowserLinkProvider'
 import type { HTMLAttributes, ComponentProps, ReactNode } from 'react'
 import type { FileAttachment } from '@proma/shared'
 import type { QuotedSelection } from '@/atoms/preview-atoms'
@@ -550,7 +549,6 @@ const MarkdownLink = React.memo(function MarkdownLink({
   children: linkChildren,
   ...linkProps
 }: React.AnchorHTMLAttributes<HTMLAnchorElement>): React.ReactElement {
-  const agentBrowserLink = useAgentBrowserLink()
   const pathResolutionContext = React.useContext(BasePathsContext)
   const contextBasePaths = pathResolutionContext?.basePaths
   // mention:// 协议 → 渲染为 MentionChip
@@ -580,8 +578,7 @@ const MarkdownLink = React.memo(function MarkdownLink({
       onClick={(e) => {
         e.preventDefault()
         if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
-          if (agentBrowserLink) agentBrowserLink.openLink(href)
-          else void window.electronAPI.openExternal(href)
+          void window.electronAPI.openExternal(href)
         }
       }}
       title={href}
