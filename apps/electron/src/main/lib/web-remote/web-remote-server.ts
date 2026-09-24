@@ -5,6 +5,7 @@ import { agentEventBus, isAgentSessionActive, listActiveAgentSessionSnapshots, q
 import { getAgentSessionMeta, getAgentSessionSDKMessages, listAgentSessions } from '../agent-session-manager'
 import { listAgentWorkspaces } from '../agent-workspace-manager'
 import { permissionService } from '../agent-permission-service'
+import { redactSensitiveLogValue } from '../bridge-log-redaction'
 import type { PermissionRequest } from '@proma/shared'
 import { WebRemoteAuth, makeAuthCookie, parseCookieHeader, type WebRemoteConfig } from './web-remote-auth'
 import { WebRemoteEventHub } from './web-remote-events'
@@ -313,7 +314,7 @@ export class WebRemoteServer {
       triggeredBy: 'external',
     }, {
       source: 'web-remote',
-      onError: (error) => console.error('[Web Remote] Agent 运行失败:', error),
+      onError: (error) => console.error('[Web Remote] Agent 运行失败:', redactSensitiveLogValue(error)),
       onComplete: () => {},
       onTitleUpdated: () => {},
     })
