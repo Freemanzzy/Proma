@@ -84,6 +84,7 @@ export const TOOL_ICONS: Record<string, LucideIcon> = {
   ReadMcpResourceTool: Database,
   ListMcpResourcesTool: Server,
   SendMessage: Send,
+  EgoBrowser: Globe,
   BrowserObserve: Globe,
   BrowserFind: Search,
   BrowserNavigate: Globe,
@@ -160,6 +161,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   ReadMcpResourceTool: '读取 MCP 资源',
   ListMcpResourcesTool: '列出 MCP 资源',
   SendMessage: '发送消息',
+  EgoBrowser: '操作 ego 浏览器',
   BrowserObserve: '查看受管浏览器',
   BrowserFind: '语义定位网页元素',
   BrowserNavigate: '打开网页',
@@ -247,6 +249,14 @@ export function getInputSummary(
         return query.length > 60 ? query.slice(0, 60) + '…' : query
       }
       return null
+    }
+
+    case 'EgoBrowser': {
+      const script = input.script
+      if (typeof script !== 'string') return null
+      const gotoMatch = script.match(/\bgoto\s*\(\s*(['"`])([^'"`]+)\1/)
+      const summary = gotoMatch?.[2] ?? script.split(/\r?\n/, 1)[0]?.trim() ?? ''
+      return summary.length > 80 ? `${summary.slice(0, 80)}…` : summary
     }
 
     case 'BrowserNavigate': {

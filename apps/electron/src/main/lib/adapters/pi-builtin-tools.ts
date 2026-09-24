@@ -42,6 +42,7 @@ import { downloadInstaller, launchInstaller } from '../installer-downloader'
 import { fetchInstallerManifest, findInstallerSource } from '../installer-manifest'
 import { shouldOfferWindowsShellInstaller } from './windows-shell-installer'
 import { buildPiCollaborationTools } from '../agent-collaboration-tools'
+import { buildEgoBrowserTools } from './pi-ego-browser-tool'
 import { serializePiToolResultPayload } from './pi-tool-result-json'
 import { configureWorkspaceMcp, listWorkspaceMcpServers } from '../mcp-configuration-service'
 import { getVisionRelayRouteLabel, inspectImageWithVisionRelay, isVisionRelayConfigured, isVisionRelayEligibleForModel } from '../vision-relay-service'
@@ -1285,6 +1286,13 @@ export async function buildPiBuiltinTools(
     tools.push(...buildVisionRelayTools(sdk, ctx))
   } catch (error) {
     console.error('[Pi 桥接] 注入视觉助手失败:', error)
+  }
+
+  // ego-browser 未安装时不暴露工具，也不在提示词中宣称支持它。
+  try {
+    tools.push(...buildEgoBrowserTools(sdk))
+  } catch (error) {
+    console.error('[Pi 桥接] 注入 EgoBrowser 工具失败:', error)
   }
 
   const cloudTools = buildPromaCloudTools(sdk, ctx)
