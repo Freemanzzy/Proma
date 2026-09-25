@@ -1,5 +1,6 @@
 /* Browser substitute for the small Electron surface imported by preload/index.ts. */
 const TYPE_KEY = '__proma_web_remote_type'
+if (typeof window !== 'undefined') (window as Window & { __PROMA_WEB_REMOTE__?: boolean }).__PROMA_WEB_REMOTE__ = true
 
 interface Listener { (event: { sender: Window }, value: unknown): void }
 

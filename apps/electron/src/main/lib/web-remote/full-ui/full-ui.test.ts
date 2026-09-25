@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { getWebRemoteDeniedError } from './denied-channels'
 import { WebRemoteRegistrationTable } from './registration-table'
+import { prepareWebRemoteFullUi } from './prepare'
 import { decodeWebRemoteValue, encodeWebRemoteValue } from './serialization'
 
 describe('web remote full-ui spike', () => {
@@ -23,5 +24,26 @@ describe('web remote full-ui spike', () => {
     invokes.set('demo:invoke', async () => 'ok')
     events.set('demo:event', () => {})
     expect({ invoke: invokes.size, event: events.size }).toEqual({ invoke: 1, event: 1 })
+  })
+
+  test('installs synchronously before later handler registration', () => {
+    const registered: Record<string, Function> = {}
+    const target = {
+      handle(channel: string, listener: Function) { registered[`handle:${channel}`] = listener },
+      on(channel: string, listener: Function) { registered[`on:${channel}`] = listener },
+    }
+    const previous = process.env.PROMA_WEB_REMOTE
+    process.env.PROMA_WEB_REMOTE = '1'
+    try {
+      const bridge = prepareWebRemoteFullUi(target, { enabled: true, fullUi: true })
+      expect(bridge).toBeTruthy()
+      target.handle('demo:invoke', async () => 'ok')
+      target.on('demo:event', () => {})
+      expect(bridge?.getRegistrationCounts()).toEqual({ invoke: 1, event: 1 })
+      expect(typeof registered['handle:demo:invoke']).toBe('function')
+    } finally {
+      if (previous === undefined) delete process.env.PROMA_WEB_REMOTE
+      else process.env.PROMA_WEB_REMOTE = previous
+    }
   })
 })

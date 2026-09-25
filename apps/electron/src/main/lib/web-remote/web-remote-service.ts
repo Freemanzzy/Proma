@@ -2,6 +2,8 @@ import { getConfigDirName } from '../config-paths'
 import { readWebRemoteConfig, getWebRemoteConfigPath, getWebRemoteDataDir, WebRemoteAuth, type WebRemoteConfig } from './web-remote-auth'
 import { WebRemoteServer } from './web-remote-server'
 import { setWebRemoteEventHub, notifyWebRemoteInteractionResolved } from './web-remote-events'
+import { getWebRemoteIpcBridge } from './full-ui/web-remote-ipc'
+export { prepareWebRemoteFullUi } from './full-ui/prepare'
 
 let server: WebRemoteServer | null = null
 
@@ -9,15 +11,7 @@ export function isWebRemoteEnabled(config: WebRemoteConfig): boolean {
   return process.env.PROMA_WEB_REMOTE === '1' && config.enabled === true
 }
 
-export async function prepareWebRemoteFullUi(): Promise<void> {
-  if (!isWebRemoteRuntimeAllowed()) return
-  const config = readWebRemoteConfig()
-  if (isWebRemoteEnabled(config) && config.fullUi === true) {
-    const { installWebRemoteIpcCapture } = await import('./full-ui/web-remote-ipc')
-    installWebRemoteIpcCapture()
-  }
-}
-
+// prepareWebRemoteFullUi lives in full-ui/prepare.ts to keep service tests Electron-free.
 export function isWebRemoteConfigDirAllowed(configDirName: string, allowProd = process.env.PROMA_WEB_REMOTE_ALLOW_PROD === '1'): boolean {
   return configDirName === '.proma-dev' || allowProd
 }
@@ -33,9 +27,7 @@ export async function startWebRemoteIfEnabled(): Promise<void> {
   const config = readWebRemoteConfig()
   if (!isWebRemoteEnabled(config)) return
   if (server) return
-  const ipcBridge = config.fullUi === true
-    ? (await import('./full-ui/web-remote-ipc')).getWebRemoteIpcBridge() ?? undefined
-    : undefined
+  const ipcBridge = config.fullUi === true ? getWebRemoteIpcBridge() ?? undefined : undefined
   const candidate = new WebRemoteServer({
     config,
     auth: new WebRemoteAuth(config, getWebRemoteDataDir()),

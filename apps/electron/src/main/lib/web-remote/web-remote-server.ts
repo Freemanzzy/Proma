@@ -15,6 +15,7 @@ import { WebRemoteEventHub } from './web-remote-events'
 import { toWebRemoteHistory, toWebRemotePermissionRequest, type WebRemoteEvent } from './web-remote-dto'
 import { renderWebRemoteIcon, renderWebRemoteManifest, renderWebRemoteStatic } from './web-remote-static'
 import type { WebRemoteIpcBridge } from './full-ui/web-remote-ipc'
+import { renderWebRemoteMobilePatch } from './full-ui/mobile-patch'
 
 const MAX_BODY_BYTES = 100_000
 const MAX_MESSAGE_CHARS = 50_000
@@ -318,6 +319,7 @@ export class WebRemoteServer {
       let html = body.toString('utf8')
       html = html.replace(/<script>([\s\S]*?)<\/script>/, `<script nonce="${nonce}">$1</script>`)
       html = html.replace(/<script type="module"/, '<script src="/app/preload.js"></script><script type="module"')
+      html = html.replace('</body>', renderWebRemoteMobilePatch().replaceAll('__PROMA_NONCE__', nonce) + '</body>')
       body = Buffer.from(html)
       headers['Content-Type'] = 'text/html; charset=utf-8'
       headers['Content-Security-Policy'] = `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data: blob:; font-src 'self' data:; base-uri 'none'; frame-ancestors 'none'`

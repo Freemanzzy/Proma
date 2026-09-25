@@ -1,4 +1,4 @@
-import { ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents } from 'electron'
+import type { IpcMainEvent, IpcMainInvokeEvent, WebContents } from 'electron'
 import WebSocket from 'ws'
 import { getMainWindow } from '../../main-window-store'
 import { getWebRemoteDeniedError } from './denied-channels'
@@ -39,7 +39,12 @@ function fakeEvent(sender: WebContents): IpcMainEvent & IpcMainInvokeEvent {
 }
 
 /** Captures existing ipcMain registrations while preserving normal Electron behavior. */
-export function installWebRemoteIpcCapture(): WebRemoteIpcBridge {
+export interface IpcMainCaptureTarget {
+  handle(channel: string, listener: InvokeHandler): void
+  on(channel: string, listener: EventHandler): unknown
+}
+
+export function installWebRemoteIpcCapture(ipcMain: IpcMainCaptureTarget): WebRemoteIpcBridge {
   if (activeBridge) return activeBridge
   const bridge = new WebRemoteIpcBridge()
   const target = ipcMain as unknown as {

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Menu, nativeTheme, protocol, screen, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, screen, shell } from 'electron'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
 import { existsSync } from 'fs'
@@ -712,9 +712,13 @@ async function bootstrap(): Promise<void> {
   const menu = createApplicationMenu()
   Menu.setApplicationMenu(menu)
 
-  // Register IPC handlers. Full UI spike 先捕获注册表，再照常交给 Electron。
-  prepareWebRemoteFullUi()
+  // Register IPC handlers. Full UI spike 必须在注册前同步捕获。
+  const fullUiBridge = prepareWebRemoteFullUi(ipcMain)
   registerIpcHandlers()
+  if (fullUiBridge) {
+    const counts = fullUiBridge.getRegistrationCounts()
+    console.log(`[Web Remote] full-ui 已登记 invoke=${counts.invoke} event=${counts.event}`)
+  }
 
   // 收敛上次退出时遗留的运行中委派子会话（内存态丢失，无法续跑）
   safeRun('markRunningDelegationsAsInterrupted', markRunningDelegationsAsInterrupted)
