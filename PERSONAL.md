@@ -304,3 +304,15 @@ python3 scripts/personal/import-proma-backup.py \\
 - 计划审批未完成：手机 harness 的新会话创建流程在开发实例报 `Cannot read properties of null (reading 'id')`，未出现计划审批卡；因此没有批准后 assistant 回复 `done` 的 IPC 历史与截图证据，不能将手机端审批标记为通过。测试中曾临时改动 `独立站/test` 的标题、权限与 Codex 快速模式，均已恢复核验为标题 `test`、权限“完全自动”、快速模式关闭；未保留额外会话标题。
 - 回归：typecheck 通过；Web Remote 定向测试 51 pass / 0 fail；build:main、build:renderer、web preload 均通过；全量测试为 523 pass / 5 fail / 1 error，与记录基线 523/5/1 相同。Harness smoke 两个视口均通过。
 - 清理：本轮 harness JSON 均记录 `revoked=true`、`chromeExited=true`、`profileRemoved=true`；`/tmp` 中 `proma-mobile-chrome-*` 剩余数量为 0。未操作 Tailscale、官方版进程或用户 Web Remote 配置字段。
+
+## 2026-09-26: Web Remote ExitPlan 手机审批卡修复与双视口验收
+
+- 根因（代码与运行证据）：full-ui IPC 桥原先将 `agent:stream:event` 设为 `denied`，因此 AskUser/ExitPlan 事件未从主窗口镜像到 `/app/` 手机 renderer；Renderer 已有 `onAgentStreamEvent` → `useGlobalAgentListeners` → pending atom → `ExitPlanModeBanner` 路径，卡片不是缺组件。另，harness 原创建通道按 session scope 校验，但新会话尚无 sessionId，无法通过授权并造成返回 ID 为 null；不能通过复用/改名/改模式已有会话绕过。
+- 修复：在桥接端允许 `agent:stream:event` 进入，但只镜像当前获准工作区会话中的 `permission_request/resolved`、`ask_user_request/resolved`、`exit_plan_mode_request/resolved`、`enter_plan_mode`、`plan_mode_changed`、`permission_mode_changed`；SDK 消息、增量与其他未知/未列出的事件仍拒绝。`agent:create-session` 改为授权工作区范围；创建后必须从会话清单差异取得真实 ID。（子会话曾将 Electron 包版本改为 0.19.58，父会话已撤销：个人版版本号必须与所跟随的官方正式版本一致，否则每周版本检查与切换判断会失真。）
+- 父会话复核补充（2026-09-26）：A1 起 `agent:stream:event` 被整体拒绝，手机端一直收不到实时输出（只在运行结束后刷新历史）。改为对已授权会话镜像全部流事件（SDK 消息、增量、审批/提问/计划事件），按 sessionId 所属工作区过滤；这些内容与该会话可读历史等价，不扩大暴露面。
+- Harness 安全修复：先选择“独立站”工作区，再用运行前后清单识别新会话；仅记录该次创建的 ID 可改标题/权限模式，null、缺失或已有 ID 均拒绝。新增单测覆盖 guard。运行前后逐项比较既有会话 ID、标题与权限模式。
+- iPhone UA 390×844：AskUser 卡片显示、选择 A、收到 AskUser request/resolved 同 requestId；ExitPlan 卡片显示并可见计划审批选项，审批前 pending ExitPlan 请求存在且活动运行快照仍存在（等待审批而非已停止），批准后 pending 清空、收到 request/resolved 同 requestId，Agent 继续并回复 `done`，最终模式为 `bypassPermissions`。截图在 `/tmp/proma-mobile-harness-exitplan-iphone-verified/`。
+- Android UA 412×915：同一交互全部通过；截图在 `/tmp/proma-mobile-harness-exitplan-android-verified/`。
+- 会话清单核对：iPhone 12→13，只增加专用会话 `4b6a0548…`；其余 12 项 ID/标题/权限模式完全相同。Android 13→14，只增加专用会话 `1b8d1224…`；其余 13 项完全相同。较早的 harness 尝试创建的 harness 测试会话仍保留，未改动 `test` 或任何已存在会话；不因“清理”而不可逆删除会话记录，若要删除这些专用测试会话需另行确认。
+- 收尾：两轮均记录设备撤销 `true`、临时 Chrome 进程退出 `true`、profile 删除 `true`、JavaScript exceptions `0`；另有 24 条 console error，均为通知音频预加载 XHR / 即时解码失败，未影响交互；没有停止/重启开发实例，没有操作官方版、`~/.proma` 或 Tailscale；未 commit、未 push。
+- 回归：workspace typecheck 通过；`build:main`、`build:preload`、`build:renderer` 通过；新增 guard 与 full-ui 安全测试均通过。全仓 `bun test`：527 pass、5 fail、1 error（Bun 报告 532 tests across 84 files）：失败项为 agent-session-manager/channel-runtime-api-key 缺少 Electron `dialog`/`shell` 命名导出、OAuth proxy scope 用例 rejected、proxy-settings-service 期望的 `redactProxyUrl` 导出缺失、planning-manager 测试拿到非字符串 Electron binary；未涉及本次修改文件，需在 Electron 测试环境中单独处理。

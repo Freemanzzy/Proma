@@ -11,6 +11,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
 import { setTimeout as delay } from 'node:timers/promises'
 import WebSocket from 'ws'
@@ -19,6 +20,11 @@ const REPO_ROOT = resolve(import.meta.dirname, '../..')
 const DEFAULT_OUTPUT_DIR = join(tmpdir(), 'proma-mobile-harness')
 let activeChrome = null
 let activeProfile = null
+
+export function assertOwnedSessionMutation(sessionId, createdSessionIds, operation) {
+  if (!sessionId || !createdSessionIds.has(sessionId)) throw new Error(`拒绝对本次运行新建会话以外的目标执行 ${operation}: ${sessionId ?? '(null)'}`)
+}
+
 const ANDROID_UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 7 Build/UP1A.231005.007) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36'
 
 function parseArgs(argv) {
@@ -263,6 +269,16 @@ async function createHarness(options) {
     : ANDROID_UA
   await client.command('Network.setUserAgentOverride', { userAgent, platform: options.userAgent === 'iphone' ? 'iPhone' : 'Android' })
   let activeSessionId = null
+  const createdSessionIds = new Set()
+  let sessionManifestBefore = null
+  let sessionManifestAfter = null
+  const readSessionManifest = async () => {
+    const sessions = await client.evaluate('window.electronAPI.listAgentSessions()')
+    return (Array.isArray(sessions) ? sessions : []).map((item) => ({ id: item?.id, title: item?.title, permissionMode: item?.permissionMode })).filter((item) => item.id).sort((a, b) => a.id.localeCompare(b.id))
+  }
+  const installInteractionStreamAudit = async () => {
+    return client.evaluate(`(() => { window.__PROMA_HARNESS_STREAM_EVENTS=[]; window.__PROMA_HARNESS_UNSUBSCRIBE_STREAM?.(); window.__PROMA_HARNESS_UNSUBSCRIBE_STREAM=window.electronAPI.onAgentStreamEvent((item)=>{ const event=item?.payload?.kind==='proma_event'?item.payload.event:null; if(event && ['ask_user_request','ask_user_resolved','exit_plan_mode_request','exit_plan_mode_resolved'].includes(event.type)) window.__PROMA_HARNESS_STREAM_EVENTS.push({sessionId:item.sessionId,type:event.type,requestId:event.request?.requestId??event.requestId}); }); return true; })()`)
+  }
   const navigate = async (path) => {
     const target = new URL(path, options.url).toString()
     const startedAt = Date.now()
@@ -303,16 +319,32 @@ async function createHarness(options) {
     return point
   }
   const createHarnessSession = async (title) => {
+    const workspaces = await client.evaluate('window.electronAPI.listAgentWorkspaces()')
+    const workspace = Array.isArray(workspaces) ? workspaces.find((item) => item?.name === '独立站') : null
+    if (!workspace?.id) throw new Error('找不到“独立站”工作区，拒绝在其他工作区创建 harness 会话')
+    const existingIds = new Set((await readSessionManifest()).map((item) => item.id))
     await openDrawer()
+    const currentWorkspaceId = await client.evaluate('window.electronAPI.getSettings().then((settings)=>settings?.agentWorkspaceId)')
+    if (currentWorkspaceId !== workspace.id) {
+      const workspaceHeading = await findElement(client, '独立站', '[data-web-remote-sidebar="left"] *')
+      await touchAt(client, workspaceHeading.x, workspaceHeading.y)
+      await waitUntil(client, `window.electronAPI.getSettings().then((settings)=>settings?.agentWorkspaceId===${quoteJs(workspace.id)})`, 10_000)
+    }
     const plus = await client.evaluate('(() => { const n=document.querySelector(\'button[aria-label="新建任务"]\'); if(!n)return null; const r=n.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()')
     if (!plus) throw new Error('手机端找不到新建任务按钮')
     await touchAt(client, plus.x, plus.y)
-    await delay(500)
     await waitUntil(client, 'Boolean(document.querySelector(\'textarea:not([disabled]),[contenteditable="true"]\'))', 10_000)
-    activeSessionId = null
-    return { id: null, title, workspaceId: null }
+    const created = await waitUntil(client, `window.electronAPI.listAgentSessions().then((items)=>items.find((item)=>item?.id&&!${JSON.stringify([...existingIds])}.includes(item.id)&&item.workspaceId===${quoteJs(workspace.id)}))`, 15_000)
+    if (!created?.id) throw new Error(`无法取得本次创建的会话 ID: ${JSON.stringify(created)}`)
+    createdSessionIds.add(created.id)
+    assertOwnedSessionMutation(created.id, createdSessionIds, '标题更新')
+    const renamed = await client.evaluate(`window.electronAPI.updateAgentSessionTitle(${quoteJs(created.id)}, ${quoteJs(title)})`)
+    if (renamed?.id !== created.id || renamed?.title !== title) throw new Error(`仅本次会话的标题更新失败: ${JSON.stringify(renamed)}`)
+    activeSessionId = created.id
+    return renamed
   }
   const setPermissionMode = async (mode) => {
+    assertOwnedSessionMutation(activeSessionId, createdSessionIds, '权限模式变更')
     if (mode !== 'plan' && mode !== 'bypassPermissions') throw new Error(`未知权限模式: ${mode}`)
     const targetLabel = mode === 'plan' ? '计划模式' : '完全自动'
     const current = await client.evaluate('document.querySelector(\'button[aria-label="计划模式"],button[aria-label="完全自动"]\')?.getAttribute("aria-label")')
@@ -463,6 +495,7 @@ async function createHarness(options) {
     await touchAt(client, approve.x, approve.y)
     return true
   }
+  const getInteractionStreamEvents = () => client.evaluate('window.__PROMA_HARNESS_STREAM_EVENTS ?? []')
   const freeze = () => client.command('Page.setWebLifecycleState', { state: 'frozen' })
   const resume = () => client.command('Page.setWebLifecycleState', { state: 'active' })
   const close = async () => {
@@ -474,7 +507,7 @@ async function createHarness(options) {
     activeChrome = null
     activeProfile = null
   }
-  return { client, chrome, profile, pair, navigate, loadMetrics, openDrawer, clickSidebarText, clickText, openSession, createHarnessSession, setPermissionMode, inputAndSend, waitText, readHistory, waitForUserSubmission, waitForAssistantReply, waitForRunning, waitForAbortedAssistant, resolveVisibleAskUserA, resolveVisiblePlanApproval, getActiveSessionId: () => activeSessionId, invokeApi, invokeRaw, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, close }
+  return { client, chrome, profile, pair, navigate, installInteractionStreamAudit, loadMetrics, openDrawer, clickSidebarText, clickText, openSession, createHarnessSession, setPermissionMode, inputAndSend, waitText, readHistory, waitForUserSubmission, waitForAssistantReply, waitForRunning, waitForAbortedAssistant, resolveVisibleAskUserA, resolveVisiblePlanApproval, getInteractionStreamEvents, getActiveSessionId: () => activeSessionId, getCreatedSessionIds: () => new Set(createdSessionIds), invokeApi, invokeRaw, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, readSessionManifest, close }
 }
 
 async function runRecovery(harness, options, result) {
@@ -508,11 +541,19 @@ async function runInteractions(harness, options, result) {
   const askReply = await harness.waitForAssistantReply(askMessage, 'A', 90_000)
   const askAnswerScreenshot = await harness.screenshot('ask-answer-a')
   result.screenshots.push(askAnswerScreenshot)
-  result.askUser = { cardVisible: true, selected: 'A', assistantContainsA: Boolean(askReply?.assistant), cardScreenshot: askCard, answerScreenshot: askAnswerScreenshot }
+  const askSessionId = harness.getActiveSessionId()
+  const askStreamEvents = await harness.getInteractionStreamEvents()
+  result.askUser = { cardVisible: true, selected: 'A', assistantContainsA: Boolean(askReply?.assistant), cardScreenshot: askCard, answerScreenshot: askAnswerScreenshot, interactionEvents: askStreamEvents.filter((event) => event.sessionId === askSessionId && event.type.startsWith('ask_user_')) }
+  if (!result.askUser.interactionEvents.some((event) => event.type === 'ask_user_request') || !result.askUser.interactionEvents.some((event) => event.type === 'ask_user_resolved')) throw new Error('AskUser 交互事件未完整通过手机镜像链路')
 
-  const planMessage = '请进入计划模式，写一个只有一步的计划：回复 done；然后提交审批'
+  const planMessage = '写一个只有一步的计划：回复 done，然后提交审批'
   await harness.inputAndSend(planMessage)
   await waitUntil(harness.client, `document.body.innerText.includes('Agent 计划待审批')`, 90_000)
+  const planSessionId = harness.getActiveSessionId()
+  const pendingAtApproval = await harness.invokeApi('getPendingRequests')
+  const pendingPlan = pendingAtApproval?.exitPlans?.find((request) => request?.sessionId === planSessionId)
+  const activeAtApproval = await harness.invokeApi('listActiveAgentSessionSnapshots')
+  const streamStillRunningForApproval = Array.isArray(activeAtApproval) && activeAtApproval.some((snapshot) => snapshot?.sessionId === planSessionId)
   const planCard = await harness.screenshot('exit-plan-approval')
   result.screenshots.push(planCard)
   const approve = await findElement(harness.client, '批准并完全自动执行', 'button')
@@ -520,7 +561,15 @@ async function runInteractions(harness, options, result) {
   const planReply = await harness.waitForAssistantReply(planMessage, 'done', 90_000)
   const planDoneScreenshot = await harness.screenshot('exit-plan-done')
   result.screenshots.push(planDoneScreenshot)
-  result.exitPlan = { approvalVisible: true, approved: true, assistantContainsDone: Boolean(planReply?.assistant), approvalScreenshot: planCard, doneScreenshot: planDoneScreenshot }
+  const interactionEvents = await harness.getInteractionStreamEvents()
+  const pendingAfterApproval = await harness.invokeApi('getPendingRequests')
+  const pendingPlanCleared = !pendingAfterApproval?.exitPlans?.some((request) => request?.sessionId === planSessionId)
+  const finalSessionMeta = (await harness.readSessionManifest()).find((session) => session.id === planSessionId)
+  result.exitPlan = { approvalVisible: true, approved: true, assistantContainsDone: Boolean(planReply?.assistant), approvalScreenshot: planCard, doneScreenshot: planDoneScreenshot, sessionId: planSessionId, pendingRequestCaptured: Boolean(pendingPlan), activeRunWaiting: streamStillRunningForApproval, pendingClearedAfterApproval: pendingPlanCleared, permissionModeAfterApproval: finalSessionMeta?.permissionMode, interactionEvents: interactionEvents.filter((event) => event.sessionId === planSessionId && event.type.startsWith('exit_plan_mode_')), cardText: await harness.client.evaluate('document.body.innerText.includes("Agent 计划待审批") ? "approval card was visible before approval" : "approval card closed after response"') }
+  if (!result.exitPlan.pendingRequestCaptured || !result.exitPlan.activeRunWaiting) throw new Error('计划审批等待状态不成立：缺少待处理请求或运行快照')
+  if (!result.exitPlan.pendingClearedAfterApproval) throw new Error('审批后 ExitPlan 待处理请求未清除')
+  if (!result.exitPlan.interactionEvents.some((event) => event.type === 'exit_plan_mode_request')) throw new Error('手机端未通过主窗口镜像收到 exit_plan_mode_request')
+  if (!result.exitPlan.interactionEvents.some((event) => event.type === 'exit_plan_mode_resolved')) throw new Error('手机端审批后未收到 exit_plan_mode_resolved')
 }
 
 async function runAbort(harness, options, result) {
@@ -725,7 +774,9 @@ async function main() {
     deviceId = paired.deviceId
     result.pairedDeviceId = deviceId
     const secondAppLoad = await harness.navigate('/app/')
+    await harness.installInteractionStreamAudit()
     result.loadMetrics = { first: paired.firstAppLoad, second: secondAppLoad }
+    result.sessionManifestBefore = await harness.readSessionManifest()
     if (options.suite === 'smoke') await runSmoke(harness, options, result)
     else if (options.suite === 'recovery') await runRecovery(harness, options, result)
     else if (options.suite === 'interactions') await runInteractions(harness, options, result)
@@ -738,6 +789,24 @@ async function main() {
   } finally {
     result.consoleErrors = harness.consoleErrors
     result.exceptions = harness.exceptions
+    try {
+      result.sessionManifestAfter = await harness.readSessionManifest()
+      const beforeById = new Map((result.sessionManifestBefore ?? []).map((item) => [item.id, item]))
+      const afterById = new Map(result.sessionManifestAfter.map((item) => [item.id, item]))
+      const createdIds = harness.getCreatedSessionIds()
+      result.existingSessionManifestComparison = [...beforeById.values()].map((before) => ({
+        id: before.id,
+        before,
+        after: afterById.get(before.id) ?? null,
+        unchanged: JSON.stringify(before) === JSON.stringify(afterById.get(before.id) ?? null),
+      }))
+      result.createdHarnessSessionIds = [...createdIds]
+      const changed = result.existingSessionManifestComparison.filter((item) => !item.unchanged)
+      if (changed.length > 0 && !result.error) result.error = `已有会话标题/权限模式发生变化: ${JSON.stringify(changed)}`
+    } catch (error) {
+      result.sessionManifestError = String(error)
+      if (!result.error) result.error = `无法导出运行后会话清单: ${String(error)}`
+    }
     try {
       await harness.close()
       result.chromeExited = harness.chrome.exitCode !== null || harness.chrome.signalCode !== null
@@ -761,4 +830,4 @@ async function main() {
   }
 }
 
-await main()
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main()

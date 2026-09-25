@@ -48,6 +48,16 @@ describe('Web Remote full-ui security policy', () => {
     expect(policySummary().denied).toBeGreaterThan(0)
   })
 
+  test('新建会话仅允许指定授权工作区，不要求不存在的 sessionId', async () => {
+    expect(getWebRemoteChannelPolicy('agent:create-session')).toMatchObject({ level: 'session', scope: 'workspace' })
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
+    bridge.registerInvoke('agent:create-session', async (_event, _title, _channelId, workspaceId) => ({ id: 'new-session', workspaceId }))
+    const ws = client(bridge)
+    expect((await invoke(ws, 'agent:create-session', ['web-remote-harness', undefined, 'ws-1'])).value.workspaceId).toBe('ws-1')
+    expect((await invoke(ws, 'agent:create-session', ['web-remote-harness', undefined, 'ws-2'])).error.denied).toBe(true)
+    expect((await invoke(ws, 'agent:create-session', ['web-remote-harness'])).error.denied).toBe(true)
+  })
+
   test('AskUser/ExitPlan 响应按 requestId 解析 session 范围，pending 快照按工作区过滤', async () => {
     expect(getWebRemoteChannelPolicy('agent:ask-user:respond')?.scope).toBe('session')
     expect(getWebRemoteChannelPolicy('agent:exit-plan-mode:respond')?.scope).toBe('session')
@@ -103,6 +113,28 @@ describe('Web Remote full-ui security policy', () => {
     const events = ws.sent.map((item) => JSON.parse(item)).filter((item) => item.type === 'event')
     expect(events).toHaveLength(1)
     expect(events[0].value.title).toBe('allowed')
+  })
+
+  test('会话流事件只镜像给授权工作区，含 SDK 内容与交互事件', async () => {
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
+    bridge.registerInvoke('agent:list-workspaces', async () => [])
+    const ws = client(bridge)
+    await invoke(ws, 'agent:list-workspaces') // ensure main window send is mirrored
+    const mainWindow = (await import('../../main-window-store')).getMainWindow()!
+    const sendInteraction = (sessionId: string, type: string, requestId: string) => mainWindow.webContents.send('agent:stream:event', {
+      sessionId,
+      payload: { kind: 'proma_event', event: { type, request: { requestId, sessionId, questions: [], allowedPrompts: [], planDocument: { filePath: '/session/plan/plan.md', displayName: 'plan.md', contentHash: 'hash' } } } },
+    })
+    sendInteraction('s-1', 'ask_user_request', 'ask-1')
+    sendInteraction('s-1', 'exit_plan_mode_request', 'plan-1')
+    sendInteraction('s-2', 'exit_plan_mode_request', 'plan-2')
+    mainWindow.webContents.send('agent:stream:event', { sessionId: 's-1', payload: { kind: 'sdk_message', message: { type: 'assistant', message: { content: 'visible response' } } } })
+    mainWindow.webContents.send('agent:stream:event', { sessionId: 's-2', payload: { kind: 'sdk_message', message: { type: 'assistant', message: { content: 'other workspace' } } } })
+    const events = ws.sent.map((item) => JSON.parse(item)).filter((item) => item.type === 'event' && item.channel === 'agent:stream:event')
+    expect(events).toHaveLength(3)
+    expect(events.every((item) => item.value.sessionId === 's-1')).toBe(true)
+    expect(events.map((item) => item.value.payload.kind === 'proma_event' ? item.value.payload.event.type : item.value.payload.kind)).toEqual(['ask_user_request', 'exit_plan_mode_request', 'sdk_message'])
+    expect(events[1].value.payload.event.request.planDocument.filePath).toBe('/session/plan/plan.md')
   })
 
   test('confirm 通道首次返回挑战，带一次性 token 才执行', async () => {
