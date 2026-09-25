@@ -246,3 +246,12 @@ python3 scripts/personal/import-proma-backup.py \\
 - Headless CDP 真实验证（412×915、deviceScaleFactor 3.5、Android touch、Tailscale HTTPS）：抽屉开关 3 次无残影；文件、Todo、定时任务、MCP/Skills 均以清晰的全屏面板显示；对话视图和面板均有固定顶栏；设置入口隐藏；冻结 20 秒后 `/agent-reach` 最终答案恢复显示。中止测试已看到“停止 Agent”按钮并点击，运行停止且未继续输出，但最终消息未渲染明确“已中止”文案，记为部分验证。
 - round4 截图：`/tmp/web-remote-spike/round4/conversation-topbar-round4.png`、`drawer-open-round4.png`、`drawer-closed-round4.png`、`file-panel-round4.png`、`todo-round4.png`、`automation-round4.png`、`mcp-round4.png`、`sidebar-settings-hidden-round4.png`、`plus-round3.png`、`settings-round3.png`、`abort-round4.png`。
 - 回归：全量 `bun test` 仍为 503 pass / 5 fail / 1 error；typecheck、web-remote 定向测试、build:main、build:renderer、preload 构建通过。config 未添加 `extraAllowedOrigins`；本轮 `cdp-mobile` 设备均已撤销；全部 `/tmp/proma-mobile-chrome-*` 目录已清理。
+
+## 2026-09-25: 手机完整客户端 A1（验证脚本与 IPC 分级）
+
+- 新增 `scripts/personal/mobile-harness.mjs`：独立 headless Chrome、Android 412×915 触控视口、CDP 文本/触控编排、自动配对与 finally 撤销设备、截图、console/异常收集，以及加载→打开 `独立站/test`→发送 pong→MCP/Skills、Todo、定时任务、文件面板截图的冒烟套件。地址和会话名均由参数传入，不写入仓库。
+- 新增 `scripts/personal/generate-web-remote-policy.mjs`，从 IPC 常量源码生成 432 条保守初稿；`full-ui/channel-policy.ts` 再按参数形态与副作用逐条归类为 `read`、`session`、`workspace`、`confirm`、`denied`，已登记通道启动时核对未分级数量并对未登记通道默认拒绝。
+- full-ui IPC 增加会话/工作区范围解析与 allowlist/all 模式、列表结果过滤、session/workspace 事件过滤、一次性 confirm token 流程和敏感字段剔除。`workspaceScope` 默认按 `allowlist` 解释；本次未修改开发实例当前配置取值。`settings:get` 与 `channel:list` 返回会递归剔除 key/token/secret/password/credential 等字段，单测确认无密钥字段外泄。
+- 删除验证期 `extraAllowedOrigins`、非 Secure Cookie 与无 Tailscale 身份头的回环放宽逻辑；配对与已认证请求均要求配置 Origin 和 `Tailscale-User-Login`，Cookie 固定 `HttpOnly; Secure; SameSite=Strict`。`/app/` CSP 仍保留 `style-src 'unsafe-inline'`，原因是上游 renderer 大量运行时内联样式，待后续拆分样式后再收紧；根配对页 CSP 已保持 nonce-only。
+- 单元验证：`bun test apps/electron/src/main/lib/web-remote` 为 36 pass / 0 fail；新增安全测试覆盖分级表、默认拒绝、越权、列表/事件过滤、confirm、denied、设置密钥剔除。`bun run typecheck`、`build:main`、`build:renderer`、web preload 构建通过。
+- 技术验证真机检验通过：上一轮 Android Chrome + Tailscale Serve 已验证配对、会话/流式消息、审批、中止、锁屏重连及移动抽屉/全屏面板；A1 新增安全边界与可复用 harness 的最终冒烟证据见父会话汇报。

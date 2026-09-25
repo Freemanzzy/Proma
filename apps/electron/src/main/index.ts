@@ -79,12 +79,12 @@ import { registerIpcHandlers } from './ipc'
 import { createTray, destroyTray, getTray, setTrayFlash } from './tray'
 import { initializeRuntime } from './lib/runtime-init'
 import { seedDefaultSkills } from './lib/config-paths'
-import { upgradeDefaultSkillsInWorkspaces } from './lib/agent-workspace-manager'
+import { listAgentWorkspaces, upgradeDefaultSkillsInWorkspaces } from './lib/agent-workspace-manager'
 import { hasActiveAgentSessions, stopAllAgents } from './lib/agent-service'
 import { prepareWebRemoteFullUi, startWebRemoteIfEnabled, stopWebRemote } from './lib/web-remote/web-remote-service'
 import { stopAllTerminals } from './lib/terminal-service'
 import { disposePiMcpConnections } from './lib/adapters/pi-mcp-tools'
-import { markRunningDelegationsAsInterrupted } from './lib/agent-session-manager'
+import { getAgentSessionMeta, markRunningDelegationsAsInterrupted } from './lib/agent-session-manager'
 import { stopAllGenerations } from './lib/chat-service'
 import { configureUpdater, initAutoUpdater, cleanupUpdater } from './lib/updater/auto-updater'
 import { startWorkspaceWatcher, stopWorkspaceWatcher } from './lib/workspace-watcher'
@@ -713,11 +713,15 @@ async function bootstrap(): Promise<void> {
   Menu.setApplicationMenu(menu)
 
   // Register IPC handlers. Full UI spike 必须在注册前同步捕获。
-  const fullUiBridge = prepareWebRemoteFullUi(ipcMain)
+  const fullUiBridge = prepareWebRemoteFullUi(ipcMain, undefined, {
+    getSessionMeta: getAgentSessionMeta,
+    listWorkspaces: listAgentWorkspaces,
+  })
   registerIpcHandlers()
   if (fullUiBridge) {
     const counts = fullUiBridge.getRegistrationCounts()
     console.log(`[Web Remote] full-ui 已登记 invoke=${counts.invoke} event=${counts.event}`)
+    fullUiBridge.reportCoverage()
   }
 
   // 收敛上次退出时遗留的运行中委派子会话（内存态丢失，无法续跑）

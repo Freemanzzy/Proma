@@ -107,11 +107,11 @@ function connect(): Promise<WebSocket> {
   return socketPromise
 }
 
-async function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
+async function invokeWithToken(channel: string, args: unknown[], confirmToken?: string): Promise<unknown> {
   const ws = await connect()
   const id = `${Date.now()}-${nextId++}`
-  const payload = JSON.stringify({ type: 'invoke', id, channel, args: args.map(encode) })
-  return new Promise((resolve, reject) => {
+  const payload = JSON.stringify({ type: 'invoke', id, channel, args: args.map(encode), ...(confirmToken ? { confirmToken } : {}) })
+  const response = await new Promise<unknown>((resolve, reject) => {
     const timer = window.setTimeout(() => {
       pending.delete(id)
       reject(new Error(`IPC 请求超时: ${channel}`))
@@ -119,6 +119,19 @@ async function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
     pending.set(id, { resolve, reject, timer })
     ws.send(payload)
   })
+  return response
+}
+
+async function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
+  try {
+    return await invokeWithToken(channel, args)
+  } catch (error) {
+    const challenge = error as { needsConfirm?: boolean; summary?: string; token?: string }
+    if (!challenge?.needsConfirm || !challenge.token) throw error
+    const accepted = window.confirm(challenge.summary || `确认执行远程操作：${channel}`)
+    if (!accepted) throw new Error('用户取消远程操作')
+    return invokeWithToken(channel, args, challenge.token)
+  }
 }
 
 function send(channel: string, ...args: unknown[]): void {

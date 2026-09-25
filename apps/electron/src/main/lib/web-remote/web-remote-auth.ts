@@ -15,10 +15,10 @@ export interface WebRemoteConfig {
   tailscaleHostname?: string
   allowedTailscaleLogins?: string[]
   allowedWorkspaceIds?: string[]
-  /** 仅开发目录启用的额外 Origin（例如本机回环验证）。 */
-  extraAllowedOrigins?: string[]
   /** 在同一份 renderer 上开启完整 UI 浏览器桥接。 */
   fullUi?: boolean
+  /** 工作区范围；省略时沿用安全的 allowlist 默认值。 */
+  workspaceScope?: 'allowlist' | 'all'
 }
 
 interface PairingState {
@@ -190,25 +190,21 @@ export class WebRemoteAuth {
 
   isAllowedOrigin(origin: string | undefined): boolean {
     const normalized = normalizeOrigin(origin)
-    if (!normalized) return false
     const expected = expectedWebRemoteOrigin(this.config)
-    if (expected && normalized === expected) return true
-    return this.isExtraAllowedOrigin(normalized)
-  }
-
-  isExtraAllowedOrigin(origin: string | undefined): boolean {
-    const normalized = normalizeOrigin(origin)
-    return !!normalized && (this.config.extraAllowedOrigins ?? []).some((allowed) => normalizeOrigin(allowed) === normalized)
+    return !!normalized && !!expected && normalized === expected
   }
 
   isAllowedTailscaleLogin(login: string | undefined): boolean {
+    if (typeof login !== 'string' || !login) return false
     const allowed = this.config.allowedTailscaleLogins
-    return !allowed || (typeof login === 'string' && allowed.includes(login))
+    return !allowed || allowed.includes(login)
   }
 
   isWorkspaceAllowed(workspaceId: string | undefined): boolean {
+    if (!workspaceId) return false
+    if (this.config.workspaceScope === 'all') return true
     const allowed = this.config.allowedWorkspaceIds
-    return !!workspaceId && Array.isArray(allowed) && allowed.length > 0 && allowed.includes(workspaceId)
+    return Array.isArray(allowed) && allowed.length > 0 && allowed.includes(workspaceId)
   }
 }
 

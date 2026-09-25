@@ -129,9 +129,7 @@ export class WebRemoteServer {
     const origin = typeof req.headers.origin === 'string' ? req.headers.origin : undefined
     if (requireOrigin && !this.auth.isAllowedOrigin(origin)) return null
     const tailscaleLogin = typeof req.headers['tailscale-user-login'] === 'string' ? req.headers['tailscale-user-login'] : undefined
-    // Loopback browser GET 请求通常没有 Origin，也没有 Tailscale 身份头；仅当显式配置了 extraAllowedOrigins 时放行。
-    const localExtraEnabled = !tailscaleLogin && (this.options.config.extraAllowedOrigins?.length ?? 0) > 0
-    if (!this.auth.isExtraAllowedOrigin(origin) && !localExtraEnabled && !this.auth.isAllowedTailscaleLogin(tailscaleLogin)) return null
+    if (!this.auth.isAllowedTailscaleLogin(tailscaleLogin)) return null
     return { deviceId: device.id }
   }
 
@@ -187,8 +185,7 @@ export class WebRemoteServer {
     if (method === 'POST' && path === '/api/pair') {
       const pairOrigin = typeof req.headers.origin === 'string' ? req.headers.origin : undefined
       const pairLogin = typeof req.headers['tailscale-user-login'] === 'string' ? req.headers['tailscale-user-login'] : undefined
-      if (!this.auth.isAllowedOrigin(pairOrigin)
-        || (!this.auth.isExtraAllowedOrigin(pairOrigin) && !this.auth.isAllowedTailscaleLogin(pairLogin))) {
+      if (!this.auth.isAllowedOrigin(pairOrigin) || !this.auth.isAllowedTailscaleLogin(pairLogin)) {
         json(res, 403, { error: 'origin or identity rejected' })
         return
       }
@@ -198,7 +195,7 @@ export class WebRemoteServer {
         const label = typeof body.label === 'string' ? body.label : 'Web Remote'
         const paired = this.auth.pair(code, label)
         if (!paired) { json(res, 401, { error: 'invalid or locked pairing code' }); return }
-        json(res, 200, { deviceId: paired.deviceId }, { 'Set-Cookie': makeAuthCookie(paired.token, !this.auth.isExtraAllowedOrigin(pairOrigin)) })
+        json(res, 200, { deviceId: paired.deviceId }, { 'Set-Cookie': makeAuthCookie(paired.token) })
       } catch (error) {
         json(res, 400, { error: error instanceof Error ? error.message : 'invalid request' })
       }
@@ -211,7 +208,8 @@ export class WebRemoteServer {
       json(res, 401, { error: 'unauthorized' })
       return
     }
-    if (!Array.isArray(this.options.config.allowedWorkspaceIds) || this.options.config.allowedWorkspaceIds.length === 0) {
+    if (this.options.config.workspaceScope !== 'all'
+      && (!Array.isArray(this.options.config.allowedWorkspaceIds) || this.options.config.allowedWorkspaceIds.length === 0)) {
       json(res, 403, { error: 'no workspaces allowed' })
       return
     }
