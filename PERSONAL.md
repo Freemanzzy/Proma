@@ -281,3 +281,9 @@ python3 scripts/personal/import-proma-backup.py \\
 - 加载统计改为按唯一 CDP requestId 计数，并记录 response 数、缓存响应数和 encoded transfer bytes。最终口径：首次约 78 请求 / 3.21 MB，二次约 77 请求 / 0.6–1.0 KB，二次大部分响应来自浏览器缓存/协商缓存；此前 8 请求统计是未等待动态资源完成的旧口径。
 - AskUserQuestion 已取得手机卡片、选择 A、assistant 回复 A 的截图和历史证据，见 `/tmp/proma-mobile-harness-a2-interactions2/`。ExitPlanMode 请求被 Agent 运行时直接完成审批，未出现手机审批卡，手机端计划审批仍未取得独立证据。
 - 中止测试受同一 `独立站/test` 会话中排队的长任务影响，未取得稳定的桌面/手机对比证据；不将其标记为已验证。
+
+## 2026-09-25: 用户决定（手机工作区范围与 EgoBrowser 权限）
+
+- 手机端工作区范围改为全部开放：开发实例配置 `workspaceScope: "all"`（本地配置，不入库）；敏感能力仍按 IPC 分级表拒绝或需二次确认。开启后父会话在最终代码上重跑 harness smoke 通过。
+- EgoBrowser 不再询问权限：维持当前运行时行为（v0.19.57 默认 `bypassPermissions` 下所有工具直接放行）。此前“每会话确认一次”的代码与单测保留但运行时不生效，不再作为目标。
+- 问题记录：A2 的 ExitPlanMode 验证曾把 `独立站/test` 会话改名为 `web-remote-harness-ask-plan-*` 并切到计划模式，导致 smoke 找不到会话；父会话已恢复标题与权限模式。后续 harness 不得修改既有会话的标题或权限模式，只能在自建的专用会话中改。
