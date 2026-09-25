@@ -160,7 +160,7 @@ async function findElement(client, text, selector = 'body *') {
   const result = await client.evaluate(`(() => {
     const wanted=${quoteJs(text)};
     const nodes=[...document.querySelectorAll(${quoteJs(selector)})];
-    const visible=(node)=>{const r=node.getBoundingClientRect();const s=getComputedStyle(node);return r.width>0&&r.height>0&&s.visibility!=='hidden'&&s.display!=='none';};
+    const visible=(node)=>{const r=node.getBoundingClientRect();const s=getComputedStyle(node);return r.width>0&&r.height>0&&r.right>0&&r.left<innerWidth&&r.bottom>0&&r.top<innerHeight&&s.visibility!=='hidden'&&s.display!=='none';};
     const node=nodes.find((item)=>visible(item)&&((item.innerText||item.textContent||'').trim()===wanted)) || nodes.find((item)=>visible(item)&&((item.innerText||item.textContent||'').includes(wanted)));
     if(!node)return null; const r=node.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2,tag:node.tagName,text:(node.innerText||node.textContent||'').trim().slice(0,160)};
   })()`)
