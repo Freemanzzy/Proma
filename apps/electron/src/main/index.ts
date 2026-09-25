@@ -81,7 +81,7 @@ import { initializeRuntime } from './lib/runtime-init'
 import { seedDefaultSkills } from './lib/config-paths'
 import { upgradeDefaultSkillsInWorkspaces } from './lib/agent-workspace-manager'
 import { hasActiveAgentSessions, stopAllAgents } from './lib/agent-service'
-import { startWebRemoteIfEnabled, stopWebRemote } from './lib/web-remote/web-remote-service'
+import { prepareWebRemoteFullUi, startWebRemoteIfEnabled, stopWebRemote } from './lib/web-remote/web-remote-service'
 import { stopAllTerminals } from './lib/terminal-service'
 import { disposePiMcpConnections } from './lib/adapters/pi-mcp-tools'
 import { markRunningDelegationsAsInterrupted } from './lib/agent-session-manager'
@@ -712,7 +712,8 @@ async function bootstrap(): Promise<void> {
   const menu = createApplicationMenu()
   Menu.setApplicationMenu(menu)
 
-  // Register IPC handlers
+  // Register IPC handlers. Full UI spike 先捕获注册表，再照常交给 Electron。
+  prepareWebRemoteFullUi()
   registerIpcHandlers()
 
   // 收敛上次退出时遗留的运行中委派子会话（内存态丢失，无法续跑）

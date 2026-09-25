@@ -2,11 +2,18 @@ import { getConfigDirName } from '../config-paths'
 import { readWebRemoteConfig, getWebRemoteConfigPath, getWebRemoteDataDir, WebRemoteAuth, type WebRemoteConfig } from './web-remote-auth'
 import { WebRemoteServer } from './web-remote-server'
 import { setWebRemoteEventHub, notifyWebRemoteInteractionResolved } from './web-remote-events'
+import { getWebRemoteIpcBridge, installWebRemoteIpcCapture } from './full-ui/web-remote-ipc'
 
 let server: WebRemoteServer | null = null
 
 export function isWebRemoteEnabled(config: WebRemoteConfig): boolean {
   return process.env.PROMA_WEB_REMOTE === '1' && config.enabled === true
+}
+
+export function prepareWebRemoteFullUi(): void {
+  if (!isWebRemoteRuntimeAllowed()) return
+  const config = readWebRemoteConfig()
+  if (isWebRemoteEnabled(config) && config.fullUi === true) installWebRemoteIpcCapture()
 }
 
 export function isWebRemoteConfigDirAllowed(configDirName: string, allowProd = process.env.PROMA_WEB_REMOTE_ALLOW_PROD === '1'): boolean {
@@ -24,7 +31,11 @@ export async function startWebRemoteIfEnabled(): Promise<void> {
   const config = readWebRemoteConfig()
   if (!isWebRemoteEnabled(config)) return
   if (server) return
-  const candidate = new WebRemoteServer({ config, auth: new WebRemoteAuth(config, getWebRemoteDataDir()) })
+  const candidate = new WebRemoteServer({
+    config,
+    auth: new WebRemoteAuth(config, getWebRemoteDataDir()),
+    ipcBridge: config.fullUi === true ? getWebRemoteIpcBridge() ?? undefined : undefined,
+  })
   try {
     await candidate.start(Number.isInteger(config.port) ? config.port! : 17888, '127.0.0.1')
     server = candidate

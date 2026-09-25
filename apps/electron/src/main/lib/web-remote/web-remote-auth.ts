@@ -15,6 +15,10 @@ export interface WebRemoteConfig {
   tailscaleHostname?: string
   allowedTailscaleLogins?: string[]
   allowedWorkspaceIds?: string[]
+  /** 仅开发目录启用的额外 Origin（例如本机回环验证）。 */
+  extraAllowedOrigins?: string[]
+  /** 在同一份 renderer 上开启完整 UI 浏览器桥接。 */
+  fullUi?: boolean
 }
 
 interface PairingState {
@@ -185,8 +189,11 @@ export class WebRemoteAuth {
   }
 
   isAllowedOrigin(origin: string | undefined): boolean {
+    const normalized = normalizeOrigin(origin)
+    if (!normalized) return false
     const expected = expectedWebRemoteOrigin(this.config)
-    return !!expected && normalizeOrigin(origin) === expected
+    if (expected && normalized === expected) return true
+    return (this.config.extraAllowedOrigins ?? []).some((allowed) => normalizeOrigin(allowed) === normalized)
   }
 
   isAllowedTailscaleLogin(login: string | undefined): boolean {

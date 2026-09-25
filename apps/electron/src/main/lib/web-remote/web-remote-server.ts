@@ -1,5 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { randomBytes } from 'node:crypto'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { join, normalize } from 'node:path'
 import type { Duplex } from 'node:stream'
 import WebSocket, { WebSocketServer } from 'ws'
 import { agentEventBus, isAgentSessionActive, listActiveAgentSessionSnapshots, queueAgentMessage, runAgentHeadless, stopAgent } from '../agent-service'
@@ -12,6 +14,7 @@ import { WebRemoteAuth, expectedWebRemoteOrigin, makeAuthCookie, parseCookieHead
 import { WebRemoteEventHub } from './web-remote-events'
 import { toWebRemoteHistory, toWebRemotePermissionRequest, type WebRemoteEvent } from './web-remote-dto'
 import { renderWebRemoteIcon, renderWebRemoteManifest, renderWebRemoteStatic } from './web-remote-static'
+import type { WebRemoteIpcBridge } from './full-ui/web-remote-ipc'
 
 const MAX_BODY_BYTES = 100_000
 const MAX_MESSAGE_CHARS = 50_000
@@ -26,6 +29,8 @@ export interface WebRemoteServerOptions {
   eventHub?: WebRemoteEventHub
   sendMessage?: (sessionId: string, message: string) => Promise<'started' | 'injected'>
   stopSession?: (sessionId: string) => void
+  ipcBridge?: WebRemoteIpcBridge
+  rendererDir?: string
 }
 
 function json(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
@@ -148,6 +153,11 @@ export class WebRemoteServer {
     if (method === 'GET' && path === '/icon.svg') {
       res.writeHead(200, { 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' })
       res.end(renderWebRemoteIcon())
+      return
+    }
+
+    if (path === '/app' || path.startsWith('/app/')) {
+      await this.handleAppRequest(req, res, path)
       return
     }
 
@@ -278,9 +288,44 @@ export class WebRemoteServer {
     json(res, 404, { error: 'not found' })
   }
 
+  private async handleAppRequest(req: IncomingMessage, res: ServerResponse, path: string): Promise<void> {
+    if (req.method !== 'GET') { json(res, 405, { error: 'method not allowed' }); return }
+    if (!this.authenticate(req, false)) {
+      res.writeHead(302, { Location: '/' })
+      res.end()
+      return
+    }
+    const root = this.options.rendererDir ?? join(__dirname, 'renderer')
+    const relativePath = path === '/app' || path === '/app/' ? 'index.html' : decodeURIComponent(path.slice('/app/'.length))
+    const safePath = normalize(relativePath).replace(/^([.][.][/\\])+/, '')
+    const filePath = join(root, safePath)
+    if (!filePath.startsWith(root) || !existsSync(filePath) || !statSync(filePath).isFile()) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+      res.end('Not Found')
+      return
+    }
+    let body = readFileSync(filePath)
+    const isHtml = safePath === 'index.html'
+    const nonce = randomBytes(16).toString('base64url')
+    const headers: Record<string, string> = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }
+    if (isHtml) {
+      let html = body.toString('utf8')
+      html = html.replace(/<script>([\s\S]*?)<\/script>/, `<script nonce="${nonce}">$1</script>`)
+      html = html.replace(/<script type="module"/, '<script src="/app/preload.js"></script><script type="module"')
+      body = Buffer.from(html)
+      headers['Content-Type'] = 'text/html; charset=utf-8'
+      headers['Content-Security-Policy'] = `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data: blob:; font-src 'self' data:; base-uri 'none'; frame-ancestors 'none'`
+    } else {
+      const ext = safePath.split('.').pop()?.toLowerCase()
+      headers['Content-Type'] = ({ js: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8', json: 'application/json; charset=utf-8', svg: 'image/svg+xml', png: 'image/png', webp: 'image/webp', ico: 'image/x-icon', woff: 'font/woff', woff2: 'font/woff2' } as Record<string, string>)[ext ?? ''] ?? 'application/octet-stream'
+    }
+    res.writeHead(200, headers)
+    res.end(body)
+  }
+
   private handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
-    if (url.pathname !== '/api/stream') { sendUpgradeError(socket, 404, 'Not Found'); return }
+    if (url.pathname !== '/api/stream' && url.pathname !== '/api/ipc') { sendUpgradeError(socket, 404, 'Not Found'); return }
     if (!this.authenticate(req, true)) { sendUpgradeError(socket, 401, 'Unauthorized'); return }
     this.wsServer.handleUpgrade(req, socket, head, (ws: WebSocket) => this.wsServer.emit('connection', ws, req))
   }
@@ -288,6 +333,11 @@ export class WebRemoteServer {
   private handleWebSocket(ws: WebSocket, req: IncomingMessage): void {
     const device = this.auth.authenticateToken(parseCookieHeader(req.headers.cookie))
     if (!device) { ws.close(1008, 'unauthorized'); return }
+    if (new URL(req.url ?? '/', 'http://127.0.0.1').pathname === '/api/ipc') {
+      if (!this.options.ipcBridge) { ws.close(1013, 'full-ui disabled'); return }
+      this.options.ipcBridge.attachWebSocket(ws, device.id)
+      return
+    }
     const connection = {
       deviceId: device.id,
       get bufferedAmount() { return (ws as unknown as { bufferedAmount: number }).bufferedAmount ?? 0 },
