@@ -10,6 +10,7 @@ let socket: WebSocket | null = null
 let socketPromise: Promise<WebSocket> | null = null
 let reconnectTimer: number | undefined
 let reconnectDelay = 250
+let hasConnectedOnce = false
 let nextId = 0
 const pending = new Map<string, { resolve(value: unknown): void; reject(error: unknown): void; timer: number }>()
 
@@ -74,6 +75,8 @@ function connect(): Promise<WebSocket> {
     socket = next
     next.onopen = () => {
       reconnectDelay = 250
+      if (hasConnectedOnce) window.dispatchEvent(new CustomEvent('proma-web-remote-reconnected'))
+      hasConnectedOnce = true
       resolve(next)
     }
     next.onmessage = (event) => {

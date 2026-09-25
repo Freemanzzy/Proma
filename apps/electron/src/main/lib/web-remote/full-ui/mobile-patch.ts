@@ -4,8 +4,10 @@ export function renderWebRemoteMobilePatch(): string {
   html, body, #root { width:100%; min-width:0; max-width:100%; overflow-x:hidden; }
   body { overscroll-behavior-x:none; }
   [data-web-remote-app-content="true"] { position:relative; width:100vw!important; max-width:100vw; }
-  [data-web-remote-sidebar="left"] { position:fixed!important; inset:0 auto 0 0; z-index:10001!important; width:min(86vw,340px)!important; max-width:340px; transform:translateX(-105%); transition:transform .18s ease; box-shadow:12px 0 32px rgba(0,0,0,.25); }
+  [data-web-remote-sidebar="left"] { position:fixed!important; inset:0 auto 0 0; z-index:10001!important; width:min(86vw,340px)!important; max-width:340px; transform:translateX(-105%); transition:transform .18s ease; box-shadow:none; }
+  body[data-web-remote-sidebar-open="true"] [data-web-remote-sidebar="left"] { box-shadow:12px 0 32px rgba(0,0,0,.25); }
   [data-web-remote-sidebar="left"] > * { width:100%!important; max-width:none!important; }
+  [data-web-remote-sidebar="left"] [class*="cursor-col-resize"], [data-web-remote-sidebar="left"] .sidebar-window-drag-strip { pointer-events:none!important; }
   [data-web-remote-sidebar-divider="true"] { display:none!important; }
   body[data-web-remote-sidebar-open="true"] [data-web-remote-sidebar="left"] { transform:translateX(0); }
   [data-web-remote-main="true"] { width:100%!important; min-width:0!important; max-width:100vw; }
@@ -38,18 +40,54 @@ export function renderWebRemoteMobilePatch(): string {
     }
     if (!document.querySelector('[data-web-remote-panel-toggle]')) {
       var panelToggle=document.createElement('button'); panelToggle.type='button'; panelToggle.dataset.webRemotePanelToggle='true'; panelToggle.textContent='文件'; panelToggle.setAttribute('aria-label','打开文件面板');
-      panelToggle.addEventListener('click',function(){var open=body.dataset.webRemoteRightOpen==='true'; if(open){delete body.dataset.webRemoteRightOpen; panelToggle.textContent='文件'; panelToggle.setAttribute('aria-label','打开文件面板')}else{body.dataset.webRemoteRightOpen='true'; panelToggle.textContent='×'; panelToggle.setAttribute('aria-label','折叠右侧工作区')}}); document.body.appendChild(panelToggle);
+      var suppressClick=false;
+      var togglePanel=function(){var open=body.dataset.webRemoteRightOpen==='true'; if(open){delete body.dataset.webRemoteRightOpen; panelToggle.textContent='文件'; panelToggle.setAttribute('aria-label','打开文件面板')}else{body.dataset.webRemoteRightOpen='true'; panelToggle.textContent='×'; panelToggle.setAttribute('aria-label','折叠右侧工作区')}};
+      window.__PROMA_TOGGLE_PANEL=togglePanel;
+      panelToggle.addEventListener('click',function(){if(window.__PROMA_PANEL_TOUCH_HANDLED){window.__PROMA_PANEL_TOUCH_HANDLED=false;return}if(suppressClick){suppressClick=false;return}togglePanel()});
+      panelToggle.addEventListener('touchend',function(event){event.preventDefault();suppressClick=true;togglePanel();window.setTimeout(function(){suppressClick=false},700)},{passive:false});
+      panelToggle.addEventListener('pointerup',function(event){if(event.pointerType==='touch'){event.preventDefault();suppressClick=true;togglePanel();window.setTimeout(function(){suppressClick=false},700)}},{passive:false}); document.body.appendChild(panelToggle);
     }
     document.querySelectorAll('img[alt="用户头像"]').forEach(function(img){img.addEventListener('error',function(){img.style.display='none'},{once:true});});
   }
   document.addEventListener('click',function(event){
     var target=event.target;
     if (!(target instanceof Element)) return;
+    if (window.__PROMA_SKIP_NEXT_CLICK && target.closest('button')) { window.__PROMA_SKIP_NEXT_CLICK=false; event.stopPropagation(); return; }
     if (target.closest('[data-web-remote-sidebar="left"]')) { window.setTimeout(function(){delete body.dataset.webRemoteSidebarOpen}, 0); }
+    var rightPanelTrigger=target.closest('button[aria-label="Todo"],button[aria-label="定时任务"],button[aria-label="MCP/Skills"]');
+    if (rightPanelTrigger) { window.setTimeout(function(){body.dataset.webRemoteRightOpen='true'}, 0); }
+    if (target.closest('button[aria-label="打开设置"]')) { window.setTimeout(function(){delete body.dataset.webRemoteRightOpen}, 0); }
+    if (target.closest('[data-web-remote-panel-toggle]')) return;
     if (target.closest('button[aria-label="打开文件面板"]')) { body.dataset.webRemoteRightOpen='true'; }
     if (target.closest('button[aria-label="折叠右侧工作区"]')) { delete body.dataset.webRemoteRightOpen; }
   }, true);
+  var forwardMobileControl=function(target){
+    if (!(target instanceof Element)) return false;
+    var control=target.closest('button[aria-label="Todo"],button[aria-label="定时任务"],button[aria-label="MCP/Skills"],button[aria-label="打开设置"],button[aria-label*="中新建会话"]');
+    if (!control) return false;
+    delete body.dataset.webRemoteSidebarOpen; control.click(); window.__PROMA_SKIP_NEXT_CLICK=true; window.setTimeout(function(){window.__PROMA_SKIP_NEXT_CLICK=false},700);
+    if (control.matches('button[aria-label="Todo"],button[aria-label="定时任务"],button[aria-label="MCP/Skills"]')) window.setTimeout(function(){body.dataset.webRemoteRightOpen='true'},0);
+    return true;
+  };
+  document.addEventListener('touchstart',function(event){
+    if (forwardMobileControl(event.target)) event.preventDefault();
+  }, {capture:true,passive:false});
+  document.addEventListener('touchend',function(event){
+    var target=event.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest('[data-web-remote-panel-toggle]') && typeof window.__PROMA_TOGGLE_PANEL==='function') {
+      window.__PROMA_PANEL_TOUCH_HANDLED=true; window.__PROMA_TOGGLE_PANEL(); return;
+    }
+    forwardMobileControl(target);
+  }, true);
   ensure(); new MutationObserver(ensure).observe(document.documentElement,{childList:true,subtree:true});
+  var hiddenAt=0;
+  document.addEventListener('visibilitychange',function(){
+    if (document.visibilityState==='hidden') { hiddenAt=Date.now(); return; }
+    if (hiddenAt && Date.now()-hiddenAt>=5000) window.location.reload();
+    hiddenAt=0;
+  });
+  window.addEventListener('proma-web-remote-reconnected',function(){ window.location.reload(); });
 })();
 </script>`
 }
