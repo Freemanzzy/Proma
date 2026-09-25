@@ -278,6 +278,7 @@ async function createHarness(options) {
     return true
   }
   const waitText = (text, timeoutMs = 60_000) => waitUntil(client, `document.body.innerText.includes(${quoteJs(text)})`, timeoutMs)
+  const clickText = (text, selector = 'body *') => touchText(client, text, selector)
   const freeze = () => client.command('Page.setWebLifecycleState', { state: 'frozen' })
   const resume = () => client.command('Page.setWebLifecycleState', { state: 'active' })
   const close = async () => {
@@ -289,7 +290,39 @@ async function createHarness(options) {
     activeChrome = null
     activeProfile = null
   }
-  return { client, chrome, profile, pair, navigate, openDrawer, clickSidebarText, openSession, inputAndSend, waitText, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, close }
+  return { client, chrome, profile, pair, navigate, openDrawer, clickSidebarText, clickText, openSession, inputAndSend, waitText, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, close }
+}
+
+async function runExtra(harness, options, result) {
+  await harness.openSession(options.session)
+  const workspaceText = await harness.client.evaluate('document.body.innerText')
+  result.allowlist = { onlyExpectedWorkspaceVisible: workspaceText.includes('独立站') && !workspaceText.includes('其他工作区') }
+  const forbidden = await harness.client.evaluate(`fetch('/api/sessions/forbidden-session/messages',{credentials:'include'}).then(async r=>({status:r.status,body:await r.text()}))`)
+  result.allowlist.forbiddenSessionStatus = forbidden.status
+  result.allowlist.forbiddenSessionRejected = forbidden.status === 404
+  await harness.clickSidebarText('定时任务')
+  await delay(500)
+  let dialogSeen = false
+  const onDialog = (event) => {
+    if (event.type === 'confirm') {
+      dialogSeen = true
+      void harness.client.command('Page.handleJavaScriptDialog', { accept: false })
+    }
+  }
+  harness.client.on('Page.javascriptDialogOpening', onDialog)
+  try {
+    await harness.clickText('立即运行', '[data-web-remote-panel="right"] button,[data-web-remote-panel="right"] [role="button"],button,[role="button"]')
+    await delay(500)
+  } finally {
+    result.confirmation = { dialogSeen, cancelled: dialogSeen }
+  }
+  const confirmScreenshot = await harness.screenshot('extra-confirm-cancelled')
+  result.screenshots.push(confirmScreenshot)
+  await harness.inputAndSend('/status')
+  await harness.waitText('本轮', 90_000)
+  const skillScreenshot = await harness.screenshot('extra-readonly-skill')
+  result.screenshots.push(skillScreenshot)
+  result.readonlySkill = { ok: true }
 }
 
 async function runSmoke(harness, options, result) {
@@ -343,6 +376,8 @@ async function main() {
     deviceId = paired.deviceId
     result.pairedDeviceId = deviceId
     if (options.suite === 'smoke') await runSmoke(harness, options, result)
+    else if (options.suite === 'extra') await runExtra(harness, options, result)
+    else if (options.suite === 'all') { await runSmoke(harness, options, result); await runExtra(harness, options, result) }
     else throw new Error(`未知套件: ${options.suite}`)
   } catch (error) {
     result.error = error instanceof Error ? error.stack ?? error.message : String(error)
