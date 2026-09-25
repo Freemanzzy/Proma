@@ -12,7 +12,8 @@ export function renderWebRemoteMobilePatch(): string {
   [data-web-remote-panel="right"] { position:fixed!important; inset:0; z-index:10002!important; display:none!important; width:100vw!important; max-width:none!important; background:hsl(var(--background)); }
   body[data-web-remote-right-open="true"] [data-web-remote-panel="right"] { display:flex!important; }
   [data-web-remote-panel="right"] > * { width:100%!important; max-width:none!important; min-width:0!important; }
-  [data-web-remote-mobile-menu], [data-web-remote-mobile-overlay] { display:block; }
+  [data-web-remote-mobile-menu], [data-web-remote-mobile-overlay], [data-web-remote-panel-toggle] { display:block; }
+  [data-web-remote-panel-toggle] { position:fixed; top:max(8px, env(safe-area-inset-top)); right:max(8px, env(safe-area-inset-right)); z-index:10003; min-width:42px; height:42px; padding:0 10px; border:1px solid hsl(var(--border)); border-radius:12px; background:hsl(var(--background)/.92); color:hsl(var(--foreground)); box-shadow:0 3px 12px rgba(0,0,0,.16); font-size:14px; }
   [data-web-remote-mobile-menu] { position:fixed; top:max(8px, env(safe-area-inset-top)); left:max(8px, env(safe-area-inset-left)); z-index:10003; width:42px; height:42px; padding:0; border:1px solid hsl(var(--border)); border-radius:12px; background:hsl(var(--background)/.92); color:hsl(var(--foreground)); box-shadow:0 3px 12px rgba(0,0,0,.16); font-size:22px; line-height:1; }
   [data-web-remote-mobile-overlay] { position:fixed; inset:0; z-index:10000; background:rgba(0,0,0,.38); }
   body:not([data-web-remote-sidebar-open="true"]) [data-web-remote-mobile-overlay] { display:none; }
@@ -21,7 +22,7 @@ export function renderWebRemoteMobilePatch(): string {
   [data-web-remote-main="true"] kbd, [data-web-remote-main="true"] [data-shortcut], [data-web-remote-main="true"] [class*="shortcut"] { display:none!important; }
   img[alt="用户头像"] { display:none!important; }
 }
-@media (min-width: 768px) { [data-web-remote-mobile-menu], [data-web-remote-mobile-overlay] { display:none!important; } }
+@media (min-width: 768px) { [data-web-remote-mobile-menu], [data-web-remote-mobile-overlay], [data-web-remote-panel-toggle] { display:none!important; } }
 </style>
 <script nonce="__PROMA_NONCE__">
 (function(){
@@ -35,12 +36,16 @@ export function renderWebRemoteMobilePatch(): string {
     if (!document.querySelector('[data-web-remote-mobile-overlay]')) {
       var overlay=document.createElement('div'); overlay.dataset.webRemoteMobileOverlay='true'; overlay.addEventListener('click',function(){delete body.dataset.webRemoteSidebarOpen; delete body.dataset.webRemoteRightOpen}); document.body.appendChild(overlay);
     }
+    if (!document.querySelector('[data-web-remote-panel-toggle]')) {
+      var panelToggle=document.createElement('button'); panelToggle.type='button'; panelToggle.dataset.webRemotePanelToggle='true'; panelToggle.textContent='文件'; panelToggle.setAttribute('aria-label','打开文件面板');
+      panelToggle.addEventListener('click',function(){var open=body.dataset.webRemoteRightOpen==='true'; if(open){delete body.dataset.webRemoteRightOpen; panelToggle.textContent='文件'; panelToggle.setAttribute('aria-label','打开文件面板')}else{body.dataset.webRemoteRightOpen='true'; panelToggle.textContent='×'; panelToggle.setAttribute('aria-label','折叠右侧工作区')}}); document.body.appendChild(panelToggle);
+    }
     document.querySelectorAll('img[alt="用户头像"]').forEach(function(img){img.addEventListener('error',function(){img.style.display='none'},{once:true});});
   }
   document.addEventListener('click',function(event){
     var target=event.target;
     if (!(target instanceof Element)) return;
-    if (target.closest('[data-web-remote-sidebar="left"]')) { delete body.dataset.webRemoteSidebarOpen; }
+    if (target.closest('[data-web-remote-sidebar="left"]')) { window.setTimeout(function(){delete body.dataset.webRemoteSidebarOpen}, 0); }
     if (target.closest('button[aria-label="打开文件面板"]')) { body.dataset.webRemoteRightOpen='true'; }
     if (target.closest('button[aria-label="折叠右侧工作区"]')) { delete body.dataset.webRemoteRightOpen; }
   }, true);
