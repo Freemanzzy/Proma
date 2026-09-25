@@ -404,6 +404,8 @@ async function runExtra(harness, options, result) {
     await touchAt(harness.client, closePanel.x, closePanel.y)
     await delay(300)
   } catch {}
+  await harness.navigate('/app/')
+  await waitUntil(harness.client, `document.body.innerText.includes('Agent') && !document.body.innerText.includes('正在启动 Proma')`, 60_000)
   await harness.openSession(options.session)
   const beforeSkillText = await harness.client.evaluate('document.body.innerText')
   await harness.inputAndSend('/status')
