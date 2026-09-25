@@ -406,6 +406,11 @@ async function runExtra(harness, options, result) {
   } catch {}
   await harness.navigate('/app/')
   await waitUntil(harness.client, `document.body.innerText.includes('Agent') && !document.body.innerText.includes('正在启动 Proma')`, 60_000)
+  for (let index = 0; index < 2; index++) {
+    await harness.client.command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+    await harness.client.command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+  }
+  await delay(300)
   await harness.openSession(options.session)
   const beforeSkillText = await harness.client.evaluate('document.body.innerText')
   await harness.inputAndSend('/status')
