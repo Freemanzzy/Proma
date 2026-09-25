@@ -1,5 +1,8 @@
+import { execFile } from 'node:child_process'
 import { createHash, randomBytes, randomInt } from 'node:crypto'
+import { isIP } from 'node:net'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { promisify } from 'node:util'
 import { join } from 'node:path'
 import { getConfigDir } from '../config-paths'
 
@@ -14,7 +17,12 @@ export interface WebRemoteConfig {
   allowedOrigin?: string
   tailscaleHostname?: string
   allowedTailscaleLogins?: string[]
+  trustedTailscaleNodes?: string[]
   allowedWorkspaceIds?: string[]
+  /** 在同一份 renderer 上开启完整 UI 浏览器桥接。 */
+  fullUi?: boolean
+  /** 工作区范围；省略时沿用安全的 allowlist 默认值。 */
+  workspaceScope?: 'allowlist' | 'all'
 }
 
 interface PairingState {
@@ -36,6 +44,46 @@ interface DeviceRecord {
 interface DeviceFile {
   version: 1
   devices: DeviceRecord[]
+}
+
+const execFileAsync = promisify(execFile)
+const TAILSCALE_CLI = '/Applications/Tailscale.app/Contents/MacOS/Tailscale'
+const WHOIS_CACHE_TTL_MS = 60_000
+const whoisCache = new Map<string, { expiresAt: number; value: TailscaleWhois | null }>()
+
+interface TailscaleWhois {
+  Node?: { ComputedName?: string }
+  UserProfile?: { LoginName?: string }
+}
+
+function isTailnetIp(ip: string): boolean {
+  if (isIP(ip) === 4) {
+    const parts = ip.split('.').map(Number)
+    return parts[0] === 100 && parts[1]! >= 64 && parts[1]! <= 127
+  }
+  if (isIP(ip) !== 6 || ip.includes('%')) return false
+  const halves = ip.toLowerCase().split('::')
+  if (halves.length > 2) return false
+  const left = halves[0] ? halves[0]!.split(':') : []
+  const right = halves[1] ? halves[1]!.split(':') : []
+  const missing = 8 - left.length - right.length
+  if (missing < 0 || (halves.length === 1 && missing !== 0)) return false
+  const groups = [...left, ...Array(missing).fill('0'), ...right]
+  return groups.length === 8 && groups[0]!.toLowerCase() === 'fd7a' && groups[1]!.toLowerCase() === '115c' && groups[2]!.toLowerCase() === 'a1e0'
+}
+
+async function lookupTailscaleNode(ip: string): Promise<TailscaleWhois | null> {
+  const cached = whoisCache.get(ip)
+  if (cached && cached.expiresAt > Date.now()) return cached.value
+  try {
+    const { stdout } = await execFileAsync(TAILSCALE_CLI, ['whois', '--json', ip], { timeout: 2_000, maxBuffer: 256 * 1024 })
+    const value = JSON.parse(stdout) as TailscaleWhois
+    whoisCache.set(ip, { expiresAt: Date.now() + WHOIS_CACHE_TTL_MS, value })
+    return value
+  } catch {
+    whoisCache.set(ip, { expiresAt: Date.now() + WHOIS_CACHE_TTL_MS, value: null })
+    return null
+  }
 }
 
 function sha256(value: string): string {
@@ -96,13 +144,16 @@ export function expectedWebRemoteOrigin(config: WebRemoteConfig): string | undef
 export class WebRemoteAuth {
   private pairing: PairingState | null
   private devices: DeviceFile
+  private config: WebRemoteConfig
 
   private lastPersistedAt = Number.NEGATIVE_INFINITY
 
   constructor(
-    private readonly config: WebRemoteConfig,
+    config: WebRemoteConfig,
     private readonly dataDir: string,
+    private readonly whoisLookup: (ip: string) => Promise<TailscaleWhois | null> = lookupTailscaleNode,
   ) {
+    this.config = config
     this.pairing = readJson<PairingState | null>(join(dataDir, 'pairing.json'), null)
     this.devices = readJson<DeviceFile>(join(dataDir, 'devices.json'), { version: 1, devices: [] })
   }
@@ -114,6 +165,22 @@ export class WebRemoteAuth {
   refreshFromDisk(): void {
     this.pairing = readJson<PairingState | null>(join(this.dataDir, 'pairing.json'), this.pairing)
     this.devices = readJson<DeviceFile>(join(this.dataDir, 'devices.json'), this.devices)
+    const configPath = join(this.dataDir, 'config.json')
+    if (existsSync(configPath)) this.config = readJson<WebRemoteConfig>(configPath, this.config)
+  }
+
+  async authenticateTrustedTailscale(login: string | undefined, forwardedFor: string | undefined): Promise<DeviceRecord | null> {
+    if (!login || !Array.isArray(this.config.allowedTailscaleLogins) || !this.config.allowedTailscaleLogins.includes(login)) return null
+    const ip = forwardedFor?.split(',')[0]?.trim()
+    if (!ip || !isTailnetIp(ip)) return null
+    const identity = await this.whoisLookup(ip)
+    const computedName = identity?.Node?.ComputedName
+    if (!identity || identity.UserProfile?.LoginName !== login || !computedName || !this.config.trustedTailscaleNodes?.includes(computedName)) return null
+    return { id: `tailnet:${computedName}`, tokenHash: '', label: computedName, createdAt: 0 }
+  }
+
+  isTrustedTailscaleNode(nodeName: string): boolean {
+    return Array.isArray(this.config.trustedTailscaleNodes) && this.config.trustedTailscaleNodes.includes(nodeName)
   }
 
   getRevokedDeviceIds(): string[] {
@@ -185,18 +252,22 @@ export class WebRemoteAuth {
   }
 
   isAllowedOrigin(origin: string | undefined): boolean {
+    const normalized = normalizeOrigin(origin)
     const expected = expectedWebRemoteOrigin(this.config)
-    return !!expected && normalizeOrigin(origin) === expected
+    return !!normalized && !!expected && normalized === expected
   }
 
   isAllowedTailscaleLogin(login: string | undefined): boolean {
+    if (typeof login !== 'string' || !login) return false
     const allowed = this.config.allowedTailscaleLogins
-    return !allowed || (typeof login === 'string' && allowed.includes(login))
+    return !allowed || allowed.includes(login)
   }
 
   isWorkspaceAllowed(workspaceId: string | undefined): boolean {
+    if (!workspaceId) return false
+    if (this.config.workspaceScope === 'all') return true
     const allowed = this.config.allowedWorkspaceIds
-    return !!workspaceId && Array.isArray(allowed) && allowed.length > 0 && allowed.includes(workspaceId)
+    return Array.isArray(allowed) && allowed.length > 0 && allowed.includes(workspaceId)
   }
 }
 
@@ -209,8 +280,8 @@ export function parseCookieHeader(header: string | undefined, name = WEB_REMOTE_
   return undefined
 }
 
-export function makeAuthCookie(token: string): string {
-  return `${WEB_REMOTE_COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Strict`
+export function makeAuthCookie(token: string, secure = true): string {
+  return `${WEB_REMOTE_COOKIE}=${token}; Path=/; HttpOnly;${secure ? ' Secure;' : ''} SameSite=Strict`
 }
 
 export function hashTokenForTest(token: string): string {

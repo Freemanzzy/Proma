@@ -946,6 +946,8 @@ export function useGlobalAgentListeners(): void {
     }
 
     // pending 快照与实时事件可以乱序抵达。保留有限的已解决 ID，避免迟到快照复活已处理横幅。
+    const resolvedPermissionRequestIds = new Set<string>()
+    const resolvedAskUserRequestIds = new Set<string>()
     const resolvedExitPlanRequestIds = new Set<string>()
     const markExitPlanRequestResolved = (requestId: string): void => {
       resolvedExitPlanRequestIds.add(requestId)
@@ -980,17 +982,6 @@ export function useGlobalAgentListeners(): void {
       })
       return inserted
     }
-
-    // renderer 重载后，主进程仍保留未决审批；恢复横幅时同步重建只读计划预览。
-    void window.electronAPI.getPendingRequests()
-      .then(({ exitPlans }) => {
-        for (const request of exitPlans) {
-          if (queueExitPlanRequest(request) && request.planDocument) {
-            openPlanDocumentPreview(request.sessionId, request.planDocument)
-          }
-        }
-      })
-      .catch((error) => console.warn('[GlobalAgentListeners] 恢复待处理审批请求失败', error))
 
     const refreshAffectedPreviews = (filePaths: readonly string[]): void => {
       if (filePaths.length === 0) return
@@ -1159,33 +1150,67 @@ export function useGlobalAgentListeners(): void {
         })
       }
     }
-    void restoreQueuedMessages().catch(console.error)
+    const restorePendingRequests = async (): Promise<void> => {
+      const snapshot = await window.electronAPI.getPendingRequests()
+      const permissions = new Map<string, import('@proma/shared').PermissionRequest[]>()
+      for (const request of snapshot.permissions) {
+        if (resolvedPermissionRequestIds.has(request.requestId)) continue
+        const current = permissions.get(request.sessionId) ?? []
+        permissions.set(request.sessionId, [...current, request])
+      }
+      const askUsers = new Map<string, import('@proma/shared').AskUserRequest[]>()
+      for (const request of snapshot.askUsers) {
+        if (resolvedAskUserRequestIds.has(request.requestId)) continue
+        const current = askUsers.get(request.sessionId) ?? []
+        askUsers.set(request.sessionId, [...current, request])
+      }
+      store.set(allPendingPermissionRequestsAtom, permissions)
+      store.set(allPendingAskUserRequestsAtom, askUsers)
+      store.set(allPendingExitPlanRequestsAtom, new Map())
+      for (const request of snapshot.exitPlans) {
+        if (queueExitPlanRequest(request) && request.planDocument) {
+          openPlanDocumentPreview(request.sessionId, request.planDocument)
+        }
+      }
+    }
 
-    // ===== 0. 初始化：恢复 stoppedByUser 与主进程真实运行态 =====
-    // 运行态不落盘，窗口重载或 renderer 晚订阅时必须从主进程 activeSessions
-    // 补一份快照；快照只提升缺失/更旧的状态，不覆盖已收到的完成态。
-    window.electronAPI.listActiveAgentSessionSnapshots().then((snapshots) => {
+    const restoreActiveSnapshots = async (): Promise<void> => {
+      const snapshots = await window.electronAPI.listActiveAgentSessionSnapshots()
       unstable_batchedUpdates(() => {
         for (const snapshot of snapshots) {
-          store.set(agentSessionStreamingStateAtomFamily(snapshot.sessionId), (existing) => {
-            return mergeActiveAgentSessionSnapshot(
-              existing,
-              snapshot,
-              latestTerminalRun.get(snapshot.sessionId),
-            )
-          })
+          store.set(agentSessionStreamingStateAtomFamily(snapshot.sessionId), (existing) => mergeActiveAgentSessionSnapshot(existing, snapshot, latestTerminalRun.get(snapshot.sessionId)))
         }
       })
-    }).catch(console.error)
+    }
 
-    window.electronAPI.listActiveAgentSessions().then((sessions) => {
-      const stoppedIds = new Set<string>(
-        sessions.filter((s) => s.stoppedByUser).map((s) => s.id)
-      )
-      if (stoppedIds.size > 0) {
-        store.set(stoppedByUserSessionsAtom, stoppedIds)
+    const restoreStoppedSessions = async (): Promise<void> => {
+      const sessions = await window.electronAPI.listActiveAgentSessions()
+      const stoppedIds = new Set<string>(sessions.filter((s) => s.stoppedByUser).map((s) => s.id))
+      store.set(stoppedByUserSessionsAtom, stoppedIds)
+    }
+
+    const recoverWebRemoteState = async (): Promise<void> => {
+      await Promise.all([
+        restoreActiveSnapshots(),
+        restoreQueuedMessages(),
+        restorePendingRequests(),
+        restoreStoppedSessions(),
+        window.electronAPI.listAgentSessions().then((sessions) => store.set(agentSessionsAtom, (prev) => mergeFetchedAgentSessions(prev, sessions))),
+      ])
+      const activeSessionId = store.get(activeSessionIdAtom)
+      if (activeSessionId) {
+        store.set(agentMessageRefreshAtom, (prev) => {
+          const next = new Map(prev)
+          next.set(activeSessionId, (prev.get(activeSessionId) ?? 0) + 1)
+          return next
+        })
       }
-    }).catch(console.error)
+    }
+
+    void Promise.all([restoreQueuedMessages(), restorePendingRequests(), restoreActiveSnapshots(), restoreStoppedSessions()]).catch(console.error)
+    if (typeof window !== 'undefined') {
+      ;(window as Window & { __PROMA_WEB_REMOTE_RECOVER?: () => Promise<void> }).__PROMA_WEB_REMOTE_RECOVER = recoverWebRemoteState
+    }
 
     // ===== 1. 流式事件 =====
     const handleStreamEvent = (streamEvent: AgentStreamEvent): void => {
@@ -1589,6 +1614,18 @@ export function useGlobalAgentListeners(): void {
               map.set(sessionId, event.suggestion)
               return map
             })
+          } else if (event.type === 'permission_resolved') {
+            resolvedPermissionRequestIds.add(event.requestId)
+            store.set(allPendingPermissionRequestsAtom, (prev) => {
+              const next = new Map(prev)
+              for (const [pendingSessionId, requests] of prev) {
+                const remaining = requests.filter((request) => request.requestId !== event.requestId)
+                if (remaining.length === requests.length) continue
+                if (remaining.length > 0) next.set(pendingSessionId, remaining)
+                else next.delete(pendingSessionId)
+              }
+              return next
+            })
           } else if (event.type === 'permission_request') {
             // 权限请求入队（统一通道，不区分当前/后台会话）
             store.set(allPendingPermissionRequestsAtom, (prev) => {
@@ -1622,6 +1659,7 @@ export function useGlobalAgentListeners(): void {
               'permissionRequest'
             )
           } else if (event.type === 'ask_user_resolved') {
+            resolvedAskUserRequestIds.add(event.requestId)
             // AskUser 可能由协作父会话代答，收到 resolved 后清理所有会话中的残留请求和草稿
             store.set(allPendingAskUserRequestsAtom, (prev) => {
               let changed = false
@@ -2149,6 +2187,8 @@ export function useGlobalAgentListeners(): void {
     const unsubscribeVisibleSession = store.sub(activeSessionIdAtom, syncVisibleAgentStreamSession)
 
     return () => {
+      const remoteWindow = window as Window & { __PROMA_WEB_REMOTE_RECOVER?: () => Promise<void> }
+      if (remoteWindow.__PROMA_WEB_REMOTE_RECOVER === recoverWebRemoteState) delete remoteWindow.__PROMA_WEB_REMOTE_RECOVER
       cleanupEvent()
       streamEventBatcher.dispose()
       unsubscribeVisibleSession()

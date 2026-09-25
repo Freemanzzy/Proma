@@ -362,10 +362,11 @@ export function AppShell(): React.ReactElement {
       <div className="shell-bg relative h-screen w-screen overflow-hidden bg-gradient-to-br from-zinc-50 to-zinc-100 dark:from-zinc-950 dark:to-zinc-900">
         <div
           ref={appContentRef}
+          data-web-remote-app-content="true"
           className={cn('flex h-full w-full', getWindowTitlebarContentInsetClass(isWindows), settingsOpen && 'hidden')}
         >
             {/* 左侧边栏：可折叠，可拖拽调整宽度 */}
-            <div className="relative z-[60] crt-sidebar">
+            <div data-web-remote-sidebar="left" className="relative z-[60] crt-sidebar">
               <LeftSidebar width={clampedLeftSidebarWidth} noTransition={isDraggingLeftSidebar} />
               {/* 侧边栏展开时显示拖拽手柄，折叠态隐藏 */}
               {!sidebarCollapsed && (
@@ -377,10 +378,10 @@ export function AppShell(): React.ReactElement {
                 />
               )}
             </div>
-            <div aria-hidden="true" className="relative z-[61] w-px flex-shrink-0 bg-border/80 dark:bg-border/70" />
+            <div data-web-remote-sidebar-divider="true" aria-hidden="true" className="relative z-[61] w-px flex-shrink-0 bg-border/80 dark:bg-border/70" />
 
             {/* 中间容器：relative z-[60] 使其在 z-50 拖动区域之上 */}
-            <div className="flex-1 min-w-0 relative z-[60]">
+            <div data-web-remote-main="true" className="flex-1 min-w-0 relative z-[60]">
               {/* 主内容区域（TabBar + TabContent） */}
               <MainArea />
               {/* 全局 Toast 固定在 Agent 历史主区右上角，不进入右侧原生浏览器面板。 */}
@@ -390,6 +391,7 @@ export function AppShell(): React.ReactElement {
             {/* 右侧边栏：Agent 文件面板 */}
             {showRightPanel && (
               <div
+                data-web-remote-panel="right"
                 className="relative z-[60] flex flex-shrink-0 items-stretch crt-sidebar"
               >
                 <div aria-hidden="true" className="pointer-events-none absolute left-0 top-0 bottom-0 z-10 w-px bg-border/80 dark:bg-border/70" />

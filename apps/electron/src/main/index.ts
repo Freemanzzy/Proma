@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Menu, nativeTheme, protocol, screen, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, screen, shell } from 'electron'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
 import { existsSync } from 'fs'
@@ -78,13 +78,16 @@ import { createApplicationMenu } from './menu'
 import { registerIpcHandlers } from './ipc'
 import { createTray, destroyTray, getTray, setTrayFlash } from './tray'
 import { initializeRuntime } from './lib/runtime-init'
-import { seedDefaultSkills } from './lib/config-paths'
-import { upgradeDefaultSkillsInWorkspaces } from './lib/agent-workspace-manager'
+import { getConfigDir, seedDefaultSkills } from './lib/config-paths'
+import { getProjectFilesPath, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles, listAgentWorkspaces, upgradeDefaultSkillsInWorkspaces } from './lib/agent-workspace-manager'
 import { hasActiveAgentSessions, stopAllAgents } from './lib/agent-service'
-import { startWebRemoteIfEnabled, stopWebRemote } from './lib/web-remote/web-remote-service'
+import { prepareWebRemoteFullUi, startWebRemoteIfEnabled, stopWebRemote } from './lib/web-remote/web-remote-service'
 import { stopAllTerminals } from './lib/terminal-service'
 import { disposePiMcpConnections } from './lib/adapters/pi-mcp-tools'
-import { markRunningDelegationsAsInterrupted } from './lib/agent-session-manager'
+import { getAgentSessionMeta, markRunningDelegationsAsInterrupted } from './lib/agent-session-manager'
+import { permissionService } from './lib/agent-permission-service'
+import { askUserService } from './lib/agent-ask-user-service'
+import { exitPlanService } from './lib/agent-exit-plan-service'
 import { stopAllGenerations } from './lib/chat-service'
 import { configureUpdater, initAutoUpdater, cleanupUpdater } from './lib/updater/auto-updater'
 import { startWorkspaceWatcher, stopWorkspaceWatcher } from './lib/workspace-watcher'
@@ -712,8 +715,51 @@ async function bootstrap(): Promise<void> {
   const menu = createApplicationMenu()
   Menu.setApplicationMenu(menu)
 
-  // Register IPC handlers
+  // Register IPC handlers. Full UI spike 必须在注册前同步捕获。
+  const fullUiBridge = prepareWebRemoteFullUi(ipcMain, undefined, {
+    getSessionMeta: getAgentSessionMeta,
+    getInteractionSessionId: (requestId) => permissionService.getPendingRequests().find((request) => request.requestId === requestId)?.sessionId
+      ?? askUserService.getPendingRequests().find((request) => request.requestId === requestId)?.sessionId
+      ?? exitPlanService.getPendingRequests().find((request) => request.requestId === requestId)?.sessionId,
+    listWorkspaces: listAgentWorkspaces,
+    getPathRoots: (args) => {
+      const strings: string[] = []
+      const walk = (value: unknown): void => {
+        if (typeof value === 'string') strings.push(value)
+        else if (Array.isArray(value)) value.forEach(walk)
+        else if (value && typeof value === 'object') Object.values(value).forEach(walk)
+      }
+      walk(args)
+      const sessionId = strings.find((value) => !!getAgentSessionMeta(value))
+      const session = sessionId ? getAgentSessionMeta(sessionId) : undefined
+      const workspaces = listAgentWorkspaces()
+      const explicitWorkspaceId = strings.find((value) => workspaces.some((workspace) => workspace.id === value))
+      const explicitWorkspaceSlug = strings.find((value) => workspaces.some((workspace) => workspace.slug === value))
+      const workspace = (session?.workspaceId ? workspaces.find((item) => item.id === session.workspaceId) : undefined)
+        ?? (explicitWorkspaceId ? workspaces.find((item) => item.id === explicitWorkspaceId) : undefined)
+        ?? (explicitWorkspaceSlug ? workspaces.find((item) => item.slug === explicitWorkspaceSlug) : undefined)
+      if (!workspace) return []
+      const roots: Array<{ path: string; exact?: boolean }> = []
+      const add = (path: string | undefined, exact = false): void => { if (path && !roots.some((root) => root.path === path && root.exact === exact)) roots.push({ path, exact }) }
+      add(workspace.projectRootPath ?? join(getConfigDir(), 'agent-workspaces', workspace.slug, 'workspace-files'))
+      add(getProjectFilesPath(workspace.slug))
+      getWorkspaceAttachedDirectories(workspace.slug).forEach((path) => add(path))
+      getWorkspaceAttachedFiles(workspace.slug).forEach((path) => add(path, true))
+      if (sessionId) {
+        add(join(getConfigDir(), 'agent-workspaces', workspace.slug, sessionId))
+        session?.attachedDirectories?.forEach((path) => add(path))
+        session?.attachedFiles?.forEach((path) => add(path, true))
+        add(session?.activeWorktree?.path)
+      }
+      return roots
+    },
+  })
   registerIpcHandlers()
+  if (fullUiBridge) {
+    const counts = fullUiBridge.getRegistrationCounts()
+    console.log(`[Web Remote] full-ui 已登记 invoke=${counts.invoke} event=${counts.event}`)
+    fullUiBridge.reportCoverage()
+  }
 
   // 收敛上次退出时遗留的运行中委派子会话（内存态丢失，无法续跑）
   safeRun('markRunningDelegationsAsInterrupted', markRunningDelegationsAsInterrupted)

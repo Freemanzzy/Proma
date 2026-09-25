@@ -1,5 +1,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
+import { brotliCompressSync, gzipSync } from 'node:zlib'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { join, normalize } from 'node:path'
 import type { Duplex } from 'node:stream'
 import WebSocket, { WebSocketServer } from 'ws'
 import { agentEventBus, isAgentSessionActive, listActiveAgentSessionSnapshots, queueAgentMessage, runAgentHeadless, stopAgent } from '../agent-service'
@@ -12,9 +15,26 @@ import { WebRemoteAuth, expectedWebRemoteOrigin, makeAuthCookie, parseCookieHead
 import { WebRemoteEventHub } from './web-remote-events'
 import { toWebRemoteHistory, toWebRemotePermissionRequest, type WebRemoteEvent } from './web-remote-dto'
 import { renderWebRemoteIcon, renderWebRemoteManifest, renderWebRemoteStatic } from './web-remote-static'
+import type { WebRemoteIpcBridge } from './full-ui/web-remote-ipc'
+import { renderWebRemoteMobilePatch } from './full-ui/mobile-patch'
 
 const MAX_BODY_BYTES = 100_000
 const MAX_MESSAGE_CHARS = 50_000
+const STATIC_CACHE_MAX_BYTES = 64 * 1024 * 1024
+const HASHED_ASSET = /(?:^|[-_.])[a-z0-9]{8,}(?=\.)/i
+
+type StaticEncoding = 'br' | 'gzip'
+
+interface StaticCacheEntry {
+  filePath: string
+  mtimeMs: number
+  size: number
+  etag: string
+  lastModified: string
+  body: Buffer
+  encoded: Map<StaticEncoding, Buffer>
+  lastAccessAt: number
+}
 
 interface AuthenticatedRequest {
   deviceId: string
@@ -26,6 +46,8 @@ export interface WebRemoteServerOptions {
   eventHub?: WebRemoteEventHub
   sendMessage?: (sessionId: string, message: string) => Promise<'started' | 'injected'>
   stopSession?: (sessionId: string) => void
+  ipcBridge?: WebRemoteIpcBridge
+  rendererDir?: string
 }
 
 function json(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
@@ -72,13 +94,16 @@ export class WebRemoteServer {
   private readonly connections = new Map<WebSocket, () => void>()
   private revokeTimer?: ReturnType<typeof setInterval>
   private listening = false
+  private readonly staticCache = new Map<string, StaticCacheEntry>()
+  private staticCacheBytes = 0
+  private renderedIndexCache?: { filePath: string; mtimeMs: number; size: number; body: Buffer; nonce: string }
 
   constructor(private readonly options: WebRemoteServerOptions) {
     this.auth = options.auth
     this.eventHub = options.eventHub ?? new WebRemoteEventHub()
     this.httpServer = createServer((req, res) => { void this.handleHttp(req, res) })
     this.wsServer = new WebSocketServer({ noServer: true })
-    this.httpServer.on('upgrade', (req, socket, head) => this.handleUpgrade(req, socket, head))
+    this.httpServer.on('upgrade', (req, socket, head) => { void this.handleUpgrade(req, socket, head) })
     this.wsServer.on('connection', (ws: WebSocket, req: IncomingMessage) => this.handleWebSocket(ws, req))
   }
 
@@ -102,6 +127,14 @@ export class WebRemoteServer {
     this.revokeTimer = setInterval(() => {
       this.auth.refreshFromDisk()
       for (const deviceId of this.auth.getRevokedDeviceIds()) this.eventHub.disconnectDevice(deviceId)
+      for (const [ws, remove] of this.connections) {
+        const deviceId = (ws as WebSocket & { webRemoteDeviceId?: string }).webRemoteDeviceId
+        if (deviceId?.startsWith('tailnet:') && !this.auth.isTrustedTailscaleNode(deviceId.slice('tailnet:'.length))) {
+          remove()
+          this.connections.delete(ws)
+          ws.close(1008, 'trusted device removed')
+        }
+      }
     }, 1000)
     this.revokeTimer.unref?.()
   }
@@ -116,13 +149,14 @@ export class WebRemoteServer {
     this.listening = false
   }
 
-  private authenticate(req: IncomingMessage, requireOrigin: boolean): AuthenticatedRequest | null {
-    const token = parseCookieHeader(req.headers.cookie)
-    const device = this.auth.authenticateToken(token)
-    if (!device) return null
-    if (requireOrigin && !this.auth.isAllowedOrigin(typeof req.headers.origin === 'string' ? req.headers.origin : undefined)) return null
-    if (!this.auth.isAllowedTailscaleLogin(typeof req.headers['tailscale-user-login'] === 'string' ? req.headers['tailscale-user-login'] : undefined)) return null
-    return { deviceId: device.id }
+  private async authenticate(req: IncomingMessage, requireOrigin: boolean): Promise<AuthenticatedRequest | null> {
+    const origin = typeof req.headers.origin === 'string' ? req.headers.origin : undefined
+    if (requireOrigin && !this.auth.isAllowedOrigin(origin)) return null
+    const tailscaleLogin = typeof req.headers['tailscale-user-login'] === 'string' ? req.headers['tailscale-user-login'] : undefined
+    if (!this.auth.isAllowedTailscaleLogin(tailscaleLogin)) return null
+    const device = this.auth.authenticateToken(parseCookieHeader(req.headers.cookie))
+      ?? await this.auth.authenticateTrustedTailscale(tailscaleLogin, typeof req.headers['x-forwarded-for'] === 'string' ? req.headers['x-forwarded-for'] : undefined)
+    return device ? { deviceId: device.id } : null
   }
 
   private hasAllowedWorkspace(workspaceId: string | undefined): boolean {
@@ -151,7 +185,15 @@ export class WebRemoteServer {
       return
     }
 
+    if (path === '/app' || path.startsWith('/app/')) {
+      await this.handleAppRequest(req, res, path)
+      return
+    }
+
     if (method === 'GET' && path === '/') {
+      const login = typeof req.headers['tailscale-user-login'] === 'string' ? req.headers['tailscale-user-login'] : undefined
+      const trusted = await this.auth.authenticateTrustedTailscale(login, typeof req.headers['x-forwarded-for'] === 'string' ? req.headers['x-forwarded-for'] : undefined)
+      if (trusted) { res.writeHead(302, { Location: '/app/' }); res.end(); return }
       const nonce = randomBytes(16).toString('base64url')
       const configuredOrigin = expectedWebRemoteOrigin(this.options.config)
       let websocketOrigin = ''
@@ -170,8 +212,9 @@ export class WebRemoteServer {
     }
 
     if (method === 'POST' && path === '/api/pair') {
-      if (!this.auth.isAllowedOrigin(typeof req.headers.origin === 'string' ? req.headers.origin : undefined)
-        || !this.auth.isAllowedTailscaleLogin(typeof req.headers['tailscale-user-login'] === 'string' ? req.headers['tailscale-user-login'] : undefined)) {
+      const pairOrigin = typeof req.headers.origin === 'string' ? req.headers.origin : undefined
+      const pairLogin = typeof req.headers['tailscale-user-login'] === 'string' ? req.headers['tailscale-user-login'] : undefined
+      if (!this.auth.isAllowedOrigin(pairOrigin) || !this.auth.isAllowedTailscaleLogin(pairLogin)) {
         json(res, 403, { error: 'origin or identity rejected' })
         return
       }
@@ -189,12 +232,13 @@ export class WebRemoteServer {
     }
 
     const isWrite = method !== 'GET'
-    const identity = this.authenticate(req, isWrite)
+    const identity = await this.authenticate(req, isWrite)
     if (!identity) {
       json(res, 401, { error: 'unauthorized' })
       return
     }
-    if (!Array.isArray(this.options.config.allowedWorkspaceIds) || this.options.config.allowedWorkspaceIds.length === 0) {
+    if (this.options.config.workspaceScope !== 'all'
+      && (!Array.isArray(this.options.config.allowedWorkspaceIds) || this.options.config.allowedWorkspaceIds.length === 0)) {
       json(res, 403, { error: 'no workspaces allowed' })
       return
     }
@@ -278,16 +322,161 @@ export class WebRemoteServer {
     json(res, 404, { error: 'not found' })
   }
 
-  private handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
+  private async handleAppRequest(req: IncomingMessage, res: ServerResponse, path: string): Promise<void> {
+    if (req.method !== 'GET') { json(res, 405, { error: 'method not allowed' }); return }
+    if (!await this.authenticate(req, false)) {
+      res.writeHead(302, { Location: '/' })
+      res.end()
+      return
+    }
+    const root = this.options.rendererDir ?? join(__dirname, 'renderer')
+    const relativePath = path === '/app' || path === '/app/' ? 'index.html' : decodeURIComponent(path.slice('/app/'.length))
+    const safePath = normalize(relativePath).replace(/^([.][.][/\\])+/, '')
+    const filePath = join(root, safePath)
+    if (!filePath.startsWith(root) || !existsSync(filePath) || !statSync(filePath).isFile()) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+      res.end('Not Found')
+      return
+    }
+
+    const sourceStat = statSync(filePath) as { mtimeMs: number; size: number; mtime: Date }
+    const isHtml = safePath === 'index.html'
+    const isPreload = safePath === 'preload.js'
+    const isHashedAsset = safePath.startsWith('assets/') && HASHED_ASSET.test(safePath.split('/').pop() ?? '')
+    const etag = `"${createHash('sha1').update(`${sourceStat.size}:${sourceStat.mtimeMs}`).digest('hex')}"`
+    const lastModified = sourceStat.mtime.toUTCString()
+    const conditionalMatch = req.headers['if-none-match'] === etag
+      || (typeof req.headers['if-modified-since'] === 'string' && req.headers['if-modified-since'] === lastModified)
+    const headers: Record<string, string> = {
+      'Cache-Control': isHashedAsset ? 'public, max-age=31536000, immutable' : 'no-cache',
+      ETag: etag,
+      'Last-Modified': lastModified,
+      Vary: 'Accept-Encoding',
+      'X-Content-Type-Options': 'nosniff',
+    }
+    if (!isHtml && conditionalMatch) {
+      res.writeHead(304, headers)
+      res.end()
+      return
+    }
+
+    let body: Buffer = readFileSync(filePath) as Buffer
+    let nonce = ''
+    if (isHtml) {
+      const rendered = this.getRenderedIndex(filePath, sourceStat, body)
+      body = rendered.body
+      nonce = rendered.nonce
+      headers['Content-Type'] = 'text/html; charset=utf-8'
+      headers['Content-Security-Policy'] = `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data: blob:; font-src 'self' data:; base-uri 'none'; frame-ancestors 'none'`
+    } else {
+      const ext = safePath.split('.').pop()?.toLowerCase()
+      headers['Content-Type'] = ({ js: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8', json: 'application/json; charset=utf-8', svg: 'image/svg+xml', png: 'image/png', webp: 'image/webp', ico: 'image/x-icon', woff: 'font/woff', woff2: 'font/woff2' } as Record<string, string>)[ext ?? ''] ?? 'application/octet-stream'
+    }
+    const cached = isHtml ? undefined : this.getStaticCache(filePath, sourceStat, etag, lastModified, body)
+    const representation = cached ? this.selectStaticRepresentation(cached, req.headers['accept-encoding']) : this.compressStaticBody(body, req.headers['accept-encoding'])
+    if (representation.encoding) headers['Content-Encoding'] = representation.encoding
+    headers['Content-Length'] = String(representation.body.byteLength)
+    if ((isHtml || isPreload) && conditionalMatch) {
+      res.writeHead(304, headers)
+      res.end()
+      return
+    }
+    res.writeHead(200, headers)
+    res.end(representation.body)
+  }
+
+  private getRenderedIndex(filePath: string, sourceStat: { mtimeMs: number; size: number; mtime: Date }, sourceBody: Buffer): { body: Buffer; nonce: string } {
+    const existing = this.renderedIndexCache
+    if (existing && existing.filePath === filePath && existing.mtimeMs === sourceStat.mtimeMs && existing.size === sourceStat.size) return existing
+    const nonce = randomBytes(16).toString('base64url')
+    let html = sourceBody.toString('utf8')
+    html = html.replace(/<script>([\s\S]*?)<\/script>/, `<script nonce="${nonce}">$1</script>`)
+    html = html.replace(/<script type="module"/, '<script src="/app/preload.js"></script><script type="module"')
+    html = html.replace('</body>', renderWebRemoteMobilePatch().replaceAll('__PROMA_NONCE__', nonce) + '</body>')
+    const rendered = { filePath, mtimeMs: sourceStat.mtimeMs, size: sourceStat.size, body: Buffer.from(html), nonce }
+    this.renderedIndexCache = rendered
+    return rendered
+  }
+
+  private getStaticCache(filePath: string, sourceStat: { mtimeMs: number; size: number; mtime: Date }, etag: string, lastModified: string, body: Buffer): StaticCacheEntry {
+    const existing = this.staticCache.get(filePath)
+    if (existing && existing.mtimeMs === sourceStat.mtimeMs && existing.size === sourceStat.size) {
+      existing.lastAccessAt = Date.now()
+      return existing
+    }
+    if (existing) this.removeStaticCache(filePath)
+    const entry: StaticCacheEntry = { filePath, mtimeMs: sourceStat.mtimeMs, size: sourceStat.size, etag, lastModified, body, encoded: new Map(), lastAccessAt: Date.now() }
+    if (body.byteLength <= STATIC_CACHE_MAX_BYTES) {
+      this.staticCache.set(filePath, entry)
+      this.staticCacheBytes += body.byteLength
+      this.evictStaticCache()
+    }
+    return entry
+  }
+
+  private removeStaticCache(filePath: string): void {
+    const entry = this.staticCache.get(filePath)
+    if (!entry) return
+    this.staticCache.delete(filePath)
+    this.staticCacheBytes -= entry.body.byteLength + [...entry.encoded.values()].reduce((sum, item) => sum + item.byteLength, 0)
+  }
+
+  private evictStaticCache(): void {
+    while (this.staticCacheBytes > STATIC_CACHE_MAX_BYTES && this.staticCache.size > 0) {
+      const oldest = [...this.staticCache.values()].sort((a, b) => a.lastAccessAt - b.lastAccessAt)[0]
+      if (!oldest) break
+      this.removeStaticCache(oldest.filePath)
+    }
+  }
+
+  private compressStaticBody(body: Buffer, acceptEncoding: string | undefined): { body: Buffer; encoding?: StaticEncoding } {
+    if (acceptEncoding?.includes('br')) {
+      const encoded = brotliCompressSync(body)
+      if (encoded.byteLength < body.byteLength) return { body: encoded, encoding: 'br' }
+    }
+    if (acceptEncoding?.includes('gzip')) {
+      const encoded = gzipSync(body)
+      if (encoded.byteLength < body.byteLength) return { body: encoded, encoding: 'gzip' }
+    }
+    return { body }
+  }
+
+  private selectStaticRepresentation(entry: StaticCacheEntry, acceptEncoding: string | undefined): { body: Buffer; encoding?: StaticEncoding } {
+    const encoding: StaticEncoding | undefined = acceptEncoding?.includes('br') ? 'br' : acceptEncoding?.includes('gzip') ? 'gzip' : undefined
+    if (!encoding) return { body: entry.body }
+    let encoded = entry.encoded.get(encoding)
+    if (!encoded) {
+      encoded = encoding === 'br' ? brotliCompressSync(entry.body) : gzipSync(entry.body)
+      if (encoded.byteLength >= entry.body.byteLength) return { body: entry.body }
+      entry.encoded.set(encoding, encoded)
+      this.staticCacheBytes += encoded.byteLength
+      this.evictStaticCache()
+      if (!this.staticCache.has(entry.filePath)) return { body: encoded, encoding }
+    }
+    entry.lastAccessAt = Date.now()
+    return { body: encoded, encoding }
+  }
+
+  private async handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
-    if (url.pathname !== '/api/stream') { sendUpgradeError(socket, 404, 'Not Found'); return }
-    if (!this.authenticate(req, true)) { sendUpgradeError(socket, 401, 'Unauthorized'); return }
+    if (url.pathname !== '/api/stream' && url.pathname !== '/api/ipc') { sendUpgradeError(socket, 404, 'Not Found'); return }
+    if (!await this.authenticate(req, true)) { sendUpgradeError(socket, 401, 'Unauthorized'); return }
     this.wsServer.handleUpgrade(req, socket, head, (ws: WebSocket) => this.wsServer.emit('connection', ws, req))
   }
 
-  private handleWebSocket(ws: WebSocket, req: IncomingMessage): void {
-    const device = this.auth.authenticateToken(parseCookieHeader(req.headers.cookie))
-    if (!device) { ws.close(1008, 'unauthorized'); return }
+  private async handleWebSocket(ws: WebSocket, req: IncomingMessage): Promise<void> {
+    const auth = await this.authenticate(req, true)
+    if (!auth) { ws.close(1008, 'unauthorized'); return }
+    const device = { id: auth.deviceId }
+    ;(ws as WebSocket & { webRemoteDeviceId?: string }).webRemoteDeviceId = device.id
+    if (new URL(req.url ?? '/', 'http://127.0.0.1').pathname === '/api/ipc') {
+      if (!this.options.ipcBridge) { ws.close(1013, 'full-ui disabled'); return }
+      this.connections.set(ws, () => {})
+      ws.once('close', () => this.connections.delete(ws))
+      ws.once('error', () => this.connections.delete(ws))
+      this.options.ipcBridge.attachWebSocket(ws, device.id)
+      return
+    }
     const connection = {
       deviceId: device.id,
       get bufferedAmount() { return (ws as unknown as { bufferedAmount: number }).bufferedAmount ?? 0 },

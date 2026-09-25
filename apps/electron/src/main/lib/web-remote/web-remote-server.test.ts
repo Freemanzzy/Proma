@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test'
 import { connect } from 'node:net'
 import WebSocket from 'ws'
-import { mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WebRemoteAuth } from './web-remote-auth'
@@ -29,17 +29,23 @@ let isWebRemoteConfigDirAllowed: typeof import('./web-remote-service').isWebRemo
 let server: InstanceType<typeof WebRemoteServer>
 let port: number
 let cookie: string
+let rendererDir: string
 
 beforeAll(async () => {
   WebRemoteServer = (await import('./web-remote-server')).WebRemoteServer
   isWebRemoteEnabled = (await import('./web-remote-service')).isWebRemoteEnabled
   isWebRemoteConfigDirAllowed = (await import('./web-remote-service')).isWebRemoteConfigDirAllowed
-  const config = { enabled: true, allowedOrigin: 'https://proma.example', allowedWorkspaceIds: ['ws-1'], allowedTailscaleLogins: ['lee@example.com'] }
-  const auth = new WebRemoteAuth(config, mkdtempSync(join(tmpdir(), 'proma-web-remote-server-')))
+  const config = { enabled: true, allowedOrigin: 'https://proma.example', allowedWorkspaceIds: ['ws-1'], allowedTailscaleLogins: ['lee@example.com'], trustedTailscaleNodes: ['trusted-phone'] }
+  const auth = new WebRemoteAuth(config, mkdtempSync(join(tmpdir(), 'proma-web-remote-server-')), async () => ({ Node: { ComputedName: 'trusted-phone' }, UserProfile: { LoginName: 'lee@example.com' } }))
   const code = auth.createPairingCode().code
   const paired = auth.pair(code, 'test')!
   cookie = `proma_web_remote=${paired.token}`
-  server = new WebRemoteServer({ config, auth })
+  rendererDir = mkdtempSync(join(tmpdir(), 'proma-web-remote-renderer-'))
+  mkdirSync(join(rendererDir, 'assets'))
+  writeFileSync(join(rendererDir, 'index.html'), '<!doctype html><html><body><div id="root"></div><script type="module" src="./assets/main-12345678.js"></script></body></html>')
+  writeFileSync(join(rendererDir, 'preload.js'), 'window.__PRELOAD__=true;'.repeat(200))
+  writeFileSync(join(rendererDir, 'assets', 'main-12345678.js'), 'console.log("cached");'.repeat(200))
+  server = new WebRemoteServer({ config, auth, rendererDir, ipcBridge: { attachWebSocket: (ws: WebSocket) => ws.send(Buffer.from(JSON.stringify({ type: 'ready' }))) } as never })
   await server.start(0)
   port = (server.httpServer.address() as { port: number }).port
 })
@@ -81,6 +87,59 @@ describe('WebRemoteServer loopback integration', () => {
     })
     expect(received.isBinary).toBe(false)
     expect(JSON.parse(received.text).type).toBe('ready')
+  })
+
+  test('受信 Tailnet 设备的 WS 升级与连接后再次鉴权均通过', async () => {
+    const received = await new Promise<{ text: string; isBinary: boolean }>((resolve, reject) => {
+      const client = new WebSocket(`ws://127.0.0.1:${port}/api/stream`, { headers: { Origin: 'https://proma.example', 'Tailscale-User-Login': 'lee@example.com', 'X-Forwarded-For': '100.90.1.2, 100.90.1.1' } })
+      const timer = setTimeout(() => { client.close(); reject(new Error('受信设备 WS ready 超时')) }, 2_000)
+      client.once('message', (data: Buffer, isBinary: boolean) => { clearTimeout(timer); resolve({ text: data.toString(), isBinary }); client.close() })
+      client.once('error', reject)
+    })
+    expect(received.isBinary).toBe(false)
+    expect(JSON.parse(received.text).type).toBe('ready')
+  })
+
+  test('受信 Tailnet 设备的 /api/ipc WebSocket 升级通过', async () => {
+    const received = await new Promise<string>((resolve, reject) => {
+      const client = new WebSocket(`ws://127.0.0.1:${port}/api/ipc`, { headers: { Origin: 'https://proma.example', 'Tailscale-User-Login': 'lee@example.com', 'X-Forwarded-For': '100.90.1.2' } })
+      const timer = setTimeout(() => { client.close(); reject(new Error('受信设备 IPC WS ready 超时')) }, 2_000)
+      client.once('message', (data: Buffer) => { clearTimeout(timer); resolve(data.toString()); client.close() })
+      client.once('error', reject)
+    })
+    expect(JSON.parse(received).type).toBe('ready')
+  })
+
+  test('受信 Tailnet 设备的 API 与 /app/ 静态资源均通过，根页跳转到 /app/', async () => {
+    const headers = { 'Tailscale-User-Login': 'lee@example.com', 'X-Forwarded-For': '100.90.1.2' }
+    const api = await fetch(`http://127.0.0.1:${port}/api/sessions`, { headers })
+    expect(api.status).toBe(200)
+    const app = await fetch(`http://127.0.0.1:${port}/app/`, { headers })
+    expect(app.status).toBe(200)
+    const response = await fetch(`http://127.0.0.1:${port}/`, { redirect: 'manual', headers })
+    expect(response.status).toBe(302)
+    expect(response.headers.get('location')).toBe('/app/')
+  })
+
+  test('完整界面静态资源提供压缩、长缓存和协商缓存', async () => {
+    const headers = { Cookie: cookie, 'Tailscale-User-Login': 'lee@example.com' }
+    const asset = await fetch(`http://127.0.0.1:${port}/app/assets/main-12345678.js`, { headers: { ...headers, 'Accept-Encoding': 'br' } })
+    expect(asset.status).toBe(200)
+    expect(asset.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
+    expect(asset.headers.get('content-encoding')).toBe('br')
+    expect(asset.headers.get('etag')).toBeString()
+    expect(asset.headers.get('last-modified')).toBeString()
+    const cached = await fetch(`http://127.0.0.1:${port}/app/assets/main-12345678.js`, { headers: { ...headers, 'If-None-Match': asset.headers.get('etag')! } })
+    expect(cached.status).toBe(304)
+    const index = await fetch(`http://127.0.0.1:${port}/app/`, { headers })
+    expect(index.status).toBe(200)
+    expect(index.headers.get('cache-control')).toBe('no-cache')
+    expect(index.headers.get('etag')).toBeString()
+    expect(index.headers.get('last-modified')).toBeString()
+    const preload = await fetch(`http://127.0.0.1:${port}/app/preload.js`, { headers: { ...headers, 'Accept-Encoding': 'gzip' } })
+    expect(preload.status).toBe(200)
+    expect(preload.headers.get('cache-control')).toBe('no-cache')
+    expect(preload.headers.get('content-encoding')).toBe('gzip')
   })
 
   test('manifest 与图标路由无需登录且不泄露会话数据', async () => {
@@ -132,6 +191,28 @@ describe('WebRemoteServer loopback integration', () => {
       socket.once('data', (data) => { resolve(data.toString()); socket.destroy() })
     })
     expect(response).toContain('401')
+  })
+
+  test('从配置撤销 Tailnet 节点后数秒内关闭既有 WebSocket', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'proma-web-remote-revoke-'))
+    const config = { allowedOrigin: 'https://proma.example', allowedTailscaleLogins: ['lee@example.com'], trustedTailscaleNodes: ['trusted-phone'] }
+    writeFileSync(join(dir, 'config.json'), JSON.stringify(config))
+    const revokeAuth = new WebRemoteAuth(config, dir, async () => ({ Node: { ComputedName: 'trusted-phone' }, UserProfile: { LoginName: 'lee@example.com' } }))
+    const revokeServer = new WebRemoteServer({ config, auth: revokeAuth })
+    await revokeServer.start(0)
+    const revokePort = (revokeServer.httpServer.address() as { port: number }).port
+    try {
+      const client = new WebSocket(`ws://127.0.0.1:${revokePort}/api/stream`, { headers: { Origin: 'https://proma.example', 'Tailscale-User-Login': 'lee@example.com', 'X-Forwarded-For': '100.90.1.2' } })
+      await new Promise<void>((resolve, reject) => { client.once('message', () => resolve()); client.once('error', reject) })
+      writeFileSync(join(dir, 'config.json'), JSON.stringify({ ...config, trustedTailscaleNodes: [] }))
+      const closed = await new Promise<number>((resolve, reject) => {
+        const timer = setTimeout(() => { client.terminate(); reject(new Error('撤销后 WS 未及时关闭')) }, 3_000)
+        client.once('close', (code) => { clearTimeout(timer); resolve(code) })
+      })
+      expect(closed).toBe(1008)
+    } finally {
+      await revokeServer.stop()
+    }
   })
 
   test('配置关闭时不满足启动条件', () => {
