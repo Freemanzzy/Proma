@@ -97,7 +97,12 @@ class CdpClient {
   }
 
   async evaluate(expression, returnByValue = true) {
-    const result = await this.command('Runtime.evaluate', { expression, returnByValue, awaitPromise: true, userGesture: true })
+    let result
+    try {
+      result = await this.command('Runtime.evaluate', { expression, returnByValue, awaitPromise: true, userGesture: true })
+    } catch (error) {
+      throw new Error(`${error instanceof Error ? error.message : String(error)}; expression=${expression.slice(0, 320)}`)
+    }
     if (result.exceptionDetails) throw new Error(`${result.exceptionDetails.exception?.description ?? result.exceptionDetails.text ?? '页面脚本异常'}; expression=${expression.slice(0, 220)}`)
     return returnByValue ? result.result?.value : result.result
   }
@@ -293,6 +298,30 @@ async function createHarness(options) {
     await client.evaluate(`delete document.body.dataset.webRemoteSidebarOpen`)
     return point
   }
+  const createHarnessSession = async (title) => {
+    const plus = await client.evaluate('(() => { const n=document.querySelector(\'button[aria-label="新建任务"]\'); if(!n)return null; const r=n.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()')
+    if (!plus) throw new Error('手机端找不到新建任务按钮')
+    await touchAt(client, plus.x, plus.y)
+    await delay(500)
+    await waitUntil(client, 'Boolean(document.querySelector(\'textarea:not([disabled]),[contenteditable="true"]\'))', 10_000)
+    activeSessionId = null
+    return { id: null, title, workspaceId: null }
+  }
+  const setPermissionMode = async (mode) => {
+    if (mode !== 'plan' && mode !== 'bypassPermissions') throw new Error(`未知权限模式: ${mode}`)
+    const targetLabel = mode === 'plan' ? '计划模式' : '完全自动'
+    const current = await client.evaluate('document.querySelector(\'button[aria-label="计划模式"],button[aria-label="完全自动"]\')?.getAttribute("aria-label")')
+    if (current !== targetLabel) {
+      const button = await client.evaluate('(() => { const n=document.querySelector(\'button[aria-label="计划模式"],button[aria-label="完全自动"]\'); if(!n)return null; const r=n.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2,aria:n.getAttribute("aria-label")}; })()')
+      if (!button) {
+        const diagnostic = await client.evaluate('({body:document.body.innerText.slice(-1000),buttons:[...document.querySelectorAll("button")].map((n)=>({aria:n.getAttribute("aria-label"),text:(n.innerText||"").trim()})).filter((x)=>x.aria||x.text).slice(-40)})')
+        throw new Error(`手机端找不到权限模式切换控件: ${JSON.stringify(diagnostic)}`)
+      }
+      await client.evaluate(`document.querySelector('button[aria-label="计划模式"],button[aria-label="完全自动"]')?.click()`)
+      await waitUntil(client, `Boolean(document.querySelector('button[aria-label=${quoteJs(targetLabel)}]'))`, 10_000)
+    }
+    return true
+  }
   const openSession = async (title) => {
     const candidates = [title, ...(title.includes('/') ? [title.split('/').at(-1)] : [])].filter(Boolean)
     let point
@@ -306,7 +335,7 @@ async function createHarness(options) {
       if (!point) throw new Error(`找不到可见文本: ${title}`)
       await touchAt(client, point.x, point.y)
       await waitUntil(client, `document.body.innerText.includes(${quoteJs(selected)})`)
-      const sessionMetas = await client.evaluate('window.electronAPI.listAgentSessions()')
+      const sessionMetas = await client.evaluate('window.electronAPI.listAgentSessions().then((xs)=>xs.map((m)=>({id:m?.id,title:m?.title,workspaceId:m?.workspaceId,updatedAt:m?.updatedAt})))')
       const matchingSessions = Array.isArray(sessionMetas)
         ? sessionMetas.filter((item) => item?.title === selected || item?.title === title || item?.title === title.split('/').at(-1))
         : []
@@ -320,6 +349,11 @@ async function createHarness(options) {
     }
   }
   const readHistory = async () => {
+    if (!activeSessionId) {
+      const sessions = await client.evaluate('window.electronAPI.listAgentSessions().then((xs)=>xs.map((m)=>({id:m?.id,title:m?.title,workspaceId:m?.workspaceId,updatedAt:m?.updatedAt})))')
+      const latest = Array.isArray(sessions) ? [...sessions].sort((a, b) => Number(b?.updatedAt ?? 0) - Number(a?.updatedAt ?? 0))[0] : null
+      if (latest?.id) activeSessionId = latest.id
+    }
     if (!activeSessionId) throw new Error('当前会话 ID 尚未建立')
     const history = await client.evaluate(`window.electronAPI.getAgentSessionSDKMessages(${quoteJs(activeSessionId)})`)
     if (!Array.isArray(history)) throw new Error(`会话历史返回格式无效: ${typeof history}`)
@@ -435,7 +469,7 @@ async function createHarness(options) {
     activeChrome = null
     activeProfile = null
   }
-  return { client, chrome, profile, pair, navigate, loadMetrics, openDrawer, clickSidebarText, clickText, openSession, inputAndSend, waitText, readHistory, waitForUserSubmission, waitForAssistantReply, waitForRunning, waitForAbortedAssistant, resolveVisibleAskUserA, resolveVisiblePlanApproval, getActiveSessionId: () => activeSessionId, invokeApi, invokeRaw, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, close }
+  return { client, chrome, profile, pair, navigate, loadMetrics, openDrawer, clickSidebarText, clickText, openSession, createHarnessSession, setPermissionMode, inputAndSend, waitText, readHistory, waitForUserSubmission, waitForAssistantReply, waitForRunning, waitForAbortedAssistant, resolveVisibleAskUserA, resolveVisiblePlanApproval, getActiveSessionId: () => activeSessionId, invokeApi, invokeRaw, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, close }
 }
 
 async function runRecovery(harness, options, result) {
@@ -455,7 +489,10 @@ async function runRecovery(harness, options, result) {
 }
 
 async function runInteractions(harness, options, result) {
-  await harness.openSession(options.session)
+  const harnessSessionTitle = `web-remote-harness-ask-plan-${Date.now()}`
+  const harnessSession = await harness.createHarnessSession(harnessSessionTitle)
+  await harness.setPermissionMode('plan')
+  result.harnessSession = { title: harnessSessionTitle, id: harnessSession?.id ?? null, workspaceId: harnessSession?.workspaceId ?? null, permissionMode: 'plan' }
   const askMessage = '请用 AskUserQuestion 工具问我一个二选一问题（A 或 B），我回答后只回复我选了什么'
   const existingAsk = await harness.client.evaluate('Boolean(document.querySelector(".ask-user-banner"))')
   if (!existingAsk) await harness.inputAndSend(askMessage)
@@ -482,7 +519,9 @@ async function runInteractions(harness, options, result) {
 }
 
 async function runAbort(harness, options, result) {
-  await harness.openSession(options.session)
+  const harnessSessionTitle = `web-remote-harness-abort-${Date.now()}`
+  const harnessSession = await harness.createHarnessSession(harnessSessionTitle)
+  result.harnessSession = { title: harnessSessionTitle, id: harnessSession?.id ?? null, workspaceId: harnessSession?.workspaceId ?? null }
   const abortMessage = '从 1 慢慢数到 300，每行一个数字；开始前先用 Bash 执行 sleep 15，然后继续，不要调用其他工具'
   if (await harness.resolveVisibleAskUserA()) await delay(2_000)
   if (await harness.resolveVisiblePlanApproval()) await delay(2_000)
