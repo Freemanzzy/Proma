@@ -294,3 +294,13 @@ python3 scripts/personal/import-proma-backup.py \\
 - 该认证统一覆盖 API、`/app/` 与静态文件、`/api/stream`、`/api/ipc` WebSocket 升级及连接建立后的二次认证；Origin/写操作检查不变。受信设备访问根配对页会跳转 `/app/`。撤销列表每秒刷新，删除信任项后已建立的 Tailnet WebSocket（含 IPC）将于轮询周期内关闭。
 - 配对页防止重复点击；配对返回 401 时会再验证已有 Cookie，若仍有效则进入 `/app/`。
 - 安全边界：撤销时从开发配置 `trustedTailscaleNodes` 删除该节点；规则同时要求 Tailnet 用户登录名、Tailscale 地址段、whois 用户和设备名精确匹配。服务只监听回环地址；同机进程理论上能伪造回环请求头，但本机进程本就拥有等同的本地访问权限。受信列表只写入个人开发配置，不入库。
+
+## 2026-09-25: Web Remote 手机输入工具栏布局修复
+
+- 根因（源码证据）：`InputToolbarOverflow` 原为固定 `h-[48px]`、单行 `justify-between`；左侧子行 `flex-1 min-w-0 overflow-hidden`，右侧模型选择器与发送控件又占用固定宽度。在 390pt 宽度下，左侧可用空间被挤压且工具子项可能被 `overflow-hidden` 裁掉；症状由布局与裁切造成，不是 mobile touch-forward 脚本专门拦截输入栏。
+- 修复：给工具栏容器增加稳定属性 `data-web-remote-input-toolbar`；移动注入层将其改为自动高度/可换行布局，左、右区域分行，并给按钮设置至少 40×40px 的触控边界，避免左侧与模型/发送区抢占同一行。Harness 增加 iPhone UA 参数，创建专用会话前先打开侧栏。
+- Android 412×915 触控证据：截图 `/tmp/web-remote-composer-fix/plan6/toolbar-412x915.png`。逐控件边界框分别为快速模式 x=19..59、权限模式 x=65..105、思考入口 x=111..151、语音 x=157..197、附件 x=203..243，均为 40×40px、相互留有 6px 间隔；各控件中心 `elementFromPoint` 命中自身 button。快速模式 `false→true`，权限模式“完全自动→计划模式”，思考入口触控后 Popover 可见。控件截图：`control-quick.png`、`control-permission.png`、`control-thinking.png`（均位于同目录）。
+- iPhone UA、390×844 smoke 通过，含 `/app/` 会话加载、发 pong、打开 MCP/Skills、Todo、定时任务及文件面板；截图 `/tmp/web-remote-composer-fix/iphone/smoke-final.png`。Android 412×915 对应 smoke 截图 `/tmp/web-remote-composer-fix/android/smoke-final.png`。本轮没有取得 iPhone 视口下逐控件命中/点击记录。
+- 计划审批未完成：手机 harness 的新会话创建流程在开发实例报 `Cannot read properties of null (reading 'id')`，未出现计划审批卡；因此没有批准后 assistant 回复 `done` 的 IPC 历史与截图证据，不能将手机端审批标记为通过。测试中曾临时改动 `独立站/test` 的标题、权限与 Codex 快速模式，均已恢复核验为标题 `test`、权限“完全自动”、快速模式关闭；未保留额外会话标题。
+- 回归：typecheck 通过；Web Remote 定向测试 51 pass / 0 fail；build:main、build:renderer、web preload 均通过；全量测试为 523 pass / 5 fail / 1 error，与记录基线 523/5/1 相同。Harness smoke 两个视口均通过。
+- 清理：本轮 harness JSON 均记录 `revoked=true`、`chromeExited=true`、`profileRemoved=true`；`/tmp` 中 `proma-mobile-chrome-*` 剩余数量为 0。未操作 Tailscale、官方版进程或用户 Web Remote 配置字段。

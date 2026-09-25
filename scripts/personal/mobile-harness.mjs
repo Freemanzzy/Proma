@@ -22,7 +22,7 @@ let activeProfile = null
 const ANDROID_UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 7 Build/UP1A.231005.007) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36'
 
 function parseArgs(argv) {
-  const result = { url: process.env.PROMA_WEB_REMOTE_URL ?? '', suite: 'smoke', session: process.env.PROMA_WEB_REMOTE_SESSION ?? '独立站/test', width: 412, height: 915, deviceScaleFactor: 3, outputDir: DEFAULT_OUTPUT_DIR, chromePath: process.env.CHROME_PATH ?? '', pairScript: join(REPO_ROOT, 'scripts/personal/web-remote.sh') }
+  const result = { url: process.env.PROMA_WEB_REMOTE_URL ?? '', suite: 'smoke', session: process.env.PROMA_WEB_REMOTE_SESSION ?? '独立站/test', width: 412, height: 915, deviceScaleFactor: 3, userAgent: 'android', outputDir: DEFAULT_OUTPUT_DIR, chromePath: process.env.CHROME_PATH ?? '', pairScript: join(REPO_ROOT, 'scripts/personal/web-remote.sh') }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     const value = () => argv[++i]
@@ -32,6 +32,7 @@ function parseArgs(argv) {
     else if (arg === '--width') result.width = Number(value())
     else if (arg === '--height') result.height = Number(value())
     else if (arg === '--device-scale-factor') result.deviceScaleFactor = Number(value())
+    else if (arg === '--user-agent') result.userAgent = value()
     else if (arg === '--output-dir') result.outputDir = resolve(value())
     else if (arg === '--chrome-path') result.chromePath = value()
     else if (arg === '--pair-script') result.pairScript = resolve(value())
@@ -257,7 +258,10 @@ async function createHarness(options) {
   })
   await client.command('Emulation.setDeviceMetricsOverride', { width: options.width, height: options.height, deviceScaleFactor: options.deviceScaleFactor, mobile: true, screenWidth: options.width, screenHeight: options.height })
   await client.command('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 })
-  await client.command('Network.setUserAgentOverride', { userAgent: ANDROID_UA, platform: 'Android' })
+  const userAgent = options.userAgent === 'iphone'
+    ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1'
+    : ANDROID_UA
+  await client.command('Network.setUserAgentOverride', { userAgent, platform: options.userAgent === 'iphone' ? 'iPhone' : 'Android' })
   let activeSessionId = null
   const navigate = async (path) => {
     const target = new URL(path, options.url).toString()
@@ -299,6 +303,7 @@ async function createHarness(options) {
     return point
   }
   const createHarnessSession = async (title) => {
+    await openDrawer()
     const plus = await client.evaluate('(() => { const n=document.querySelector(\'button[aria-label="新建任务"]\'); if(!n)return null; const r=n.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()')
     if (!plus) throw new Error('手机端找不到新建任务按钮')
     await touchAt(client, plus.x, plus.y)
@@ -705,7 +710,7 @@ async function runSmoke(harness, options, result) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2))
-  const result = { startedAt: new Date().toISOString(), options: { url: options.url, suite: options.suite, session: options.session, width: options.width, height: options.height, deviceScaleFactor: options.deviceScaleFactor, outputDir: options.outputDir }, steps: [], screenshots: [], consoleErrors: [], exceptions: [], pairedDeviceId: null, revoked: false, chromeExited: false, profileRemoved: false }
+  const result = { startedAt: new Date().toISOString(), options: { url: options.url, suite: options.suite, session: options.session, width: options.width, height: options.height, deviceScaleFactor: options.deviceScaleFactor, userAgent: options.userAgent, outputDir: options.outputDir }, steps: [], screenshots: [], consoleErrors: [], exceptions: [], pairedDeviceId: null, revoked: false, chromeExited: false, profileRemoved: false }
   let harness
   try {
     harness = await createHarness(options)

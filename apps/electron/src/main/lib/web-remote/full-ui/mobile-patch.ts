@@ -32,6 +32,13 @@ export function renderWebRemoteMobilePatch(): string {
   [data-web-remote-mobile-overlay] { position:fixed; inset:0; z-index:10000; background:rgba(0,0,0,.38); }
   body:not([data-web-remote-sidebar-open="true"]) [data-web-remote-mobile-overlay] { display:none; }
   [data-web-remote-main="true"] input, [data-web-remote-main="true"] textarea, [data-web-remote-main="true"] [contenteditable="true"] { font-size:16px!important; }
+  [data-web-remote-input-toolbar="true"] { height:auto!important; min-height:48px; flex-wrap:wrap!important; align-items:flex-start!important; gap:8px!important; }
+  [data-web-remote-input-toolbar="true"] > :first-child { flex:1 1 100%!important; min-width:0; flex-wrap:wrap!important; overflow:visible!important; }
+  [data-web-remote-input-toolbar="true"] > :first-child > * { min-height:40px; }
+  [data-web-remote-input-toolbar="true"] > :last-child { flex:1 1 100%; justify-content:flex-end; }
+  [data-web-remote-input-toolbar="true"] button, [data-web-remote-input-toolbar="true"] [role="button"] { min-height:40px!important; min-width:40px; }
+  [data-web-remote-input-toolbar="true"] [data-radix-popper-content-wrapper] { max-width:calc(100vw - 16px); }
+  [data-web-remote-input-toolbar="true"] [data-radix-popper-content-wrapper] > * { max-width:calc(100vw - 16px); }
   [data-web-remote-main="true"] [contenteditable="true"] { max-width:100%; overflow-x:hidden; }
   [data-web-remote-main="true"] kbd, [data-web-remote-main="true"] [data-shortcut], [data-web-remote-main="true"] [class*="shortcut"] { display:none!important; }
   img[alt="用户头像"] { display:none!important; }
