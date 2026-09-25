@@ -228,6 +228,7 @@ async function createHarness(options) {
     const paired = await client.evaluate(`fetch('/api/pair',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:${quoteJs(pairing.code)},label:${quoteJs(label)}})}).then(async r=>({status:r.status,body:await r.json()}))`)
     if (!paired || paired.status !== 200) throw new Error(`页面配对失败: ${JSON.stringify(paired)}`)
     await navigate('/app/')
+    await waitUntil(client, `document.body.innerText.includes('Agent') && !document.body.innerText.includes('正在启动 Proma')`, 60_000)
     return { ...paired.body, label, pairingOutput: pairing.output }
   }
   const openDrawer = async () => {
