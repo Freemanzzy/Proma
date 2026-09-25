@@ -161,7 +161,8 @@ async function findElement(client, text, selector = 'body *') {
     const wanted=${quoteJs(text)};
     const nodes=[...document.querySelectorAll(${quoteJs(selector)})];
     const visible=(node)=>{const r=node.getBoundingClientRect();const s=getComputedStyle(node);return r.width>0&&r.height>0&&r.right>0&&r.left<innerWidth&&r.bottom>0&&r.top<innerHeight&&s.visibility!=='hidden'&&s.display!=='none';};
-    const node=nodes.find((item)=>visible(item)&&((item.innerText||item.textContent||'').trim()===wanted)) || nodes.find((item)=>visible(item)&&((item.innerText||item.textContent||'').includes(wanted)));
+    const matches=nodes.filter((item)=>visible(item)&&((item.innerText||item.textContent||'').includes(wanted))).sort((a,b)=>{const rank=(item)=>item.matches('button,[role="button"]')?0:((item.innerText||item.textContent||'').trim()===wanted?1:2);const ar=a.getBoundingClientRect();const br=b.getBoundingClientRect();return rank(a)-rank(b)||(ar.width*ar.height)-(br.width*br.height)});
+    const node=matches[0];
     if(!node)return null; const r=node.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2,tag:node.tagName,text:(node.innerText||node.textContent||'').trim().slice(0,160)};
   })()`)
   if (!result) throw new Error(`找不到可见文本: ${text}`)
