@@ -236,6 +236,7 @@ async function createHarness(options) {
     const menu = await findElement(client, '☰', '[data-web-remote-mobile-menu],button')
     await touchAt(client, menu.x, menu.y)
     await waitUntil(client, `document.body.dataset.webRemoteSidebarOpen === 'true'`)
+    await delay(300)
   }
   const clickSidebarText = async (text) => {
     await openDrawer()
