@@ -14,6 +14,7 @@ export function renderWebRemoteMobilePatch(): string {
   [data-web-remote-panel="right"] { position:fixed!important; inset:56px 0 0!important; z-index:10002!important; display:none!important; width:100vw!important; max-width:none!important; height:calc(100vh - 56px)!important; background:hsl(var(--background)); }
   body[data-web-remote-right-open="true"] [data-web-remote-panel="right"] { display:flex!important; }
   [data-web-remote-panel="right"] > * { width:100%!important; max-width:none!important; min-width:0!important; }
+  [data-web-remote-panel="right"] > [aria-hidden="true"] { display:none!important; }
   body[data-web-remote-right-open="true"] [data-web-remote-panel="right"] [class*="opacity-0"] { opacity:1!important; pointer-events:auto!important; }
   [data-web-remote-panel="right"] [role="tablist"], [data-web-remote-panel="right"] [class*="overflow-x-auto"] { overflow-x:auto!important; white-space:nowrap; scrollbar-width:none; }
   [data-web-remote-panel="right"] button, [data-web-remote-panel="right"] [role="button"] { min-height:42px; }
