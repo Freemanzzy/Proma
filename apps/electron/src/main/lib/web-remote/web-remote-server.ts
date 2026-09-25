@@ -125,8 +125,10 @@ export class WebRemoteServer {
     const token = parseCookieHeader(req.headers.cookie)
     const device = this.auth.authenticateToken(token)
     if (!device) return null
-    if (requireOrigin && !this.auth.isAllowedOrigin(typeof req.headers.origin === 'string' ? req.headers.origin : undefined)) return null
-    if (!this.auth.isAllowedTailscaleLogin(typeof req.headers['tailscale-user-login'] === 'string' ? req.headers['tailscale-user-login'] : undefined)) return null
+    const origin = typeof req.headers.origin === 'string' ? req.headers.origin : undefined
+    if (requireOrigin && !this.auth.isAllowedOrigin(origin)) return null
+    const tailscaleLogin = typeof req.headers['tailscale-user-login'] === 'string' ? req.headers['tailscale-user-login'] : undefined
+    if (!this.auth.isExtraAllowedOrigin(origin) && !this.auth.isAllowedTailscaleLogin(tailscaleLogin)) return null
     return { deviceId: device.id }
   }
 
@@ -180,8 +182,10 @@ export class WebRemoteServer {
     }
 
     if (method === 'POST' && path === '/api/pair') {
-      if (!this.auth.isAllowedOrigin(typeof req.headers.origin === 'string' ? req.headers.origin : undefined)
-        || !this.auth.isAllowedTailscaleLogin(typeof req.headers['tailscale-user-login'] === 'string' ? req.headers['tailscale-user-login'] : undefined)) {
+      const pairOrigin = typeof req.headers.origin === 'string' ? req.headers.origin : undefined
+      const pairLogin = typeof req.headers['tailscale-user-login'] === 'string' ? req.headers['tailscale-user-login'] : undefined
+      if (!this.auth.isAllowedOrigin(pairOrigin)
+        || (!this.auth.isExtraAllowedOrigin(pairOrigin) && !this.auth.isAllowedTailscaleLogin(pairLogin))) {
         json(res, 403, { error: 'origin or identity rejected' })
         return
       }

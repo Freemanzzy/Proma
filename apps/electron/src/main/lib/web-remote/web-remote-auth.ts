@@ -193,7 +193,12 @@ export class WebRemoteAuth {
     if (!normalized) return false
     const expected = expectedWebRemoteOrigin(this.config)
     if (expected && normalized === expected) return true
-    return (this.config.extraAllowedOrigins ?? []).some((allowed) => normalizeOrigin(allowed) === normalized)
+    return this.isExtraAllowedOrigin(normalized)
+  }
+
+  isExtraAllowedOrigin(origin: string | undefined): boolean {
+    const normalized = normalizeOrigin(origin)
+    return !!normalized && (this.config.extraAllowedOrigins ?? []).some((allowed) => normalizeOrigin(allowed) === normalized)
   }
 
   isAllowedTailscaleLogin(login: string | undefined): boolean {
