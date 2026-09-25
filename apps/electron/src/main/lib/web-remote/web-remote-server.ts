@@ -195,7 +195,7 @@ export class WebRemoteServer {
         const label = typeof body.label === 'string' ? body.label : 'Web Remote'
         const paired = this.auth.pair(code, label)
         if (!paired) { json(res, 401, { error: 'invalid or locked pairing code' }); return }
-        json(res, 200, { deviceId: paired.deviceId }, { 'Set-Cookie': makeAuthCookie(paired.token) })
+        json(res, 200, { deviceId: paired.deviceId }, { 'Set-Cookie': makeAuthCookie(paired.token, !this.auth.isExtraAllowedOrigin(pairOrigin)) })
       } catch (error) {
         json(res, 400, { error: error instanceof Error ? error.message : 'invalid request' })
       }

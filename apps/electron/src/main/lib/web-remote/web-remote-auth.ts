@@ -221,8 +221,8 @@ export function parseCookieHeader(header: string | undefined, name = WEB_REMOTE_
   return undefined
 }
 
-export function makeAuthCookie(token: string): string {
-  return `${WEB_REMOTE_COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Strict`
+export function makeAuthCookie(token: string, secure = true): string {
+  return `${WEB_REMOTE_COOKIE}=${token}; Path=/; HttpOnly;${secure ? ' Secure;' : ''} SameSite=Strict`
 }
 
 export function hashTokenForTest(token: string): string {
