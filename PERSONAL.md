@@ -238,3 +238,11 @@ python3 scripts/personal/import-proma-backup.py \\
 - CDP 验收截图目录：`/tmp/web-remote-spike/round3/`。抽屉开关 3 次的 open/closed 截图均无残影；文件全屏面板 `panel-open-round3.png` / `panel-closed.png`；Todo 全屏面板 `todo-round3.png`；新建会话 `plus-round3.png`；设置首页 `settings-round3.png`；Skill 冻结恢复控制台与结果记录在 `freeze-console.json`。
 - 真实功能：`/agent-reach` 查询在页面冻结 20 秒后恢复，最终答案出现在手机端；侧栏新建会话和设置可打开；Todo 触控经过移动转发后打开全屏内容；面板关闭可用。当前全量测试仍为 503 pass / 5 fail / 1 error；typecheck、web-remote 定向测试、build:main、build:renderer、preload 构建均通过。
 - 本轮创建的配对设备 `df2bab01a7f2baca65f11bbc`、`48f2976d75d9335a0b451165` 均已撤销，并已用 `devices` 核对 `revokedAt`；headless Chrome PID/profile 已结束并删除。
+
+## 2026-09-25: Android round4 全屏面板与移动顶栏
+
+- 根因：全屏右侧面板内部 `SidePanel` 在 `isOpen=false` 时保留 `opacity-0 pointer-events-none`，移动端只切换外层显示导致蒙版/不可操作；浮动按钮固定在页面上方覆盖标签栏；面板入口切换时 touchend 后合成 click 二次翻转；设置入口仍出现在侧栏。
+- 修复：移动注入层在全屏状态强制面板内容 `opacity:1/pointer-events:auto`；新增固定移动顶栏，承载左侧菜单、当前视图标题与文件/返回切换，内容区下移 56px；面板从 `top:56px` 起占满宽度，标签栏横向滚动，控件行高至少 42px；侧栏设置入口隐藏，若设置已打开显示“设置请在电脑端操作”提示和返回按钮；修复 touch/click 去重和 sidebar resize handle 拦截。
+- Headless CDP 真实验证（412×915、deviceScaleFactor 3.5、Android touch、Tailscale HTTPS）：抽屉开关 3 次无残影；文件、Todo、定时任务、MCP/Skills 均以清晰的全屏面板显示；对话视图和面板均有固定顶栏；设置入口隐藏；冻结 20 秒后 `/agent-reach` 最终答案恢复显示；中止运行和顶栏交互仍属于验证中/未完整取证项。
+- round4 截图：`/tmp/web-remote-spike/round4/conversation-topbar-round4.png`、`drawer-open-round4.png`、`drawer-closed-round4.png`、`file-panel-round4.png`、`todo-round4.png`、`automation-round4.png`、`mcp-round4.png`、`sidebar-settings-hidden-round4.png`、`plus-round3.png`、`settings-round3.png`。
+- 回归：全量 `bun test` 仍为 503 pass / 5 fail / 1 error；typecheck、web-remote 定向测试、build:main、build:renderer、preload 构建通过。config 未添加 `extraAllowedOrigins`；本轮 `cdp-mobile` 设备均已撤销；全部 `/tmp/proma-mobile-chrome-*` 目录已清理。
