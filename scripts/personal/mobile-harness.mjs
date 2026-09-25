@@ -399,10 +399,15 @@ async function runExtra(harness, options, result) {
   }
   result.automationConfirm = { dialogSeen: automationDialogSeen, cancelled: automationDialogSeen }
 
+  try {
+    const closePanel = await findElement(harness.client, '×', '[data-web-remote-panel-toggle],button,[role="button"]')
+    await touchAt(harness.client, closePanel.x, closePanel.y)
+    await delay(300)
+  } catch {}
   await harness.openSession(options.session)
   const beforeSkillText = await harness.client.evaluate('document.body.innerText')
   await harness.inputAndSend('/status')
-  await delay(8_000)
+  await delay(20_000)
   const skillText = await harness.client.evaluate('document.body.innerText')
   const skillChanged = skillText.length > beforeSkillText.length + 20 && skillText.includes('/status')
   const skillScreenshot = await harness.screenshot('extra-readonly-skill')
