@@ -128,7 +128,9 @@ export class WebRemoteServer {
     const origin = typeof req.headers.origin === 'string' ? req.headers.origin : undefined
     if (requireOrigin && !this.auth.isAllowedOrigin(origin)) return null
     const tailscaleLogin = typeof req.headers['tailscale-user-login'] === 'string' ? req.headers['tailscale-user-login'] : undefined
-    if (!this.auth.isExtraAllowedOrigin(origin) && !this.auth.isAllowedTailscaleLogin(tailscaleLogin)) return null
+    // Loopback browser GET 请求通常没有 Origin，也没有 Tailscale 身份头；仅当显式配置了 extraAllowedOrigins 时放行。
+    const localExtraEnabled = !tailscaleLogin && (this.options.config.extraAllowedOrigins?.length ?? 0) > 0
+    if (!this.auth.isExtraAllowedOrigin(origin) && !localExtraEnabled && !this.auth.isAllowedTailscaleLogin(tailscaleLogin)) return null
     return { deviceId: device.id }
   }
 

@@ -103,7 +103,7 @@ function connect(): Promise<WebSocket> {
   return socketPromise
 }
 
-async function invoke(channel: string, args: unknown[]): Promise<unknown> {
+async function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
   const ws = await connect()
   const id = `${Date.now()}-${nextId++}`
   const payload = JSON.stringify({ type: 'invoke', id, channel, args: args.map(encode) })
@@ -117,7 +117,7 @@ async function invoke(channel: string, args: unknown[]): Promise<unknown> {
   })
 }
 
-function send(channel: string, args: unknown[]): void {
+function send(channel: string, ...args: unknown[]): void {
   void connect().then((ws) => ws.send(JSON.stringify({ type: 'send', id: `${Date.now()}-${nextId++}`, channel, args: args.map(encode) }))).catch((error) => console.error('[Web Remote full-ui] send 失败', error))
 }
 
