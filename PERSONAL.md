@@ -255,3 +255,13 @@ python3 scripts/personal/import-proma-backup.py \\
 - 删除验证期 `extraAllowedOrigins`、非 Secure Cookie 与无 Tailscale 身份头的回环放宽逻辑；配对与已认证请求均要求配置 Origin 和 `Tailscale-User-Login`，Cookie 固定 `HttpOnly; Secure; SameSite=Strict`。`/app/` CSP 仍保留 `style-src 'unsafe-inline'`，原因是上游 renderer 大量运行时内联样式，待后续拆分样式后再收紧；根配对页 CSP 已保持 nonce-only。
 - 单元验证：`bun test apps/electron/src/main/lib/web-remote` 为 36 pass / 0 fail；新增安全测试覆盖分级表、默认拒绝、越权、列表/事件过滤、confirm、denied、设置密钥剔除。`bun run typecheck`、`build:main`、`build:renderer`、web preload 构建通过。
 - 技术验证真机检验通过：上一轮 Android Chrome + Tailscale Serve 已验证配对、会话/流式消息、审批、中止、锁屏重连及移动抽屉/全屏面板。最终 A1 harness（提交 `1b6a14dc` 后运行）在 412×915、deviceScaleFactor 3 下完成 load、`独立站/test`、pong、MCP/Skills、Todo、定时任务、文件面板步骤；截图为 `/tmp/proma-mobile-harness-a1-final/mcp-skills.png`、`todo.png`、`automations.png`、`files.png`、`smoke-final.png`。allowlist 额外检查只显示预期工作区，伪造越权会话返回 404；确认框取消与只读 Skill 的独立 UI 检查仍待父会话复核。
+
+## 2026-09-25: A1 复核修正（显式分级、文件路径与凭据掩码）
+
+- 修正提交：`4992288f`、`c766ec56`、`3db11586`、`aa570067`、`4a5ecd51`、`77f68ab9`。运行时分级表改为 442 条显式 `channel -> level/scope/rationale` 字面量表，不再按正则推断；源码导出通道与 10 个字面量 file/migration 通道的覆盖检查保留为登记校验，未知登记通道默认拒绝。
+- 最终分级统计：`read=64`、`session=36`、`workspace=35`、`write=9`、`confirm=28`、`denied=270`、未分级 `0`。新增 file 预览通道均执行 realpath 后的项目根、workspace-files、附加目录或允许会话目录校验；`file:write-text` 为 confirm；`migration:open-data-folder` 为 denied。
+- 改级：Mac 开窗/改项目根的 memory-window 与 project-root 通道为 denied；删除/覆盖/批量变更为 confirm；planning 创建/更新/提醒操作为无确认 `write`；planning native-sync/connect/disconnect/privacy/profile 通道为 denied。MCP `env`/`headers` 值在返回前掩码，敏感 key 保留键名但值为 `[REDACTED]`。
+- 开发实例真实 IPC 检查（不打印返回值）：`settings:get`、`channel:list`、所有允许工作区的 `agent:get-mcp-config` 均通过疑似密钥扫描，结果均为 `ok=true, suspicious=[]`；检查规则覆盖 `sk-`、`Bearer` 及敏感字段 key。工作区外 `file:resolve-and-read` 直接 IPC 请求返回 denied。
+- 修正后定向 Web Remote 测试：`39 pass / 0 fail`；全量测试：`511 pass / 5 fail / 1 error`，相对复核基线 `508/5/1` 未新增失败或错误。typecheck、build:main、build:renderer、web preload 均通过。
+- 最终手机证据（提交 `77f68ab9` 后运行）：panel DOM 标题断言全部通过（MCP/Skills、Todo、定时任务、文件），截图位于 `/tmp/proma-mobile-harness-a1-correction-final/`；Todo `harness-confirm-test` 创建成功，首次删除确认框取消后 Todo 仍在，第二次确认后消失；定时任务立即运行确认框出现并取消；只读 `/status` Skill 出现最终回复文本；文件越权 IPC 被拒。最终 smoke（同一最终代码）截图位于 `/tmp/proma-mobile-harness-a1-final-correction/`，load、会话、pong、四面板步骤全部成功。
+- 开发实例 stdout 未被当前会话捕获，无法贴出 watcher 的原始启动日志行；代码启动检查现应输出 `[Web Remote] full-ui 分级覆盖率 100%（invoke=N, event=M）`，单测已覆盖“登记表 ⊆ 分级表”及 10 个此前缺口通道。该日志行仍请父会话从开发实例日志复核。
