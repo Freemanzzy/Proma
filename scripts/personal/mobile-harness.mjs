@@ -156,6 +156,22 @@ async function waitUntil(client, expression, timeoutMs = 30_000, intervalMs = 25
 
 function quoteJs(value) { return JSON.stringify(value) }
 
+function sdkMessageRole(message) {
+  if (message?.type === 'assistant' || message?.type === 'user' || message?.type === 'system') return message.type
+  return typeof message?.role === 'string' ? message.role : ''
+}
+
+function sdkMessageText(message) {
+  const content = message?.message?.content ?? message?.content ?? message?.text ?? ''
+  const collect = (value) => {
+    if (typeof value === 'string') return value
+    if (Array.isArray(value)) return value.map(collect).filter(Boolean).join(' ')
+    if (value && typeof value === 'object') return collect(value.text ?? value.content ?? value.message ?? '')
+    return ''
+  }
+  return collect(content)
+}
+
 async function findElement(client, text, selector = 'body *') {
   const result = await client.evaluate(`(() => {
     const wanted=${quoteJs(text)};
@@ -222,22 +238,30 @@ async function createHarness(options) {
   let activeNavigation = null
   const loadMetrics = []
   client.on('Network.requestWillBeSent', (event) => {
-    if (activeNavigation) activeNavigation.requests += 1
+    if (activeNavigation) activeNavigation.requestIds.add(event.requestId)
+  })
+  client.on('Network.responseReceived', (event) => {
+    if (!activeNavigation) return
+    activeNavigation.responses += 1
+    if (event.response?.fromDiskCache || event.response?.fromServiceWorker || event.response?.fromPrefetchCache) activeNavigation.cachedResponses += 1
   })
   client.on('Network.loadingFinished', (event) => {
-    if (activeNavigation) activeNavigation.transferBytes += Number(event.encodedDataLength ?? 0)
+    if (!activeNavigation || activeNavigation.finishedIds.has(event.requestId)) return
+    activeNavigation.finishedIds.add(event.requestId)
+    activeNavigation.transferBytes += Number(event.encodedDataLength ?? 0)
   })
   await client.command('Emulation.setDeviceMetricsOverride', { width: options.width, height: options.height, deviceScaleFactor: options.deviceScaleFactor, mobile: true, screenWidth: options.width, screenHeight: options.height })
   await client.command('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 })
   await client.command('Network.setUserAgentOverride', { userAgent: ANDROID_UA, platform: 'Android' })
+  let activeSessionId = null
   const navigate = async (path) => {
     const target = new URL(path, options.url).toString()
     const startedAt = Date.now()
-    activeNavigation = { path, requests: 0, transferBytes: 0 }
+    activeNavigation = { path, requestIds: new Set(), finishedIds: new Set(), responses: 0, cachedResponses: 0, transferBytes: 0 }
     await client.command('Page.navigate', { url: target })
     await waitUntil(client, `document.readyState === 'complete' || document.readyState === 'interactive'`, 30_000)
-    await delay(500)
-    const metric = { path, requests: activeNavigation.requests, transferBytes: activeNavigation.transferBytes, durationMs: Date.now() - startedAt }
+    await delay(2_000)
+    const metric = { path, requests: activeNavigation.requestIds.size, responses: activeNavigation.responses, cachedResponses: activeNavigation.cachedResponses, transferBytes: activeNavigation.transferBytes, durationMs: Date.now() - startedAt }
     loadMetrics.push(metric)
     activeNavigation = null
     return metric
@@ -282,31 +306,124 @@ async function createHarness(options) {
       if (!point) throw new Error(`找不到可见文本: ${title}`)
       await touchAt(client, point.x, point.y)
       await waitUntil(client, `document.body.innerText.includes(${quoteJs(selected)})`)
+      const sessionMetas = await client.evaluate('window.electronAPI.listAgentSessions()')
+      const matchingSessions = Array.isArray(sessionMetas)
+        ? sessionMetas.filter((item) => item?.title === selected || item?.title === title || item?.title === title.split('/').at(-1))
+        : []
+      const sessionMeta = matchingSessions.sort((a, b) => Number(b?.updatedAt ?? 0) - Number(a?.updatedAt ?? 0))[0]
+      if (!sessionMeta?.id) throw new Error(`无法解析当前会话 ID: ${title}`)
+      activeSessionId = sessionMeta.id
       return point
     } catch (error) {
       const bodyText = await client.evaluate('document.body.innerText').catch(() => '')
       throw new Error(`${error instanceof Error ? error.message : String(error)}; body=${String(bodyText).slice(0, 1200)}`)
     }
   }
+  const readHistory = async () => {
+    if (!activeSessionId) throw new Error('当前会话 ID 尚未建立')
+    const history = await client.evaluate(`window.electronAPI.getAgentSessionSDKMessages(${quoteJs(activeSessionId)})`)
+    if (!Array.isArray(history)) throw new Error(`会话历史返回格式无效: ${typeof history}`)
+    return history
+  }
+  const waitForUserSubmission = async (userText, timeoutMs = 15_000) => {
+    const end = Date.now() + timeoutMs
+    let last = []
+    while (Date.now() < end) {
+      last = await readHistory()
+      if (last.some((message) => sdkMessageRole(message) === 'user' && sdkMessageText(message).includes(userText))) return last
+      await delay(250)
+    }
+    throw new Error(`消息未提交到会话历史: ${userText}; historyTail=${JSON.stringify(last.slice(-4).map((message) => ({ role: sdkMessageRole(message), text: sdkMessageText(message).slice(0, 180) })))}`)
+  }
+  const waitForAssistantReply = async (userText, expectedText, timeoutMs = 90_000) => {
+    const end = Date.now() + timeoutMs
+    let last = []
+    while (Date.now() < end) {
+      last = await readHistory()
+      const userIndex = [...last].map((message) => sdkMessageRole(message) === 'user' && sdkMessageText(message).includes(userText)).lastIndexOf(true)
+      const assistantReply = userIndex >= 0
+        ? last.slice(userIndex + 1).find((message) => sdkMessageRole(message) === 'assistant' && sdkMessageText(message).includes(expectedText))
+        : null
+      const pageAssistantHasText = await client.evaluate(`([...document.querySelectorAll('[data-message-role="assistant"]')].some((node) => (node.innerText || '').includes(${quoteJs(expectedText)})))`)
+      if (assistantReply && pageAssistantHasText) return { history: last, assistant: assistantReply }
+      await delay(500)
+    }
+    throw new Error(`未找到用户消息之后的 assistant 回复: ${expectedText}; historyTail=${JSON.stringify(last.slice(-6).map((message) => ({ role: sdkMessageRole(message), text: sdkMessageText(message).slice(0, 220) })))}`)
+  }
+  const waitForRunning = async (timeoutMs = 20_000) => {
+    const end = Date.now() + timeoutMs
+    while (Date.now() < end) {
+      const snapshots = await client.evaluate('window.electronAPI.listActiveAgentSessionSnapshots()')
+      if (Array.isArray(snapshots) && snapshots.some((snapshot) => snapshot?.sessionId === activeSessionId && snapshot?.running !== false)) return snapshots
+      await delay(250)
+    }
+    throw new Error(`冻结前未观察到当前会话运行中: ${activeSessionId}`)
+  }
+
+  const waitForAbortedAssistant = async (userText, timeoutMs = 30_000) => {
+    const end = Date.now() + timeoutMs
+    let last = []
+    while (Date.now() < end) {
+      last = await readHistory()
+      const userIndex = [...last].map((message) => sdkMessageRole(message) === 'user' && sdkMessageText(message).includes(userText)).lastIndexOf(true)
+      const aborted = userIndex >= 0
+        ? last.slice(userIndex + 1).find((message) => sdkMessageRole(message) === 'assistant' && (message.stop_reason === 'aborted' || message.message?.stop_reason === 'aborted' || message.subtype === 'aborted'))
+        : null
+      if (aborted) return { history: last, assistant: aborted }
+      await delay(500)
+    }
+    throw new Error(`未找到中止后的 assistant 记录: ${userText}; historyTail=${JSON.stringify(last.slice(-6).map((message) => ({ role: sdkMessageRole(message), text: sdkMessageText(message).slice(0, 220), stopReason: message.stop_reason ?? message.message?.stop_reason })))}`)
+  }
   const inputAndSend = async (message) => {
     const input = await client.evaluate(`(() => { const n=document.querySelector('textarea:not([disabled]),[contenteditable="true"]'); if(!n)return null; const r=n.getBoundingClientRect(); n.focus(); return {x:r.left+r.width/2,y:r.top+r.height/2,tag:n.tagName}; })()`)
-    if (!input) throw new Error('找不到消息输入框')
+    if (!input) {
+      const diagnostic = await client.evaluate('({body:document.body.innerText.slice(-1200),ask:Boolean(document.querySelector(".ask-user-banner")),plan:document.body.innerText.includes("Agent 计划待审批")})')
+      throw new Error(`找不到消息输入框: ${JSON.stringify(diagnostic)}`)
+    }
     await touchAt(client, input.x, input.y)
-    await client.command('Input.insertText', { text: message })
-    await client.evaluate(`(() => { const n=[...document.querySelectorAll('textarea,[contenteditable="true"]')].find((x)=>{const r=x.getBoundingClientRect();return r.width>0&&r.height>0}); if(n)n.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:${quoteJs(message)}})); })()`)
+    await client.evaluate(`(() => {
+      const n=[...document.querySelectorAll('textarea,[contenteditable="true"]')].find((x)=>{const r=x.getBoundingClientRect();return r.width>0&&r.height>0});
+      if (!n) return false;
+      if (n instanceof HTMLTextAreaElement || n instanceof HTMLInputElement) {
+        const setter=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(n),'value')?.set;
+        setter?.call(n,${quoteJs(message)});
+      } else {
+        n.textContent=${quoteJs(message)};
+      }
+      n.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:${quoteJs(message)}}));
+      n.dispatchEvent(new Event('change',{bubbles:true}));
+      return true;
+    })()`)
     await delay(100)
+    const typedValue = await client.evaluate('(() => { const n=[...document.querySelectorAll(\'textarea,[contenteditable="true"]\')].find((x)=>{const r=x.getBoundingClientRect();return r.width>0&&r.height>0}); return n ? (\'value\' in n ? n.value : n.innerText || n.textContent || \'\') : null })()')
+    if (typeof typedValue !== 'string' || !typedValue.includes(message)) throw new Error(`输入框未接收到完整消息: ${JSON.stringify({ activeSessionId, typedValue, message })}`)
     const send = await client.evaluate(`(() => { const nodes=[...document.querySelectorAll('button,[role="button"]')]; const visible=(x)=>{const r=x.getBoundingClientRect();return r.width>0&&r.height>0&&r.bottom>innerHeight-110&&x.getAttribute('aria-disabled')!=='true'&&!x.disabled}; const named=nodes.find(x=>visible(x)&&/^(发送|Send)$/.test((x.innerText||x.getAttribute('aria-label')||'').trim())); const bottom=nodes.filter(visible).sort((a,b)=>b.getBoundingClientRect().right-a.getBoundingClientRect().right)[0]; const n=named||bottom; if(!n)return null; const r=n.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2,aria:n.getAttribute('aria-label'),text:(n.innerText||'').trim()}; })()`)
     if (!send) {
       const controls = await client.evaluate(`([...document.querySelectorAll('button,[role="button"]')].map((x)=>({text:(x.innerText||'').trim(),aria:x.getAttribute('aria-label'),disabled:x.disabled,rect:(()=>{const r=x.getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height}})()})).filter((x)=>x.rect.w>0&&x.rect.h>0)).slice(-30)`)
       throw new Error(`找不到发送按钮 controls=${JSON.stringify(controls)}`)
     }
     await touchAt(client, send.x, send.y)
-    return true
+    await waitForUserSubmission(message)
+    return { submitted: true, userText: message }
   }
   const waitText = (text, timeoutMs = 60_000) => waitUntil(client, `document.body.innerText.includes(${quoteJs(text)})`, timeoutMs)
   const invokeApi = (method, args = []) => client.evaluate(`window.electronAPI[${quoteJs(method)}](...${quoteJs(args)})`)
   const invokeRaw = (channel, args = []) => client.evaluate(`window.__PROMA_WEB_REMOTE_INVOKE(${quoteJs(channel)}, ...${quoteJs(args)})`)
   const clickText = (text, selector = 'body *') => touchText(client, text, selector)
+  const resolveVisibleAskUserA = async () => {
+    if (!await client.evaluate('Boolean(document.querySelector(".ask-user-banner"))')) return false
+    const optionA = await findElement(client, 'A', '.ask-user-banner button')
+    await touchAt(client, optionA.x, optionA.y)
+    const confirm = await findElement(client, '确认', '.ask-user-banner button')
+    await touchAt(client, confirm.x, confirm.y)
+    return true
+  }
+  const resolveVisiblePlanApproval = async () => {
+    if (!await client.evaluate('document.body.innerText.includes("Agent 计划待审批")')) return false
+    const approve = await findElement(client, '批准并完全自动执行', 'button')
+    await touchAt(client, approve.x, approve.y)
+    return true
+  }
   const freeze = () => client.command('Page.setWebLifecycleState', { state: 'frozen' })
   const resume = () => client.command('Page.setWebLifecycleState', { state: 'active' })
   const close = async () => {
@@ -318,22 +435,72 @@ async function createHarness(options) {
     activeChrome = null
     activeProfile = null
   }
-  return { client, chrome, profile, pair, navigate, loadMetrics, openDrawer, clickSidebarText, clickText, openSession, inputAndSend, waitText, invokeApi, invokeRaw, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, close }
+  return { client, chrome, profile, pair, navigate, loadMetrics, openDrawer, clickSidebarText, clickText, openSession, inputAndSend, waitText, readHistory, waitForUserSubmission, waitForAssistantReply, waitForRunning, waitForAbortedAssistant, resolveVisibleAskUserA, resolveVisiblePlanApproval, getActiveSessionId: () => activeSessionId, invokeApi, invokeRaw, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, close }
 }
 
 async function runRecovery(harness, options, result) {
   await harness.openSession(options.session)
   const before = await harness.client.evaluate('({timeOrigin: performance.timeOrigin, navigationType: performance.getEntriesByType("navigation")[0]?.type ?? "unknown"})')
-  await harness.inputAndSend('请等待 10 秒后只回复 recovery-done')
-  await delay(1_000)
-  await harness.freeze()
+  const recoveryMessage = `请使用 Bash 执行 sleep 15，然后只回复 recovery-done。不要调用其他工具。`
+  await harness.inputAndSend(recoveryMessage)
+  const runningSnapshots = await harness.waitForRunning(20_000)
   const frozenAt = Date.now()
+  await harness.freeze()
   await delay(20_000)
   await harness.resume()
-  await harness.waitText('recovery-done', 60_000)
+  const reply = await harness.waitForAssistantReply(recoveryMessage, 'recovery-done', 90_000)
   const after = await harness.client.evaluate('({timeOrigin: performance.timeOrigin, navigationType: performance.getEntriesByType("navigation")[0]?.type ?? "unknown"})')
-  result.recovery = { frozenMs: Date.now() - frozenAt, finalAnswerSeen: true, pageReloaded: before.timeOrigin !== after.timeOrigin, before, after }
+  result.recovery = { frozenMs: Date.now() - frozenAt, finalAnswerSeen: Boolean(reply?.assistant), runningSnapshots: runningSnapshots.length, pageReloaded: before.timeOrigin !== after.timeOrigin, before, after }
   if (result.recovery.pageReloaded) throw new Error('冻结恢复触发了整页重载')
+}
+
+async function runInteractions(harness, options, result) {
+  await harness.openSession(options.session)
+  const askMessage = '请用 AskUserQuestion 工具问我一个二选一问题（A 或 B），我回答后只回复我选了什么'
+  const existingAsk = await harness.client.evaluate('Boolean(document.querySelector(".ask-user-banner"))')
+  if (!existingAsk) await harness.inputAndSend(askMessage)
+  await waitUntil(harness.client, `Boolean(document.querySelector('.ask-user-banner')) && document.body.innerText.includes('Proma Agent 需要你的输入')`, 90_000)
+  const askCard = await harness.screenshot('ask-question-card')
+  result.screenshots.push(askCard)
+  await harness.resolveVisibleAskUserA()
+  const askReply = await harness.waitForAssistantReply(askMessage, 'A', 90_000)
+  const askAnswerScreenshot = await harness.screenshot('ask-answer-a')
+  result.screenshots.push(askAnswerScreenshot)
+  result.askUser = { cardVisible: true, selected: 'A', assistantContainsA: Boolean(askReply?.assistant), cardScreenshot: askCard, answerScreenshot: askAnswerScreenshot }
+
+  const planMessage = '请进入计划模式，写一个只有一步的计划：回复 done；然后提交审批'
+  await harness.inputAndSend(planMessage)
+  await waitUntil(harness.client, `document.body.innerText.includes('Agent 计划待审批')`, 90_000)
+  const planCard = await harness.screenshot('exit-plan-approval')
+  result.screenshots.push(planCard)
+  const approve = await findElement(harness.client, '批准并完全自动执行', 'button')
+  await touchAt(harness.client, approve.x, approve.y)
+  const planReply = await harness.waitForAssistantReply(planMessage, 'done', 90_000)
+  const planDoneScreenshot = await harness.screenshot('exit-plan-done')
+  result.screenshots.push(planDoneScreenshot)
+  result.exitPlan = { approvalVisible: true, approved: true, assistantContainsDone: Boolean(planReply?.assistant), approvalScreenshot: planCard, doneScreenshot: planDoneScreenshot }
+}
+
+async function runAbort(harness, options, result) {
+  await harness.openSession(options.session)
+  const abortMessage = '从 1 慢慢数到 300，每行一个数字；开始前先用 Bash 执行 sleep 15，然后继续，不要调用其他工具'
+  if (await harness.resolveVisibleAskUserA()) await delay(2_000)
+  if (await harness.resolveVisiblePlanApproval()) await delay(2_000)
+  await harness.inputAndSend(abortMessage)
+  await waitUntil(harness.client, `Boolean(document.querySelector('button[aria-label="停止 Agent"],button[aria-label="再次停止 Agent"]'))`, 60_000)
+  const stop = await harness.client.evaluate(`(() => { const n=document.querySelector('button[aria-label="停止 Agent"],button[aria-label="再次停止 Agent"]'); if(!n)return null; const r=n.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2,aria:n.getAttribute('aria-label')}; })()`)
+  if (!stop) throw new Error('停止按钮在等待后消失')
+  await harness.client.evaluate('document.querySelector(\'button[aria-label="停止 Agent"],button[aria-label="再次停止 Agent"]\')?.click()')
+  await delay(500)
+  if (await harness.client.evaluate('Boolean(document.querySelector("button[aria-label=\\"停止 Agent\\"],button[aria-label=\\"再次停止 Agent\\"]"))')) {
+    await harness.invokeApi('stopAgent', [harness.getActiveSessionId()]).catch(() => {})
+  }
+  const aborted = await harness.waitForAbortedAssistant(abortMessage, 30_000)
+  await delay(500)
+  const screenshotPath = await harness.screenshot(`abort-${options.width}x${options.height}`)
+  result.screenshots.push(screenshotPath)
+  const pageStopped = await harness.client.evaluate(`([...document.querySelectorAll('[data-message-role="assistant"]')].some((node) => (node.innerText || '').includes('已被用户中断')))`)
+  result.abort = { stopClicked: true, historyAborted: Boolean(aborted?.assistant), pageStopped, screenshot: screenshotPath, viewport: { width: options.width, height: options.height } }
 }
 
 async function runExtra(harness, options, result) {
@@ -466,8 +633,9 @@ async function runSmoke(harness, options, result) {
   result.steps.push({ name: 'load', ok: true, url: new URL('/app/', options.url).toString() })
   await harness.openSession(options.session)
   result.steps.push({ name: 'open-session', ok: true, session: options.session })
-  await harness.inputAndSend('只回复 pong')
-  await harness.waitText('pong', 90_000)
+  const smokeMessage = '只回复 pong'
+  await harness.inputAndSend(smokeMessage)
+  await harness.waitForAssistantReply(smokeMessage, 'pong', 90_000)
   result.steps.push({ name: 'send-pong', ok: true })
   const targets = [
     ['MCP/Skills', 'mcp-skills'],
@@ -516,8 +684,10 @@ async function main() {
     result.loadMetrics = { first: paired.firstAppLoad, second: secondAppLoad }
     if (options.suite === 'smoke') await runSmoke(harness, options, result)
     else if (options.suite === 'recovery') await runRecovery(harness, options, result)
+    else if (options.suite === 'interactions') await runInteractions(harness, options, result)
+    else if (options.suite === 'abort') await runAbort(harness, options, result)
     else if (options.suite === 'extra') await runExtra(harness, options, result)
-    else if (options.suite === 'all') { await runSmoke(harness, options, result); await runRecovery(harness, options, result); await runExtra(harness, options, result) }
+    else if (options.suite === 'all') { await runSmoke(harness, options, result); await runRecovery(harness, options, result); await runInteractions(harness, options, result); await runAbort(harness, options, result); await runExtra(harness, options, result) }
     else throw new Error(`未知套件: ${options.suite}`)
   } catch (error) {
     result.error = error instanceof Error ? error.stack ?? error.message : String(error)

@@ -273,3 +273,11 @@ python3 scripts/personal/import-proma-backup.py \\
 - AskUserQuestion 与 ExitPlanMode 响应通道按 requestId 解析 session 范围并过滤 pending 快照；新增覆盖测试。harness 增加首次/二次加载请求数、传输字节、耗时，以及 recovery 套件。
 - 定向 web-remote 测试 41 pass；Electron typecheck、build:main、build:renderer、web preload 构建通过；全量测试 513 pass / 5 fail / 1 error，相对 A1 基线 511/5/1 仅增加新增测试通过数，未增加失败或错误。
 - A2 smoke 最终链路通过：pong、MCP/Skills、Todo、定时任务、文件面板截图；设备撤销、临时 Chrome 退出、临时 profile 删除均核对通过。当前加载指标与 AskUser/ExitPlan 完整交互及冻结恢复证据由父会话继续汇总。
+
+## 2026-09-25: 手机完整客户端 A2 收尾复核
+
+- 修正 recovery harness：输入步骤现在通过 `getAgentSessionSDKMessages` 断言用户消息已落盘；回复等待只检查该用户消息之后的 assistant 消息，并同时检查 `[data-message-role="assistant"]` 页面区域，避免用户消息自身包含目标文本造成误判。
+- recovery 使用 `Bash sleep 15` 确保冻结时确有运行中任务。最终证据：`/tmp/proma-mobile-harness-a2-recovery-fixed3/`，运行中快照 1 个、冻结约 28.9 秒、最终 `recovery-done` 出现、`performance.timeOrigin` 保持不变、未整页重载。
+- 加载统计改为按唯一 CDP requestId 计数，并记录 response 数、缓存响应数和 encoded transfer bytes。最终口径：首次约 78 请求 / 3.21 MB，二次约 77 请求 / 0.6–1.0 KB，二次大部分响应来自浏览器缓存/协商缓存；此前 8 请求统计是未等待动态资源完成的旧口径。
+- AskUserQuestion 已取得手机卡片、选择 A、assistant 回复 A 的截图和历史证据，见 `/tmp/proma-mobile-harness-a2-interactions2/`。ExitPlanMode 请求被 Agent 运行时直接完成审批，未出现手机审批卡，手机端计划审批仍未取得独立证据。
+- 中止测试受同一 `独立站/test` 会话中排队的长任务影响，未取得稳定的桌面/手机对比证据；不将其标记为已验证。
