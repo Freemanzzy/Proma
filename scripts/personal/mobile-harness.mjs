@@ -411,9 +411,13 @@ async function runExtra(harness, options, result) {
     await harness.client.command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
   }
   await delay(300)
-  await harness.openSession(options.session)
+  await harness.navigate('/app/')
+  await waitUntil(harness.client, `document.body.innerText.includes('Agent') && !document.body.innerText.includes('正在启动 Proma')`, 60_000)
+  const sessions = await harness.invokeApi('listAgentSessions')
+  const targetSession = Array.isArray(sessions) ? sessions.find((item) => item?.title === 'test' || item?.title === options.session.split('/').at(-1)) : null
+  if (!targetSession?.id || !targetSession.channelId) throw new Error('找不到可用于只读 Skill 验证的目标会话元数据')
   const beforeSkillText = await harness.client.evaluate('document.body.innerText')
-  await harness.inputAndSend('/status')
+  await harness.invokeApi('sendAgentMessage', [{ sessionId: targetSession.id, userMessage: '/status', rawUserMessage: '/status', channelId: targetSession.channelId, modelId: targetSession.modelId, workspaceId: targetSession.workspaceId }])
   await delay(20_000)
   const skillText = await harness.client.evaluate('document.body.innerText')
   const skillChanged = skillText.length > beforeSkillText.length + 20 && skillText.includes('/status')
