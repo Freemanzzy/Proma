@@ -3,7 +3,7 @@ export function renderWebRemoteMobilePatch(): string {
 @media (max-width: 767px) {
   html, body, #root { width:100%; min-width:0; max-width:100%; overflow-x:hidden; }
   body { overscroll-behavior-x:none; }
-  [data-web-remote-app-content="true"] { position:relative; width:100vw!important; max-width:100vw; }
+  [data-web-remote-app-content="true"] { position:relative; width:100vw!important; max-width:100vw; padding-top:56px!important; }
   [data-web-remote-sidebar="left"] { position:fixed!important; inset:0 auto 0 0; z-index:10001!important; width:min(86vw,340px)!important; max-width:340px; transform:translateX(-105%); transition:transform .18s ease; box-shadow:none; }
   body[data-web-remote-sidebar-open="true"] [data-web-remote-sidebar="left"] { box-shadow:12px 0 32px rgba(0,0,0,.25); }
   [data-web-remote-sidebar="left"] > * { width:100%!important; max-width:none!important; }
@@ -11,9 +11,18 @@ export function renderWebRemoteMobilePatch(): string {
   [data-web-remote-sidebar-divider="true"] { display:none!important; }
   body[data-web-remote-sidebar-open="true"] [data-web-remote-sidebar="left"] { transform:translateX(0); }
   [data-web-remote-main="true"] { width:100%!important; min-width:0!important; max-width:100vw; }
-  [data-web-remote-panel="right"] { position:fixed!important; inset:0; z-index:10002!important; display:none!important; width:100vw!important; max-width:none!important; background:hsl(var(--background)); }
+  [data-web-remote-panel="right"] { position:fixed!important; inset:56px 0 0!important; z-index:10002!important; display:none!important; width:100vw!important; max-width:none!important; height:calc(100vh - 56px)!important; background:hsl(var(--background)); }
   body[data-web-remote-right-open="true"] [data-web-remote-panel="right"] { display:flex!important; }
   [data-web-remote-panel="right"] > * { width:100%!important; max-width:none!important; min-width:0!important; }
+  body[data-web-remote-right-open="true"] [data-web-remote-panel="right"] [class*="opacity-0"] { opacity:1!important; pointer-events:auto!important; }
+  [data-web-remote-panel="right"] [role="tablist"], [data-web-remote-panel="right"] [class*="overflow-x-auto"] { overflow-x:auto!important; white-space:nowrap; scrollbar-width:none; }
+  [data-web-remote-panel="right"] button, [data-web-remote-panel="right"] [role="button"] { min-height:42px; }
+  [data-web-remote-sidebar="left"] button[aria-label="打开设置"] { display:none!important; }
+  [data-web-remote-mobile-topbar] { position:fixed; inset:0 0 auto; z-index:10004; display:flex; align-items:center; gap:8px; height:56px; padding:max(7px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) 7px max(8px,env(safe-area-inset-left)); background:hsl(var(--background)/.94); border-bottom:1px solid hsl(var(--border)); backdrop-filter:blur(12px); }
+  [data-web-remote-mobile-topbar] [data-web-remote-mobile-menu], [data-web-remote-mobile-topbar] [data-web-remote-panel-toggle] { position:static!important; flex:none; box-shadow:none; }
+  [data-web-remote-mobile-topbar-title] { min-width:0; flex:1; overflow:hidden; text-align:center; text-overflow:ellipsis; white-space:nowrap; font-size:15px; font-weight:650; color:hsl(var(--foreground)); }
+  [data-web-remote-settings-notice] { position:fixed; inset:56px 12px auto; z-index:10005; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border:1px solid hsl(var(--border)); border-radius:14px; background:hsl(var(--background)); color:hsl(var(--foreground)); box-shadow:0 8px 26px rgba(0,0,0,.2); font-size:14px; }
+  [data-web-remote-settings-notice] button { min-height:36px; padding:6px 12px; border-radius:9px; background:hsl(var(--primary)); color:hsl(var(--primary-foreground)); }
   [data-web-remote-mobile-menu], [data-web-remote-mobile-overlay], [data-web-remote-panel-toggle] { display:block; }
   [data-web-remote-panel-toggle] { position:fixed; top:max(8px, env(safe-area-inset-top)); right:max(8px, env(safe-area-inset-right)); z-index:10003; min-width:42px; height:42px; padding:0 10px; border:1px solid hsl(var(--border)); border-radius:12px; background:hsl(var(--background)/.92); color:hsl(var(--foreground)); box-shadow:0 3px 12px rgba(0,0,0,.16); font-size:14px; }
   [data-web-remote-mobile-menu] { position:fixed; top:max(8px, env(safe-area-inset-top)); left:max(8px, env(safe-area-inset-left)); z-index:10003; width:42px; height:42px; padding:0; border:1px solid hsl(var(--border)); border-radius:12px; background:hsl(var(--background)/.92); color:hsl(var(--foreground)); box-shadow:0 3px 12px rgba(0,0,0,.16); font-size:22px; line-height:1; }
@@ -47,6 +56,29 @@ export function renderWebRemoteMobilePatch(): string {
       panelToggle.addEventListener('touchend',function(event){event.preventDefault();suppressClick=true;togglePanel();window.setTimeout(function(){suppressClick=false},700)},{passive:false});
       panelToggle.addEventListener('pointerup',function(event){if(event.pointerType==='touch'){event.preventDefault();suppressClick=true;togglePanel();window.setTimeout(function(){suppressClick=false},700)}},{passive:false}); document.body.appendChild(panelToggle);
     }
+    if (!document.querySelector('[data-web-remote-mobile-topbar]')) {
+      var topbar=document.createElement('div'); topbar.dataset.webRemoteMobileTopbar='true';
+      var title=document.createElement('div'); title.dataset.webRemoteMobileTopbarTitle='true'; topbar.appendChild(title); document.body.appendChild(topbar);
+    }
+    var topbar=document.querySelector('[data-web-remote-mobile-topbar]');
+    var title=topbar && topbar.querySelector('[data-web-remote-mobile-topbar-title]');
+    var menu=document.querySelector('[data-web-remote-mobile-menu]'); var panelToggle=document.querySelector('[data-web-remote-panel-toggle]');
+    if (topbar && menu && panelToggle) {
+      if (menu.parentElement !== topbar) topbar.insertBefore(menu, topbar.firstChild);
+      if (panelToggle.parentElement !== topbar) topbar.appendChild(panelToggle);
+      if (title && title.parentElement !== topbar) topbar.insertBefore(title, panelToggle);
+    }
+    if (title) {
+      var selectedTab=document.querySelector('[data-web-remote-panel="right"] [role="tab"][aria-selected="true"]');
+      var sessionButton=document.querySelector('button[aria-label^="会话菜单："]');
+      var nextTitle=body.dataset.webRemoteRightOpen==='true' ? ((selectedTab && selectedTab.innerText.trim()) || '工作区') : ((sessionButton && sessionButton.innerText.trim()) || 'Proma');
+      if (title.textContent!==nextTitle) title.textContent=nextTitle;
+    }
+    var settingsOpen=Array.from(document.querySelectorAll('h1,h2,h3')).some(function(node){return /通用设置|模型配置/.test(node.innerText)});
+    var notice=document.querySelector('[data-web-remote-settings-notice]');
+    if (settingsOpen && !notice) {
+      notice=document.createElement('div'); notice.dataset.webRemoteSettingsNotice='true'; notice.innerHTML='<span>设置请在电脑端操作</span><button type="button">返回</button>'; notice.querySelector('button').addEventListener('click',function(){var buttons=Array.from(document.querySelectorAll('button'));var back=buttons.reverse().find(function(button){return button.innerText.trim()==='返回'});if(back)back.click()}); document.body.appendChild(notice);
+    } else if (!settingsOpen && notice) notice.remove();
     document.querySelectorAll('img[alt="用户头像"]').forEach(function(img){img.addEventListener('error',function(){img.style.display='none'},{once:true});});
   }
   document.addEventListener('click',function(event){
@@ -81,8 +113,10 @@ export function renderWebRemoteMobilePatch(): string {
     forwardMobileControl(target);
   }, true);
   ensure(); new MutationObserver(ensure).observe(document.documentElement,{childList:true,subtree:true});
-  var hiddenAt=0;
+  var hiddenAt=0; var lifecycleReady=false;
+  window.setTimeout(function(){lifecycleReady=true},3000);
   document.addEventListener('visibilitychange',function(){
+    if (!lifecycleReady) return;
     if (document.visibilityState==='hidden') { hiddenAt=Date.now(); return; }
     if (hiddenAt && Date.now()-hiddenAt>=5000) window.location.reload();
     hiddenAt=0;
