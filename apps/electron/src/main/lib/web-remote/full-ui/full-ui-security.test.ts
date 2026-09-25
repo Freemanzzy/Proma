@@ -116,6 +116,7 @@ describe('Web Remote full-ui security policy', () => {
     expect((await invoke(ws, 'file:resolve-and-read', [file])).ok).toBe(true)
     expect((await invoke(ws, 'file:resolve-and-read', ['/tmp/outside-secret.md'])).error.denied).toBe(true)
     expect((await invoke(ws, 'agent:get-mcp-config', [{ workspaceId: 'ws-1' }])).value).toEqual({ env: { TOKEN: '[REDACTED]' }, headers: { Authorization: '[REDACTED]' }, name: 'demo' })
+    expect((await invoke(ws, 'agent:get-mcp-config', ['one'])).ok).toBe(true)
   })
 
   test('planning write 级无需确认，删除仍需确认，denied workspace-window 通道始终拒绝', async () => {

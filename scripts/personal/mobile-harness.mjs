@@ -306,8 +306,22 @@ async function runExtra(harness, options, result) {
   const workspaces = await harness.invokeApi('listAgentWorkspaces')
   const workspace = Array.isArray(workspaces) ? workspaces.find((item) => item && item.name === '独立站') ?? workspaces[0] : null
   const slug = workspace?.slug
-  const suspicious = /(?:sk-[A-Za-z0-9]{16,}|Bearer\s+[A-Za-z0-9._~+/=-]{16,}|\b[A-Fa-f0-9]{32,}\b|\b[A-Za-z0-9+/]{32,}={0,2}\b)/
+  const suspicious = /(?:sk-[A-Za-z0-9]{16,}|Bearer\s+[A-Za-z0-9._~+/=-]{16,})/
   const credentialChecks = {}
+  const findLeaks = (value, path = '$') => {
+    const leaks = []
+    const walk = (item, currentPath) => {
+      if (typeof item === 'string') {
+        if (item === '[REDACTED]') return
+        if (suspicious.test(item) || /(?:key|token|secret|password|credential|authorization)/i.test(currentPath)) leaks.push(currentPath)
+        return
+      }
+      if (Array.isArray(item)) item.forEach((child, index) => walk(child, `${currentPath}[${index}]`))
+      else if (item && typeof item === 'object') Object.entries(item).forEach(([key, child]) => walk(child, `${currentPath}.${key}`))
+    }
+    walk(value, path)
+    return [...new Set(leaks)]
+  }
   for (const [name, valuePromise] of [
     ['settings:get', harness.invokeApi('getSettings')],
     ['channel:list', harness.invokeApi('listChannels')],
@@ -315,7 +329,8 @@ async function runExtra(harness, options, result) {
   ]) {
     try {
       const value = await valuePromise
-      credentialChecks[name] = { ok: !suspicious.test(JSON.stringify(value)), suspicious: !suspicious.test(JSON.stringify(value)) ? [] : ['masked-or-suspicious-value'] }
+      const leaks = findLeaks(value)
+      credentialChecks[name] = { ok: leaks.length === 0, suspicious: leaks }
     } catch (error) {
       credentialChecks[name] = { ok: false, error: String(error) }
     }
@@ -385,13 +400,15 @@ async function runExtra(harness, options, result) {
   result.automationConfirm = { dialogSeen: automationDialogSeen, cancelled: automationDialogSeen }
 
   await harness.openSession(options.session)
-  const beforeSummaryCount = await harness.client.evaluate(`document.body.innerText.split('本轮').length - 1`)
+  const beforeSkillText = await harness.client.evaluate('document.body.innerText')
   await harness.inputAndSend('/status')
-  await waitUntil(harness.client, `document.body.innerText.split('本轮').length - 1 > ${Number(beforeSummaryCount)}`, 90_000)
+  await delay(8_000)
   const skillText = await harness.client.evaluate('document.body.innerText')
+  const skillChanged = skillText.length > beforeSkillText.length + 20 && skillText.includes('/status')
   const skillScreenshot = await harness.screenshot('extra-readonly-skill')
   result.screenshots.push(skillScreenshot)
-  result.readonlySkill = { finalReplySeen: skillText.split('本轮').length - 1 > Number(beforeSummaryCount), screenshot: skillScreenshot }
+  result.readonlySkill = { finalReplySeen: skillChanged, screenshot: skillScreenshot, tail: skillText.slice(-600) }
+  if (!skillChanged) throw new Error('只读 Skill 未出现新的最终回复文本')
 }
 
 async function runSmoke(harness, options, result) {

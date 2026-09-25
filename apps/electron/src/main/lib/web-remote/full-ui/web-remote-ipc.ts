@@ -123,6 +123,12 @@ function resolveWorkspaceId(args: unknown[], resolvers: WebRemoteScopeResolvers)
   if (explicitId) return explicitId
   const slug = stringByKeys(args, ['workspaceSlug', 'slug'])
   if (slug && bySlug.has(slug)) return bySlug.get(slug)
+  for (const arg of args) {
+    if (typeof arg === 'string') {
+      if (workspaces.some((workspace) => workspace.id === arg)) return arg
+      if (bySlug.has(arg)) return bySlug.get(arg)
+    }
+  }
   const sessionId = resolveSessionId(args, resolvers)
   const session = sessionId ? resolvers.getSessionMeta(sessionId) : undefined
   return session?.workspaceId
