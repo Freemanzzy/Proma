@@ -134,6 +134,10 @@ async function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
   }
 }
 
+if (typeof window !== 'undefined') {
+  Object.defineProperty(window, '__PROMA_WEB_REMOTE_INVOKE', { configurable: false, enumerable: false, value: invoke })
+}
+
 function send(channel: string, ...args: unknown[]): void {
   void connect().then((ws) => ws.send(JSON.stringify({ type: 'send', id: `${Date.now()}-${nextId++}`, channel, args: args.map(encode) }))).catch((error) => console.error('[Web Remote full-ui] send 失败', error))
 }

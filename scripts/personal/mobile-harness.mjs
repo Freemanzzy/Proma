@@ -241,7 +241,10 @@ async function createHarness(options) {
   }
   const clickSidebarText = async (text) => {
     await openDrawer()
-    const point = await touchText(client, text, '[data-web-remote-sidebar="left"] *')
+    const aria = { 'MCP/Skills': 'MCP/Skills', Todo: 'Todo', '定时任务': '定时任务' }[text]
+    const point = aria
+      ? await findElement(client, text, `button[aria-label=${quoteJs(aria)}]`)
+      : await touchText(client, text, '[data-web-remote-sidebar="left"] *')
     await delay(300)
     await client.evaluate(`delete document.body.dataset.webRemoteSidebarOpen`)
     return point
@@ -281,6 +284,8 @@ async function createHarness(options) {
     return true
   }
   const waitText = (text, timeoutMs = 60_000) => waitUntil(client, `document.body.innerText.includes(${quoteJs(text)})`, timeoutMs)
+  const invokeApi = (method, args = []) => client.evaluate(`window.electronAPI[${quoteJs(method)}](...${quoteJs(args)})`)
+  const invokeRaw = (channel, args = []) => client.evaluate(`window.__PROMA_WEB_REMOTE_INVOKE(${quoteJs(channel)}, ...${quoteJs(args)})`)
   const clickText = (text, selector = 'body *') => touchText(client, text, selector)
   const freeze = () => client.command('Page.setWebLifecycleState', { state: 'frozen' })
   const resume = () => client.command('Page.setWebLifecycleState', { state: 'active' })
@@ -293,39 +298,100 @@ async function createHarness(options) {
     activeChrome = null
     activeProfile = null
   }
-  return { client, chrome, profile, pair, navigate, openDrawer, clickSidebarText, clickText, openSession, inputAndSend, waitText, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, close }
+  return { client, chrome, profile, pair, navigate, openDrawer, clickSidebarText, clickText, openSession, inputAndSend, waitText, invokeApi, invokeRaw, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, close }
 }
 
 async function runExtra(harness, options, result) {
   await harness.openSession(options.session)
-  const workspaceText = await harness.client.evaluate('document.body.innerText')
-  result.allowlist = { onlyExpectedWorkspaceVisible: workspaceText.includes('独立站') && !workspaceText.includes('其他工作区') }
-  const forbidden = await harness.client.evaluate(`fetch('/api/sessions/forbidden-session/messages',{credentials:'include'}).then(async r=>({status:r.status,body:await r.text()}))`)
-  result.allowlist.forbiddenSessionStatus = forbidden.status
-  result.allowlist.forbiddenSessionRejected = forbidden.status === 404
-  await harness.clickSidebarText('定时任务')
-  await delay(500)
-  let dialogSeen = false
-  const onDialog = (event) => {
-    if (event.type === 'confirm') {
-      dialogSeen = true
-      void harness.client.command('Page.handleJavaScriptDialog', { accept: false })
+  const workspaces = await harness.invokeApi('listAgentWorkspaces')
+  const workspace = Array.isArray(workspaces) ? workspaces.find((item) => item && item.name === '独立站') ?? workspaces[0] : null
+  const slug = workspace?.slug
+  const suspicious = /(?:sk-[A-Za-z0-9]{16,}|Bearer\s+[A-Za-z0-9._~+/=-]{16,}|\b[A-Fa-f0-9]{32,}\b|\b[A-Za-z0-9+/]{32,}={0,2}\b)/
+  const credentialChecks = {}
+  for (const [name, valuePromise] of [
+    ['settings:get', harness.invokeApi('getSettings')],
+    ['channel:list', harness.invokeApi('listChannels')],
+    ['agent:get-mcp-config', slug ? harness.invokeApi('getWorkspaceMcpConfig', [slug]) : Promise.resolve(null)],
+  ]) {
+    try {
+      const value = await valuePromise
+      credentialChecks[name] = { ok: !suspicious.test(JSON.stringify(value)), suspicious: !suspicious.test(JSON.stringify(value)) ? [] : ['masked-or-suspicious-value'] }
+    } catch (error) {
+      credentialChecks[name] = { ok: false, error: String(error) }
     }
   }
-  harness.client.on('Page.javascriptDialogOpening', onDialog)
+  result.credentialChecks = credentialChecks
+
+  const forbiddenPath = '/tmp/proma-web-remote-outside-harness.md'
   try {
-    await harness.clickText('立即运行', '[data-web-remote-panel="right"] button,[data-web-remote-panel="right"] [role="button"],button,[role="button"]')
-    await delay(500)
-  } finally {
-    result.confirmation = { dialogSeen, cancelled: dialogSeen }
+    await harness.invokeRaw('file:resolve-and-read', [forbiddenPath, slug ? { workspaceSlug: slug } : {}])
+    result.fileScope = { outsidePathRejected: false }
+  } catch (error) {
+    result.fileScope = { outsidePathRejected: true, error: String(error).slice(0, 240) }
   }
-  const confirmScreenshot = await harness.screenshot('extra-confirm-cancelled')
-  result.screenshots.push(confirmScreenshot)
+
+  const panelAssertions = []
+  for (const [label, title] of [['MCP/Skills', 'Skills'], ['Todo', 'Todo'], ['定时任务', '定时任务']] ) {
+    try {
+      await harness.clickSidebarText(label)
+      await waitUntil(harness.client, `document.body.innerText.includes(${quoteJs(title)})`, 5_000)
+      const path = await harness.screenshot(`panel-${label === 'MCP/Skills' ? 'mcp-skills' : label === 'Todo' ? 'todo' : 'automations'}`)
+      result.screenshots.push(path)
+      panelAssertions.push({ panel: label, title, dom: true, screenshot: path })
+    } catch (error) {
+      panelAssertions.push({ panel: label, title, dom: false, error: String(error) })
+    }
+  }
+  try {
+    const fileButton = await findElement(harness.client, '文件', '[data-web-remote-panel-toggle],button,[role="button"]')
+    await touchAt(harness.client, fileButton.x, fileButton.y)
+    await waitUntil(harness.client, `document.body.innerText.includes('文件')`, 5_000)
+    const path = await harness.screenshot('panel-files')
+    result.screenshots.push(path)
+    panelAssertions.push({ panel: '文件', title: '文件', dom: true, screenshot: path })
+  } catch (error) {
+    panelAssertions.push({ panel: '文件', title: '文件', dom: false, error: String(error) })
+  }
+  result.panelAssertions = panelAssertions
+
+  const todo = await harness.invokeApi('createTodo', [{ title: 'harness-confirm-test' }])
+  const dialogs = []
+  let dialogDecision = 'cancel'
+  const onDialog = (event) => {
+    if (event.type !== 'confirm') return
+    dialogs.push(event.message)
+    void harness.client.command('Page.handleJavaScriptDialog', { accept: dialogDecision === 'accept' })
+  }
+  harness.client.on('Page.javascriptDialogOpening', onDialog)
+  let firstDeleteError = ''
+  dialogDecision = 'cancel'
+  try { await harness.invokeApi('deleteTodo', [todo.id]) } catch (error) { firstDeleteError = String(error) }
+  const afterCancel = await harness.invokeApi('listTodos')
+  const remainsAfterCancel = Array.isArray(afterCancel) && afterCancel.some((item) => item.id === todo.id || item.title === 'harness-confirm-test')
+  dialogDecision = 'accept'
+  await harness.invokeApi('deleteTodo', [todo.id]).catch(() => {})
+  const afterConfirm = await harness.invokeApi('listTodos')
+  const remainsAfterConfirm = Array.isArray(afterConfirm) && afterConfirm.some((item) => item.id === todo.id || item.title === 'harness-confirm-test')
+  result.todoConfirm = { created: Boolean(todo?.id), cancelDialogSeen: dialogs.length >= 1, remainsAfterCancel, confirmDialogSeen: dialogs.length >= 2, remainsAfterConfirm, firstDeleteError: firstDeleteError.slice(0, 240) }
+
+  const automations = await harness.invokeApi('listAutomations')
+  let automationDialogSeen = false
+  if (Array.isArray(automations) && automations[0]?.id) {
+    dialogDecision = 'cancel'
+    const before = dialogs.length
+    await harness.invokeApi('runAutomationNow', [automations[0].id]).catch(() => {})
+    automationDialogSeen = dialogs.length > before
+  }
+  result.automationConfirm = { dialogSeen: automationDialogSeen, cancelled: automationDialogSeen }
+
+  await harness.openSession(options.session)
+  const beforeSummaryCount = await harness.client.evaluate(`document.body.innerText.split('本轮').length - 1`)
   await harness.inputAndSend('/status')
-  await harness.waitText('本轮', 90_000)
+  await waitUntil(harness.client, `document.body.innerText.split('本轮').length - 1 > ${Number(beforeSummaryCount)}`, 90_000)
+  const skillText = await harness.client.evaluate('document.body.innerText')
   const skillScreenshot = await harness.screenshot('extra-readonly-skill')
   result.screenshots.push(skillScreenshot)
-  result.readonlySkill = { ok: true }
+  result.readonlySkill = { finalReplySeen: skillText.split('本轮').length - 1 > Number(beforeSummaryCount), screenshot: skillScreenshot }
 }
 
 async function runSmoke(harness, options, result) {

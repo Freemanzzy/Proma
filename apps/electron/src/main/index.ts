@@ -78,8 +78,8 @@ import { createApplicationMenu } from './menu'
 import { registerIpcHandlers } from './ipc'
 import { createTray, destroyTray, getTray, setTrayFlash } from './tray'
 import { initializeRuntime } from './lib/runtime-init'
-import { seedDefaultSkills } from './lib/config-paths'
-import { listAgentWorkspaces, upgradeDefaultSkillsInWorkspaces } from './lib/agent-workspace-manager'
+import { getConfigDir, seedDefaultSkills } from './lib/config-paths'
+import { getProjectFilesPath, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles, listAgentWorkspaces, upgradeDefaultSkillsInWorkspaces } from './lib/agent-workspace-manager'
 import { hasActiveAgentSessions, stopAllAgents } from './lib/agent-service'
 import { prepareWebRemoteFullUi, startWebRemoteIfEnabled, stopWebRemote } from './lib/web-remote/web-remote-service'
 import { stopAllTerminals } from './lib/terminal-service'
@@ -716,6 +716,37 @@ async function bootstrap(): Promise<void> {
   const fullUiBridge = prepareWebRemoteFullUi(ipcMain, undefined, {
     getSessionMeta: getAgentSessionMeta,
     listWorkspaces: listAgentWorkspaces,
+    getPathRoots: (args) => {
+      const strings: string[] = []
+      const walk = (value: unknown): void => {
+        if (typeof value === 'string') strings.push(value)
+        else if (Array.isArray(value)) value.forEach(walk)
+        else if (value && typeof value === 'object') Object.values(value).forEach(walk)
+      }
+      walk(args)
+      const sessionId = strings.find((value) => !!getAgentSessionMeta(value))
+      const session = sessionId ? getAgentSessionMeta(sessionId) : undefined
+      const workspaces = listAgentWorkspaces()
+      const explicitWorkspaceId = strings.find((value) => workspaces.some((workspace) => workspace.id === value))
+      const explicitWorkspaceSlug = strings.find((value) => workspaces.some((workspace) => workspace.slug === value))
+      const workspace = (session?.workspaceId ? workspaces.find((item) => item.id === session.workspaceId) : undefined)
+        ?? (explicitWorkspaceId ? workspaces.find((item) => item.id === explicitWorkspaceId) : undefined)
+        ?? (explicitWorkspaceSlug ? workspaces.find((item) => item.slug === explicitWorkspaceSlug) : undefined)
+      if (!workspace) return []
+      const roots: Array<{ path: string; exact?: boolean }> = []
+      const add = (path: string | undefined, exact = false): void => { if (path && !roots.some((root) => root.path === path && root.exact === exact)) roots.push({ path, exact }) }
+      add(workspace.projectRootPath ?? join(getConfigDir(), 'agent-workspaces', workspace.slug, 'workspace-files'))
+      add(getProjectFilesPath(workspace.slug))
+      getWorkspaceAttachedDirectories(workspace.slug).forEach((path) => add(path))
+      getWorkspaceAttachedFiles(workspace.slug).forEach((path) => add(path, true))
+      if (sessionId) {
+        add(join(getConfigDir(), 'agent-workspaces', workspace.slug, sessionId))
+        session?.attachedDirectories?.forEach((path) => add(path))
+        session?.attachedFiles?.forEach((path) => add(path, true))
+        add(session?.activeWorktree?.path)
+      }
+      return roots
+    },
   })
   registerIpcHandlers()
   if (fullUiBridge) {

@@ -1,11 +1,13 @@
 import { randomBytes } from 'node:crypto'
+import { realpath } from 'node:fs/promises'
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type { IpcMainEvent, IpcMainInvokeEvent, WebContents } from 'electron'
 import WebSocket from 'ws'
 import { getMainWindow } from '../../main-window-store'
 import type { WebRemoteConfig } from '../web-remote-auth'
 import { decodeWebRemoteValue, encodeWebRemoteValue } from './serialization'
 import { WebRemoteRegistrationTable } from './registration-table'
-import { getWebRemoteChannelPolicy, getDeclaredWebRemoteChannels, type WebRemoteChannelLevel, type WebRemoteChannelPolicyEntry } from './channel-policy'
+import { getWebRemoteChannelPolicy, getDeclaredWebRemoteChannels, type WebRemoteChannelPolicyEntry } from './channel-policy'
 
 const REQUEST_TIMEOUT_MS = 30_000
 const CONFIRM_TTL_MS = 60_000
@@ -62,12 +64,15 @@ export interface IpcMainCaptureTarget {
   on(channel: string, listener: EventHandler): unknown
 }
 
+export interface WebRemotePathRoot { path: string; exact?: boolean }
+
 export interface WebRemoteScopeResolvers {
   getSessionMeta(sessionId: string): { workspaceId?: string } | undefined
   listWorkspaces(): Array<{ id: string; slug: string }>
+  getPathRoots?(args: unknown[]): WebRemotePathRoot[] | Promise<WebRemotePathRoot[]>
 }
 
-const EMPTY_SCOPE_RESOLVERS: WebRemoteScopeResolvers = { getSessionMeta: () => undefined, listWorkspaces: () => [] }
+const EMPTY_SCOPE_RESOLVERS: WebRemoteScopeResolvers = { getSessionMeta: () => undefined, listWorkspaces: () => [], getPathRoots: () => [] }
 
 export function installWebRemoteIpcCapture(ipcMain: IpcMainCaptureTarget, config: WebRemoteConfig = {}, resolvers: WebRemoteScopeResolvers = EMPTY_SCOPE_RESOLVERS): WebRemoteIpcBridge {
   if (activeBridge) return activeBridge
@@ -133,6 +138,52 @@ function redactSensitive(value: unknown, key?: string): unknown {
     if (next !== undefined) output[childKey] = next
   }
   return output
+}
+
+function redactMcpConfig(value: unknown, parentKey?: string): unknown {
+  if (parentKey && /^(env|headers)$/i.test(parentKey) && value && typeof value === 'object' && !Array.isArray(value)) {
+    return Object.fromEntries(Object.keys(value as Record<string, unknown>).map((key) => [key, '[REDACTED]']))
+  }
+  if (parentKey && SENSITIVE_KEY.test(parentKey)) return '[REDACTED]'
+  if (Array.isArray(value)) return value.map((item) => redactMcpConfig(item, parentKey))
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, redactMcpConfig(child, key)]))
+}
+
+const FILE_SCOPE_CHANNELS = new Set([
+  'file:exists-batch', 'file:office-to-html', 'file:prepare-pdf-preview', 'file:read-binary-base64',
+  'file:resolve-and-read', 'file:resolve-html-preview-path', 'file:resolve-markdown-media', 'file:resolve-path', 'file:write-text',
+])
+
+function fileTargets(channel: string, args: unknown[]): string[] {
+  if (channel === 'file:exists-batch' && Array.isArray(args[0])) return args[0].filter((item): item is string => typeof item === 'string')
+  if (typeof args[0] === 'string') return [args[0]]
+  return []
+}
+
+function pathWithin(root: string, target: string, exact = false): boolean {
+  const rel = relative(root, target)
+  return exact ? rel === '' : rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+}
+
+async function pathScopeAllowed(channel: string, args: unknown[], resolvers: WebRemoteScopeResolvers): Promise<boolean> {
+  if (!FILE_SCOPE_CHANNELS.has(channel)) return true
+  const rawRoots = await resolvers.getPathRoots?.(args) ?? []
+  if (rawRoots.length === 0) return false
+  const roots = await Promise.all(rawRoots.map(async (root) => {
+    try { return { ...root, path: await realpath(resolve(root.path)) } } catch { return { ...root, path: resolve(root.path) } }
+  }))
+  const targets = fileTargets(channel, args)
+  if (targets.length === 0) return false
+  for (const rawTarget of targets) {
+    if (!isAbsolute(rawTarget)) continue
+    let target: string
+    try { target = await realpath(rawTarget) } catch {
+      try { target = await realpath(dirname(rawTarget)) } catch { return false }
+    }
+    if (!roots.some((root) => pathWithin(root.path, target, root.exact))) return false
+  }
+  return true
 }
 
 function summarize(channel: string): string {
@@ -249,12 +300,13 @@ export class WebRemoteIpcBridge {
     }
     if (policy.level === 'denied') return this.deny(channel, policy.rationale)
     if (!this.scopeAllowed(policy, args)) return this.deny(channel, 'session/workspace is outside the allowed scope or missing')
+    if (!(await pathScopeAllowed(channel, args, this.resolvers))) return this.deny(channel, 'file path is outside the allowed workspace/session roots')
     if (policy.level === 'confirm' && !this.consumeConfirmation(client, channel, confirmToken)) return this.challenge(client, channel)
     return null
   }
 
   private filterResult(channel: string, value: unknown): unknown {
-    let filtered = channel === 'settings:get' || channel === 'channel:list' ? redactSensitive(value) : value
+    let filtered = channel === 'settings:get' || channel === 'channel:list' ? redactSensitive(value) : channel === 'agent:get-mcp-config' ? redactMcpConfig(value) : value
     if (channel === 'agent:list-workspaces' && Array.isArray(filtered)) {
       filtered = filtered.filter((workspace) => workspace && typeof workspace === 'object' && this.workspaceAllowed((workspace as { id?: string }).id)).map((workspace) => {
         if (!workspace || typeof workspace !== 'object') return workspace

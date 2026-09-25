@@ -1,6 +1,9 @@
 import { describe, expect, mock, test } from 'bun:test'
 import { EventEmitter } from 'node:events'
-import { getDeclaredWebRemoteChannels, getWebRemoteChannelPolicy, policySummary } from './channel-policy'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { getDeclaredWebRemoteChannels, getWebRemoteChannelPolicy, policySummary, WEB_REMOTE_CHANNEL_POLICY } from './channel-policy'
 
 const fakeMainWindow = { webContents: { send: () => true } }
 mock.module('../../main-window-store', () => ({
@@ -92,4 +95,37 @@ describe('Web Remote full-ui security policy', () => {
     expect(third.error.needsConfirm).toBe(true)
     expect(calls).toBe(1)
   })
+  test('显式表覆盖登记表/导出常量，runtime file 通道也已登记', () => {
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
+    const runtimeChannels = ['file:exists-batch', 'file:office-to-html', 'file:prepare-pdf-preview', 'file:read-binary-base64', 'file:resolve-and-read', 'file:resolve-html-preview-path', 'file:resolve-markdown-media', 'file:resolve-path', 'file:write-text', 'migration:open-data-folder']
+    for (const channel of runtimeChannels) bridge.registerInvoke(channel, async () => null)
+    expect(bridge.getUnclassifiedRegisteredChannels()).toEqual([])
+    expect(Object.keys(WEB_REMOTE_CHANNEL_POLICY).every((channel) => getDeclaredWebRemoteChannels().includes(channel))).toBe(true)
+    bridge.registerInvoke('future:unreviewed', async () => null)
+    expect(bridge.getUnclassifiedRegisteredChannels()).toEqual(['future:unreviewed'])
+  })
+
+  test('file 通道必须位于 realpath 后的允许根，MCP env/headers 只保留键名', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'web-remote-file-root-'))
+    const file = join(root, 'note.md')
+    writeFileSync(file, '# ok')
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, { ...resolvers, getPathRoots: () => [{ path: root }] })
+    bridge.registerInvoke('file:resolve-and-read', async () => ({ ok: true }))
+    bridge.registerInvoke('agent:get-mcp-config', async () => ({ env: { TOKEN: 'super-secret' }, headers: { Authorization: 'Bearer super-secret' }, name: 'demo' }))
+    const ws = client(bridge)
+    expect((await invoke(ws, 'file:resolve-and-read', [file])).ok).toBe(true)
+    expect((await invoke(ws, 'file:resolve-and-read', ['/tmp/outside-secret.md'])).error.denied).toBe(true)
+    expect((await invoke(ws, 'agent:get-mcp-config', [{ workspaceId: 'ws-1' }])).value).toEqual({ env: { TOKEN: '[REDACTED]' }, headers: { Authorization: '[REDACTED]' }, name: 'demo' })
+  })
+
+  test('planning write 级无需确认，删除仍需确认，denied workspace-window 通道始终拒绝', async () => {
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
+    bridge.registerInvoke('planning:create-todo', async () => ({ id: 'todo' }))
+    bridge.registerInvoke('planning:delete-todo', async () => ({ deleted: true }))
+    const ws = client(bridge)
+    expect((await invoke(ws, 'planning:create-todo', [{ title: 'harness-confirm-test' }])).ok).toBe(true)
+    expect((await invoke(ws, 'planning:delete-todo', [{ id: 'todo' }])).error.needsConfirm).toBe(true)
+    expect((await invoke(ws, 'agent:open-workspace-memory-window', [{ workspaceId: 'ws-1' }])).error.denied).toBe(true)
+  })
+
 })
