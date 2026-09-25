@@ -68,6 +68,7 @@ export interface WebRemotePathRoot { path: string; exact?: boolean }
 
 export interface WebRemoteScopeResolvers {
   getSessionMeta(sessionId: string): { workspaceId?: string } | undefined
+  getInteractionSessionId?(requestId: string): string | undefined
   listWorkspaces(): Array<{ id: string; slug: string }>
   getPathRoots?(args: unknown[]): WebRemotePathRoot[] | Promise<WebRemotePathRoot[]>
 }
@@ -110,6 +111,11 @@ function stringByKeys(args: unknown[], keys: string[]): string | undefined {
 function resolveSessionId(args: unknown[], resolvers: WebRemoteScopeResolvers): string | undefined {
   const explicit = stringByKeys(args, ['sessionId', 'conversationId', 'agentSessionId'])
   if (explicit) return explicit
+  const requestId = stringByKeys(args, ['requestId'])
+  if (requestId && resolvers.getInteractionSessionId) {
+    const sessionId = resolvers.getInteractionSessionId(requestId)
+    if (sessionId) return sessionId
+  }
   for (const arg of args) {
     if (typeof arg === 'string' && resolvers.getSessionMeta(arg)) return arg
   }
@@ -313,6 +319,13 @@ export class WebRemoteIpcBridge {
 
   private filterResult(channel: string, value: unknown): unknown {
     let filtered = channel === 'settings:get' || channel === 'channel:list' ? redactSensitive(value) : channel === 'agent:get-mcp-config' ? redactMcpConfig(value) : value
+    if (channel === 'agent:get-pending-requests' && filtered && typeof filtered === 'object') {
+      const snapshot = filtered as { permissions?: unknown; askUsers?: unknown; exitPlans?: unknown }
+      const filterRequests = (items: unknown): unknown => Array.isArray(items)
+        ? items.filter((item) => item && typeof item === 'object' && this.sessionAllowed(typeof (item as { sessionId?: unknown }).sessionId === 'string' ? (item as { sessionId: string }).sessionId : undefined))
+        : items
+      filtered = { ...snapshot, permissions: filterRequests(snapshot.permissions), askUsers: filterRequests(snapshot.askUsers), exitPlans: filterRequests(snapshot.exitPlans) }
+    }
     if (channel === 'agent:list-workspaces' && Array.isArray(filtered)) {
       filtered = filtered.filter((workspace) => workspace && typeof workspace === 'object' && this.workspaceAllowed((workspace as { id?: string }).id)).map((workspace) => {
         if (!workspace || typeof workspace !== 'object') return workspace

@@ -48,6 +48,31 @@ describe('Web Remote full-ui security policy', () => {
     expect(policySummary().denied).toBeGreaterThan(0)
   })
 
+  test('AskUser/ExitPlan 响应按 requestId 解析 session 范围，pending 快照按工作区过滤', async () => {
+    expect(getWebRemoteChannelPolicy('agent:ask-user:respond')?.scope).toBe('session')
+    expect(getWebRemoteChannelPolicy('agent:exit-plan-mode:respond')?.scope).toBe('session')
+    expect(getWebRemoteChannelPolicy('agent:get-pending-requests')?.level).toBe('read')
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, {
+      ...resolvers,
+      getInteractionSessionId: (requestId) => requestId === 'ask-1' ? 's-1' : requestId === 'plan-2' ? 's-2' : undefined,
+    })
+    bridge.registerInvoke('agent:ask-user:respond', async () => ({ answered: true }))
+    bridge.registerInvoke('agent:exit-plan-mode:respond', async () => ({ approved: true }))
+    bridge.registerInvoke('agent:get-pending-requests', async () => ({
+      permissions: [{ requestId: 'p-1', sessionId: 's-1' }, { requestId: 'p-2', sessionId: 's-2' }],
+      askUsers: [{ requestId: 'ask-1', sessionId: 's-1' }, { requestId: 'ask-2', sessionId: 's-2' }],
+      exitPlans: [{ requestId: 'plan-1', sessionId: 's-1' }, { requestId: 'plan-2', sessionId: 's-2' }],
+    }))
+    const ws = client(bridge)
+    expect((await invoke(ws, 'agent:ask-user:respond', [{ requestId: 'ask-1' }])).ok).toBe(true)
+    expect((await invoke(ws, 'agent:exit-plan-mode:respond', [{ requestId: 'plan-2' }])).error.denied).toBe(true)
+    const pending = (await invoke(ws, 'agent:get-pending-requests')).value
+    expect(pending.permissions).toHaveLength(1)
+    expect(pending.askUsers).toHaveLength(1)
+    expect(pending.exitPlans).toHaveLength(1)
+    expect(pending.exitPlans[0].sessionId).toBe('s-1')
+  })
+
   test('默认拒绝、denied 通道和 session/workspace 越权均生效', async () => {
     const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
     bridge.registerInvoke('agent:get-sdk-messages', async () => ['ok'])

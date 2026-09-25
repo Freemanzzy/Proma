@@ -218,19 +218,39 @@ async function createHarness(options) {
   client.on('Runtime.exceptionThrown', (event) => exceptions.push({ text: event.exceptionDetails?.text, description: event.exceptionDetails?.exception?.description }))
   await client.command('Runtime.enable')
   await client.command('Page.enable')
+  await client.command('Network.enable')
+  let activeNavigation = null
+  const loadMetrics = []
+  client.on('Network.requestWillBeSent', (event) => {
+    if (activeNavigation) activeNavigation.requests += 1
+  })
+  client.on('Network.loadingFinished', (event) => {
+    if (activeNavigation) activeNavigation.transferBytes += Number(event.encodedDataLength ?? 0)
+  })
   await client.command('Emulation.setDeviceMetricsOverride', { width: options.width, height: options.height, deviceScaleFactor: options.deviceScaleFactor, mobile: true, screenWidth: options.width, screenHeight: options.height })
   await client.command('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 })
   await client.command('Network.setUserAgentOverride', { userAgent: ANDROID_UA, platform: 'Android' })
-  const navigate = async (path) => { const target = new URL(path, options.url).toString(); await client.command('Page.navigate', { url: target }); await waitUntil(client, `document.readyState === 'complete' || document.readyState === 'interactive'`, 30_000) }
+  const navigate = async (path) => {
+    const target = new URL(path, options.url).toString()
+    const startedAt = Date.now()
+    activeNavigation = { path, requests: 0, transferBytes: 0 }
+    await client.command('Page.navigate', { url: target })
+    await waitUntil(client, `document.readyState === 'complete' || document.readyState === 'interactive'`, 30_000)
+    await delay(500)
+    const metric = { path, requests: activeNavigation.requests, transferBytes: activeNavigation.transferBytes, durationMs: Date.now() - startedAt }
+    loadMetrics.push(metric)
+    activeNavigation = null
+    return metric
+  }
   const pair = async () => {
     const pairing = await shellPair(options.pairScript)
     await navigate('/')
     const label = `harness-${Date.now()}`
     const paired = await client.evaluate(`fetch('/api/pair',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:${quoteJs(pairing.code)},label:${quoteJs(label)}})}).then(async r=>({status:r.status,body:await r.json()}))`)
     if (!paired || paired.status !== 200) throw new Error(`页面配对失败: ${JSON.stringify(paired)}`)
-    await navigate('/app/')
+    const firstAppLoad = await navigate('/app/')
     await waitUntil(client, `document.body.innerText.includes('Agent') && !document.body.innerText.includes('正在启动 Proma')`, 60_000)
-    return { ...paired.body, label, pairingOutput: pairing.output }
+    return { ...paired.body, label, pairingOutput: pairing.output, firstAppLoad }
   }
   const openDrawer = async () => {
     if (await client.evaluate(`document.body.dataset.webRemoteSidebarOpen === 'true'`)) return
@@ -298,7 +318,22 @@ async function createHarness(options) {
     activeChrome = null
     activeProfile = null
   }
-  return { client, chrome, profile, pair, navigate, openDrawer, clickSidebarText, clickText, openSession, inputAndSend, waitText, invokeApi, invokeRaw, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, close }
+  return { client, chrome, profile, pair, navigate, loadMetrics, openDrawer, clickSidebarText, clickText, openSession, inputAndSend, waitText, invokeApi, invokeRaw, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, close }
+}
+
+async function runRecovery(harness, options, result) {
+  await harness.openSession(options.session)
+  const before = await harness.client.evaluate('({timeOrigin: performance.timeOrigin, navigationType: performance.getEntriesByType("navigation")[0]?.type ?? "unknown"})')
+  await harness.inputAndSend('请等待 10 秒后只回复 recovery-done')
+  await delay(1_000)
+  await harness.freeze()
+  const frozenAt = Date.now()
+  await delay(20_000)
+  await harness.resume()
+  await harness.waitText('recovery-done', 60_000)
+  const after = await harness.client.evaluate('({timeOrigin: performance.timeOrigin, navigationType: performance.getEntriesByType("navigation")[0]?.type ?? "unknown"})')
+  result.recovery = { frozenMs: Date.now() - frozenAt, finalAnswerSeen: true, pageReloaded: before.timeOrigin !== after.timeOrigin, before, after }
+  if (result.recovery.pageReloaded) throw new Error('冻结恢复触发了整页重载')
 }
 
 async function runExtra(harness, options, result) {
@@ -477,9 +512,12 @@ async function main() {
     const paired = await harness.pair()
     deviceId = paired.deviceId
     result.pairedDeviceId = deviceId
+    const secondAppLoad = await harness.navigate('/app/')
+    result.loadMetrics = { first: paired.firstAppLoad, second: secondAppLoad }
     if (options.suite === 'smoke') await runSmoke(harness, options, result)
+    else if (options.suite === 'recovery') await runRecovery(harness, options, result)
     else if (options.suite === 'extra') await runExtra(harness, options, result)
-    else if (options.suite === 'all') { await runSmoke(harness, options, result); await runExtra(harness, options, result) }
+    else if (options.suite === 'all') { await runSmoke(harness, options, result); await runRecovery(harness, options, result); await runExtra(harness, options, result) }
     else throw new Error(`未知套件: ${options.suite}`)
   } catch (error) {
     result.error = error instanceof Error ? error.stack ?? error.message : String(error)

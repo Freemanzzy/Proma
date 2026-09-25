@@ -1,6 +1,18 @@
 /* Browser substitute for the small Electron surface imported by preload/index.ts. */
 const TYPE_KEY = '__proma_web_remote_type'
-if (typeof window !== 'undefined') (window as Window & { __PROMA_WEB_REMOTE__?: boolean }).__PROMA_WEB_REMOTE__ = true
+if (typeof window !== 'undefined') {
+  const remoteWindow = window as Window & { __PROMA_WEB_REMOTE__?: boolean }
+  remoteWindow.__PROMA_WEB_REMOTE__ = true
+  class WebRemoteAudio {
+    src = ''
+    preload = 'none'
+    addEventListener(): void {}
+    removeEventListener(): void {}
+    load(): void {}
+    play(): Promise<void> { return Promise.resolve() }
+  }
+  Object.defineProperty(window, 'Audio', { configurable: true, writable: true, value: WebRemoteAudio })
+}
 
 interface Listener { (event: { sender: Window }, value: unknown): void }
 
@@ -12,6 +24,7 @@ let reconnectTimer: number | undefined
 let reconnectDelay = 250
 let hasConnectedOnce = false
 let nextId = 0
+let loggedSendSync = false
 const pending = new Map<string, { resolve(value: unknown): void; reject(error: unknown): void; timer: number }>()
 
 function encode(value: unknown): unknown {
@@ -122,11 +135,20 @@ async function invokeWithToken(channel: string, args: unknown[], confirmToken?: 
   return response
 }
 
+function safeDeniedValue(channel: string): unknown {
+  return /(?:list|get.*(?:status|tools|sounds)|statuses|candidates|search)/i.test(channel) ? [] : null
+}
+
 async function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
   try {
     return await invokeWithToken(channel, args)
   } catch (error) {
-    const challenge = error as { needsConfirm?: boolean; summary?: string; token?: string }
+    const access = error as { denied?: boolean; needsConfirm?: boolean; summary?: string; token?: string }
+    if (access?.denied) {
+      console.warn(`[Web Remote full-ui] 已安全忽略不可用通道: ${channel}`)
+      return safeDeniedValue(channel)
+    }
+    const challenge = access
     if (!challenge?.needsConfirm || !challenge.token) throw error
     const accepted = window.confirm(challenge.summary || `确认执行远程操作：${channel}`)
     if (!accepted) throw new Error('用户取消远程操作')
@@ -134,8 +156,12 @@ async function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
   }
 }
 
+async function invokeStrict(channel: string, ...args: unknown[]): Promise<unknown> {
+  return invokeWithToken(channel, args)
+}
+
 if (typeof window !== 'undefined') {
-  Object.defineProperty(window, '__PROMA_WEB_REMOTE_INVOKE', { configurable: false, enumerable: false, value: invoke })
+  Object.defineProperty(window, '__PROMA_WEB_REMOTE_INVOKE', { configurable: false, enumerable: false, value: invokeStrict })
 }
 
 function send(channel: string, ...args: unknown[]): void {
@@ -150,6 +176,16 @@ export const contextBridge = {
 
 export const ipcRenderer = {
   invoke,
+  // Electron's synchronous IPC is unavailable in a browser. Return the safe
+  // no-op value used by optional desktop-only persistence paths instead of
+  // throwing during renderer initialization.
+  sendSync(channel: string, ..._args: unknown[]): null {
+    if (!loggedSendSync) {
+      loggedSendSync = true
+      console.warn(`[Web Remote full-ui] ipcRenderer.sendSync 不支持，已忽略: ${channel}`)
+    }
+    return null
+  },
   send,
   on(channel: string, listener: Listener): void {
     let set = listeners.get(channel)

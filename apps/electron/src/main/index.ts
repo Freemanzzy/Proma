@@ -85,6 +85,9 @@ import { prepareWebRemoteFullUi, startWebRemoteIfEnabled, stopWebRemote } from '
 import { stopAllTerminals } from './lib/terminal-service'
 import { disposePiMcpConnections } from './lib/adapters/pi-mcp-tools'
 import { getAgentSessionMeta, markRunningDelegationsAsInterrupted } from './lib/agent-session-manager'
+import { permissionService } from './lib/agent-permission-service'
+import { askUserService } from './lib/agent-ask-user-service'
+import { exitPlanService } from './lib/agent-exit-plan-service'
 import { stopAllGenerations } from './lib/chat-service'
 import { configureUpdater, initAutoUpdater, cleanupUpdater } from './lib/updater/auto-updater'
 import { startWorkspaceWatcher, stopWorkspaceWatcher } from './lib/workspace-watcher'
@@ -715,6 +718,9 @@ async function bootstrap(): Promise<void> {
   // Register IPC handlers. Full UI spike 必须在注册前同步捕获。
   const fullUiBridge = prepareWebRemoteFullUi(ipcMain, undefined, {
     getSessionMeta: getAgentSessionMeta,
+    getInteractionSessionId: (requestId) => permissionService.getPendingRequests().find((request) => request.requestId === requestId)?.sessionId
+      ?? askUserService.getPendingRequests().find((request) => request.requestId === requestId)?.sessionId
+      ?? exitPlanService.getPendingRequests().find((request) => request.requestId === requestId)?.sessionId,
     listWorkspaces: listAgentWorkspaces,
     getPathRoots: (args) => {
       const strings: string[] = []

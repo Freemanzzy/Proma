@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
+import { brotliCompressSync, gzipSync } from 'node:zlib'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join, normalize } from 'node:path'
 import type { Duplex } from 'node:stream'
@@ -19,6 +20,21 @@ import { renderWebRemoteMobilePatch } from './full-ui/mobile-patch'
 
 const MAX_BODY_BYTES = 100_000
 const MAX_MESSAGE_CHARS = 50_000
+const STATIC_CACHE_MAX_BYTES = 64 * 1024 * 1024
+const HASHED_ASSET = /(?:^|[-_.])[a-z0-9]{8,}(?=\.)/i
+
+type StaticEncoding = 'br' | 'gzip'
+
+interface StaticCacheEntry {
+  filePath: string
+  mtimeMs: number
+  size: number
+  etag: string
+  lastModified: string
+  body: Buffer
+  encoded: Map<StaticEncoding, Buffer>
+  lastAccessAt: number
+}
 
 interface AuthenticatedRequest {
   deviceId: string
@@ -78,6 +94,9 @@ export class WebRemoteServer {
   private readonly connections = new Map<WebSocket, () => void>()
   private revokeTimer?: ReturnType<typeof setInterval>
   private listening = false
+  private readonly staticCache = new Map<string, StaticCacheEntry>()
+  private staticCacheBytes = 0
+  private renderedIndexCache?: { filePath: string; mtimeMs: number; size: number; body: Buffer; nonce: string }
 
   constructor(private readonly options: WebRemoteServerOptions) {
     this.auth = options.auth
@@ -309,24 +328,123 @@ export class WebRemoteServer {
       res.end('Not Found')
       return
     }
-    let body = readFileSync(filePath)
+
+    const sourceStat = statSync(filePath) as { mtimeMs: number; size: number; mtime: Date }
     const isHtml = safePath === 'index.html'
-    const nonce = randomBytes(16).toString('base64url')
-    const headers: Record<string, string> = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }
+    const isPreload = safePath === 'preload.js'
+    const isHashedAsset = safePath.startsWith('assets/') && HASHED_ASSET.test(safePath.split('/').pop() ?? '')
+    const etag = `"${createHash('sha1').update(`${sourceStat.size}:${sourceStat.mtimeMs}`).digest('hex')}"`
+    const lastModified = sourceStat.mtime.toUTCString()
+    const conditionalMatch = req.headers['if-none-match'] === etag
+      || (typeof req.headers['if-modified-since'] === 'string' && req.headers['if-modified-since'] === lastModified)
+    const headers: Record<string, string> = {
+      'Cache-Control': isHashedAsset ? 'public, max-age=31536000, immutable' : 'no-cache',
+      ETag: etag,
+      'Last-Modified': lastModified,
+      Vary: 'Accept-Encoding',
+      'X-Content-Type-Options': 'nosniff',
+    }
+    if (!isHtml && conditionalMatch) {
+      res.writeHead(304, headers)
+      res.end()
+      return
+    }
+
+    let body: Buffer = readFileSync(filePath) as Buffer
+    let nonce = ''
     if (isHtml) {
-      let html = body.toString('utf8')
-      html = html.replace(/<script>([\s\S]*?)<\/script>/, `<script nonce="${nonce}">$1</script>`)
-      html = html.replace(/<script type="module"/, '<script src="/app/preload.js"></script><script type="module"')
-      html = html.replace('</body>', renderWebRemoteMobilePatch().replaceAll('__PROMA_NONCE__', nonce) + '</body>')
-      body = Buffer.from(html)
+      const rendered = this.getRenderedIndex(filePath, sourceStat, body)
+      body = rendered.body
+      nonce = rendered.nonce
       headers['Content-Type'] = 'text/html; charset=utf-8'
       headers['Content-Security-Policy'] = `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data: blob:; font-src 'self' data:; base-uri 'none'; frame-ancestors 'none'`
     } else {
       const ext = safePath.split('.').pop()?.toLowerCase()
       headers['Content-Type'] = ({ js: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8', json: 'application/json; charset=utf-8', svg: 'image/svg+xml', png: 'image/png', webp: 'image/webp', ico: 'image/x-icon', woff: 'font/woff', woff2: 'font/woff2' } as Record<string, string>)[ext ?? ''] ?? 'application/octet-stream'
     }
+    const cached = isHtml ? undefined : this.getStaticCache(filePath, sourceStat, etag, lastModified, body)
+    const representation = cached ? this.selectStaticRepresentation(cached, req.headers['accept-encoding']) : this.compressStaticBody(body, req.headers['accept-encoding'])
+    if (representation.encoding) headers['Content-Encoding'] = representation.encoding
+    headers['Content-Length'] = String(representation.body.byteLength)
+    if ((isHtml || isPreload) && conditionalMatch) {
+      res.writeHead(304, headers)
+      res.end()
+      return
+    }
     res.writeHead(200, headers)
-    res.end(body)
+    res.end(representation.body)
+  }
+
+  private getRenderedIndex(filePath: string, sourceStat: { mtimeMs: number; size: number; mtime: Date }, sourceBody: Buffer): { body: Buffer; nonce: string } {
+    const existing = this.renderedIndexCache
+    if (existing && existing.filePath === filePath && existing.mtimeMs === sourceStat.mtimeMs && existing.size === sourceStat.size) return existing
+    const nonce = randomBytes(16).toString('base64url')
+    let html = sourceBody.toString('utf8')
+    html = html.replace(/<script>([\s\S]*?)<\/script>/, `<script nonce="${nonce}">$1</script>`)
+    html = html.replace(/<script type="module"/, '<script src="/app/preload.js"></script><script type="module"')
+    html = html.replace('</body>', renderWebRemoteMobilePatch().replaceAll('__PROMA_NONCE__', nonce) + '</body>')
+    const rendered = { filePath, mtimeMs: sourceStat.mtimeMs, size: sourceStat.size, body: Buffer.from(html), nonce }
+    this.renderedIndexCache = rendered
+    return rendered
+  }
+
+  private getStaticCache(filePath: string, sourceStat: { mtimeMs: number; size: number; mtime: Date }, etag: string, lastModified: string, body: Buffer): StaticCacheEntry {
+    const existing = this.staticCache.get(filePath)
+    if (existing && existing.mtimeMs === sourceStat.mtimeMs && existing.size === sourceStat.size) {
+      existing.lastAccessAt = Date.now()
+      return existing
+    }
+    if (existing) this.removeStaticCache(filePath)
+    const entry: StaticCacheEntry = { filePath, mtimeMs: sourceStat.mtimeMs, size: sourceStat.size, etag, lastModified, body, encoded: new Map(), lastAccessAt: Date.now() }
+    if (body.byteLength <= STATIC_CACHE_MAX_BYTES) {
+      this.staticCache.set(filePath, entry)
+      this.staticCacheBytes += body.byteLength
+      this.evictStaticCache()
+    }
+    return entry
+  }
+
+  private removeStaticCache(filePath: string): void {
+    const entry = this.staticCache.get(filePath)
+    if (!entry) return
+    this.staticCache.delete(filePath)
+    this.staticCacheBytes -= entry.body.byteLength + [...entry.encoded.values()].reduce((sum, item) => sum + item.byteLength, 0)
+  }
+
+  private evictStaticCache(): void {
+    while (this.staticCacheBytes > STATIC_CACHE_MAX_BYTES && this.staticCache.size > 0) {
+      const oldest = [...this.staticCache.values()].sort((a, b) => a.lastAccessAt - b.lastAccessAt)[0]
+      if (!oldest) break
+      this.removeStaticCache(oldest.filePath)
+    }
+  }
+
+  private compressStaticBody(body: Buffer, acceptEncoding: string | undefined): { body: Buffer; encoding?: StaticEncoding } {
+    if (acceptEncoding?.includes('br')) {
+      const encoded = brotliCompressSync(body)
+      if (encoded.byteLength < body.byteLength) return { body: encoded, encoding: 'br' }
+    }
+    if (acceptEncoding?.includes('gzip')) {
+      const encoded = gzipSync(body)
+      if (encoded.byteLength < body.byteLength) return { body: encoded, encoding: 'gzip' }
+    }
+    return { body }
+  }
+
+  private selectStaticRepresentation(entry: StaticCacheEntry, acceptEncoding: string | undefined): { body: Buffer; encoding?: StaticEncoding } {
+    const encoding: StaticEncoding | undefined = acceptEncoding?.includes('br') ? 'br' : acceptEncoding?.includes('gzip') ? 'gzip' : undefined
+    if (!encoding) return { body: entry.body }
+    let encoded = entry.encoded.get(encoding)
+    if (!encoded) {
+      encoded = encoding === 'br' ? brotliCompressSync(entry.body) : gzipSync(entry.body)
+      if (encoded.byteLength >= entry.body.byteLength) return { body: entry.body }
+      entry.encoded.set(encoding, encoded)
+      this.staticCacheBytes += encoded.byteLength
+      this.evictStaticCache()
+      if (!this.staticCache.has(entry.filePath)) return { body: encoded, encoding }
+    }
+    entry.lastAccessAt = Date.now()
+    return { body: encoded, encoding }
   }
 
   private handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {

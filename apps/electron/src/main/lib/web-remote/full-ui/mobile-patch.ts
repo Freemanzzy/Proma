@@ -38,7 +38,8 @@ export function renderWebRemoteMobilePatch(): string {
 </style>
 <script nonce="__PROMA_NONCE__">
 (function(){
-  if (window.__PROMA_WEB_REMOTE__ !== true || window.innerWidth >= 768) return;
+  function start(){
+    if (window.innerWidth >= 768 && (window.screen?.width ?? window.innerWidth) >= 768) return;
   var body=document.body;
   function ensure(){
     if (!document.querySelector('[data-web-remote-mobile-menu]')) {
@@ -113,16 +114,31 @@ export function renderWebRemoteMobilePatch(): string {
     }
     forwardMobileControl(target);
   }, true);
-  ensure(); new MutationObserver(ensure).observe(document.documentElement,{childList:true,subtree:true});
-  var hiddenAt=0; var lifecycleReady=false;
+  try { ensure(); new MutationObserver(ensure).observe(document.documentElement,{childList:true,subtree:true}); } catch(error) { window.__PROMA_WEB_REMOTE_PATCH_ERROR=String(error); console.error('[Web Remote mobile patch] 初始化失败',error); }
+  var hiddenAt=0; var lifecycleReady=false; var recovering=false;
   window.setTimeout(function(){lifecycleReady=true},3000);
+  function recover(){
+    if (recovering) return;
+    recovering=true;
+    var callback=window.__PROMA_WEB_REMOTE_RECOVER;
+    if (typeof callback!=='function') { recovering=false; window.location.reload(); return; }
+    Promise.resolve().then(function(){return callback()}).catch(function(){ window.location.reload(); }).finally(function(){ recovering=false; });
+  }
   document.addEventListener('visibilitychange',function(){
     if (!lifecycleReady) return;
     if (document.visibilityState==='hidden') { hiddenAt=Date.now(); return; }
-    if (hiddenAt && Date.now()-hiddenAt>=5000) window.location.reload();
+    if (hiddenAt && Date.now()-hiddenAt>=5000) recover();
     hiddenAt=0;
   });
-  window.addEventListener('proma-web-remote-reconnected',function(){ window.location.reload(); });
+    window.addEventListener('proma-web-remote-reconnected',recover);
+  }
+  var bootAttempts=0;
+  function boot(){
+    if (window.innerWidth < 768 || (window.screen?.width ?? window.innerWidth) < 768) { start(); return; }
+    if (bootAttempts++<100) window.setTimeout(boot,50);
+  }
+  boot();
+  window.setTimeout(start,1000);
 })();
 </script>`
 }

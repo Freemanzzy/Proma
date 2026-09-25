@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test'
 import { connect } from 'node:net'
 import WebSocket from 'ws'
-import { mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WebRemoteAuth } from './web-remote-auth'
@@ -29,6 +29,7 @@ let isWebRemoteConfigDirAllowed: typeof import('./web-remote-service').isWebRemo
 let server: InstanceType<typeof WebRemoteServer>
 let port: number
 let cookie: string
+let rendererDir: string
 
 beforeAll(async () => {
   WebRemoteServer = (await import('./web-remote-server')).WebRemoteServer
@@ -39,7 +40,12 @@ beforeAll(async () => {
   const code = auth.createPairingCode().code
   const paired = auth.pair(code, 'test')!
   cookie = `proma_web_remote=${paired.token}`
-  server = new WebRemoteServer({ config, auth })
+  rendererDir = mkdtempSync(join(tmpdir(), 'proma-web-remote-renderer-'))
+  mkdirSync(join(rendererDir, 'assets'))
+  writeFileSync(join(rendererDir, 'index.html'), '<!doctype html><html><body><div id="root"></div><script type="module" src="./assets/main-12345678.js"></script></body></html>')
+  writeFileSync(join(rendererDir, 'preload.js'), 'window.__PRELOAD__=true;'.repeat(200))
+  writeFileSync(join(rendererDir, 'assets', 'main-12345678.js'), 'console.log("cached");'.repeat(200))
+  server = new WebRemoteServer({ config, auth, rendererDir })
   await server.start(0)
   port = (server.httpServer.address() as { port: number }).port
 })
@@ -81,6 +87,27 @@ describe('WebRemoteServer loopback integration', () => {
     })
     expect(received.isBinary).toBe(false)
     expect(JSON.parse(received.text).type).toBe('ready')
+  })
+
+  test('完整界面静态资源提供压缩、长缓存和协商缓存', async () => {
+    const headers = { Cookie: cookie, 'Tailscale-User-Login': 'lee@example.com' }
+    const asset = await fetch(`http://127.0.0.1:${port}/app/assets/main-12345678.js`, { headers: { ...headers, 'Accept-Encoding': 'br' } })
+    expect(asset.status).toBe(200)
+    expect(asset.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
+    expect(asset.headers.get('content-encoding')).toBe('br')
+    expect(asset.headers.get('etag')).toBeString()
+    expect(asset.headers.get('last-modified')).toBeString()
+    const cached = await fetch(`http://127.0.0.1:${port}/app/assets/main-12345678.js`, { headers: { ...headers, 'If-None-Match': asset.headers.get('etag')! } })
+    expect(cached.status).toBe(304)
+    const index = await fetch(`http://127.0.0.1:${port}/app/`, { headers })
+    expect(index.status).toBe(200)
+    expect(index.headers.get('cache-control')).toBe('no-cache')
+    expect(index.headers.get('etag')).toBeString()
+    expect(index.headers.get('last-modified')).toBeString()
+    const preload = await fetch(`http://127.0.0.1:${port}/app/preload.js`, { headers: { ...headers, 'Accept-Encoding': 'gzip' } })
+    expect(preload.status).toBe(200)
+    expect(preload.headers.get('cache-control')).toBe('no-cache')
+    expect(preload.headers.get('content-encoding')).toBe('gzip')
   })
 
   test('manifest 与图标路由无需登录且不泄露会话数据', async () => {
