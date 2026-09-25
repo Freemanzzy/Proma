@@ -287,3 +287,10 @@ python3 scripts/personal/import-proma-backup.py \\
 - 手机端工作区范围改为全部开放：开发实例配置 `workspaceScope: "all"`（本地配置，不入库）；敏感能力仍按 IPC 分级表拒绝或需二次确认。开启后父会话在最终代码上重跑 harness smoke 通过。
 - EgoBrowser 不再询问权限：维持当前运行时行为（v0.19.57 默认 `bypassPermissions` 下所有工具直接放行）。此前“每会话确认一次”的代码与单测保留但运行时不生效，不再作为目标。
 - 问题记录：A2 的 ExitPlanMode 验证曾把 `独立站/test` 会话改名为 `web-remote-harness-ask-plan-*` 并切到计划模式，导致 smoke 找不到会话；父会话已恢复标题与权限模式。后续 harness 不得修改既有会话的标题或权限模式，只能在自建的专用会话中改。
+
+## 2026-09-25: Tailnet 受信设备免配对
+
+- Cookie 设备认证维持原路径；无有效 Cookie 时，只有允许的 `Tailscale-User-Login`、XFF 最左侧 Tailnet IP、`tailscale whois --json` 的登录用户一致且 `Node.ComputedName` 在 `trustedTailscaleNodes` 配置列表中，才生成 `tailnet:<ComputedName>` 身份。whois 使用只读 `execFile`，2 秒超时，成功/失败均按 IP 缓存 60 秒；失败拒绝。
+- 该认证统一覆盖 API、`/app/` 与静态文件、`/api/stream`、`/api/ipc` WebSocket 升级及连接建立后的二次认证；Origin/写操作检查不变。受信设备访问根配对页会跳转 `/app/`。撤销列表每秒刷新，删除信任项后已建立的 Tailnet WebSocket（含 IPC）将于轮询周期内关闭。
+- 配对页防止重复点击；配对返回 401 时会再验证已有 Cookie，若仍有效则进入 `/app/`。
+- 安全边界：撤销时从开发配置 `trustedTailscaleNodes` 删除该节点；规则同时要求 Tailnet 用户登录名、Tailscale 地址段、whois 用户和设备名精确匹配。服务只监听回环地址；同机进程理论上能伪造回环请求头，但本机进程本就拥有等同的本地访问权限。受信列表只写入个人开发配置，不入库。

@@ -103,7 +103,7 @@ export class WebRemoteServer {
     this.eventHub = options.eventHub ?? new WebRemoteEventHub()
     this.httpServer = createServer((req, res) => { void this.handleHttp(req, res) })
     this.wsServer = new WebSocketServer({ noServer: true })
-    this.httpServer.on('upgrade', (req, socket, head) => this.handleUpgrade(req, socket, head))
+    this.httpServer.on('upgrade', (req, socket, head) => { void this.handleUpgrade(req, socket, head) })
     this.wsServer.on('connection', (ws: WebSocket, req: IncomingMessage) => this.handleWebSocket(ws, req))
   }
 
@@ -127,6 +127,14 @@ export class WebRemoteServer {
     this.revokeTimer = setInterval(() => {
       this.auth.refreshFromDisk()
       for (const deviceId of this.auth.getRevokedDeviceIds()) this.eventHub.disconnectDevice(deviceId)
+      for (const [ws, remove] of this.connections) {
+        const deviceId = (ws as WebSocket & { webRemoteDeviceId?: string }).webRemoteDeviceId
+        if (deviceId?.startsWith('tailnet:') && !this.auth.isTrustedTailscaleNode(deviceId.slice('tailnet:'.length))) {
+          remove()
+          this.connections.delete(ws)
+          ws.close(1008, 'trusted device removed')
+        }
+      }
     }, 1000)
     this.revokeTimer.unref?.()
   }
@@ -141,15 +149,14 @@ export class WebRemoteServer {
     this.listening = false
   }
 
-  private authenticate(req: IncomingMessage, requireOrigin: boolean): AuthenticatedRequest | null {
-    const token = parseCookieHeader(req.headers.cookie)
-    const device = this.auth.authenticateToken(token)
-    if (!device) return null
+  private async authenticate(req: IncomingMessage, requireOrigin: boolean): Promise<AuthenticatedRequest | null> {
     const origin = typeof req.headers.origin === 'string' ? req.headers.origin : undefined
     if (requireOrigin && !this.auth.isAllowedOrigin(origin)) return null
     const tailscaleLogin = typeof req.headers['tailscale-user-login'] === 'string' ? req.headers['tailscale-user-login'] : undefined
     if (!this.auth.isAllowedTailscaleLogin(tailscaleLogin)) return null
-    return { deviceId: device.id }
+    const device = this.auth.authenticateToken(parseCookieHeader(req.headers.cookie))
+      ?? await this.auth.authenticateTrustedTailscale(tailscaleLogin, typeof req.headers['x-forwarded-for'] === 'string' ? req.headers['x-forwarded-for'] : undefined)
+    return device ? { deviceId: device.id } : null
   }
 
   private hasAllowedWorkspace(workspaceId: string | undefined): boolean {
@@ -184,6 +191,9 @@ export class WebRemoteServer {
     }
 
     if (method === 'GET' && path === '/') {
+      const login = typeof req.headers['tailscale-user-login'] === 'string' ? req.headers['tailscale-user-login'] : undefined
+      const trusted = await this.auth.authenticateTrustedTailscale(login, typeof req.headers['x-forwarded-for'] === 'string' ? req.headers['x-forwarded-for'] : undefined)
+      if (trusted) { res.writeHead(302, { Location: '/app/' }); res.end(); return }
       const nonce = randomBytes(16).toString('base64url')
       const configuredOrigin = expectedWebRemoteOrigin(this.options.config)
       let websocketOrigin = ''
@@ -222,7 +232,7 @@ export class WebRemoteServer {
     }
 
     const isWrite = method !== 'GET'
-    const identity = this.authenticate(req, isWrite)
+    const identity = await this.authenticate(req, isWrite)
     if (!identity) {
       json(res, 401, { error: 'unauthorized' })
       return
@@ -314,7 +324,7 @@ export class WebRemoteServer {
 
   private async handleAppRequest(req: IncomingMessage, res: ServerResponse, path: string): Promise<void> {
     if (req.method !== 'GET') { json(res, 405, { error: 'method not allowed' }); return }
-    if (!this.authenticate(req, false)) {
+    if (!await this.authenticate(req, false)) {
       res.writeHead(302, { Location: '/' })
       res.end()
       return
@@ -447,18 +457,23 @@ export class WebRemoteServer {
     return { body: encoded, encoding }
   }
 
-  private handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
+  private async handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
     if (url.pathname !== '/api/stream' && url.pathname !== '/api/ipc') { sendUpgradeError(socket, 404, 'Not Found'); return }
-    if (!this.authenticate(req, true)) { sendUpgradeError(socket, 401, 'Unauthorized'); return }
+    if (!await this.authenticate(req, true)) { sendUpgradeError(socket, 401, 'Unauthorized'); return }
     this.wsServer.handleUpgrade(req, socket, head, (ws: WebSocket) => this.wsServer.emit('connection', ws, req))
   }
 
-  private handleWebSocket(ws: WebSocket, req: IncomingMessage): void {
-    const device = this.auth.authenticateToken(parseCookieHeader(req.headers.cookie))
-    if (!device) { ws.close(1008, 'unauthorized'); return }
+  private async handleWebSocket(ws: WebSocket, req: IncomingMessage): Promise<void> {
+    const auth = await this.authenticate(req, true)
+    if (!auth) { ws.close(1008, 'unauthorized'); return }
+    const device = { id: auth.deviceId }
+    ;(ws as WebSocket & { webRemoteDeviceId?: string }).webRemoteDeviceId = device.id
     if (new URL(req.url ?? '/', 'http://127.0.0.1').pathname === '/api/ipc') {
       if (!this.options.ipcBridge) { ws.close(1013, 'full-ui disabled'); return }
+      this.connections.set(ws, () => {})
+      ws.once('close', () => this.connections.delete(ws))
+      ws.once('error', () => this.connections.delete(ws))
       this.options.ipcBridge.attachWebSocket(ws, device.id)
       return
     }

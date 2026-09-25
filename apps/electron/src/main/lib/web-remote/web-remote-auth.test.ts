@@ -74,6 +74,40 @@ describe('WebRemoteAuth', () => {
     expect(auth.authenticateToken(paired.token, 62_000)?.lastUsedAt).toBe(62_000)
   })
 
+  test('Tailnet 受信设备满足身份、地址、whois 与节点 allowlist 时通过', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'proma-web-remote-auth-'))
+    const auth = new WebRemoteAuth({ allowedTailscaleLogins: ['jo@example.com'], trustedTailscaleNodes: ['iphone-15'] }, dir, async () => ({ Node: { ComputedName: 'iphone-15' }, UserProfile: { LoginName: 'jo@example.com' } }))
+    expect((await auth.authenticateTrustedTailscale('jo@example.com', '100.90.1.2, 100.90.1.1'))?.id).toBe('tailnet:iphone-15')
+    expect((await auth.authenticateTrustedTailscale('jo@example.com', 'fd7a:115c:a1e0::1234'))?.id).toBe('tailnet:iphone-15')
+  })
+
+  test('Tailnet 登录名不在 allowlist 时拒绝', async () => {
+    const auth = new WebRemoteAuth({ allowedTailscaleLogins: ['jo@example.com'], trustedTailscaleNodes: ['iphone-15'] }, mkdtempSync(join(tmpdir(), 'proma-web-remote-auth-')), async () => ({ Node: { ComputedName: 'iphone-15' }, UserProfile: { LoginName: 'jo@example.com' } }))
+    expect(await auth.authenticateTrustedTailscale('other@example.com', '100.90.1.2')).toBeNull()
+  })
+
+  test('非 Tailnet 地址段拒绝且不调用 whois', async () => {
+    let called = false
+    const auth = new WebRemoteAuth({ allowedTailscaleLogins: ['jo@example.com'], trustedTailscaleNodes: ['iphone-15'] }, mkdtempSync(join(tmpdir(), 'proma-web-remote-auth-')), async () => { called = true; return null })
+    expect(await auth.authenticateTrustedTailscale('jo@example.com', '192.168.1.2')).toBeNull()
+    expect(called).toBe(false)
+  })
+
+  test('whois 用户不匹配时拒绝', async () => {
+    const auth = new WebRemoteAuth({ allowedTailscaleLogins: ['jo@example.com'], trustedTailscaleNodes: ['iphone-15'] }, mkdtempSync(join(tmpdir(), 'proma-web-remote-auth-')), async () => ({ Node: { ComputedName: 'iphone-15' }, UserProfile: { LoginName: 'other@example.com' } }))
+    expect(await auth.authenticateTrustedTailscale('jo@example.com', '100.90.1.2')).toBeNull()
+  })
+
+  test('节点名不在受信列表时拒绝', async () => {
+    const auth = new WebRemoteAuth({ allowedTailscaleLogins: ['jo@example.com'], trustedTailscaleNodes: ['another-phone'] }, mkdtempSync(join(tmpdir(), 'proma-web-remote-auth-')), async () => ({ Node: { ComputedName: 'iphone-15' }, UserProfile: { LoginName: 'jo@example.com' } }))
+    expect(await auth.authenticateTrustedTailscale('jo@example.com', '100.90.1.2')).toBeNull()
+  })
+
+  test('whois 失败时拒绝', async () => {
+    const auth = new WebRemoteAuth({ allowedTailscaleLogins: ['jo@example.com'], trustedTailscaleNodes: ['iphone-15'] }, mkdtempSync(join(tmpdir(), 'proma-web-remote-auth-')), async () => null)
+    expect(await auth.authenticateTrustedTailscale('jo@example.com', '100.90.1.2')).toBeNull()
+  })
+
   test('Cookie 使用 HttpOnly Secure Strict', () => {
     const cookie = makeAuthCookie('abc')
     expect(cookie).toContain('HttpOnly')
