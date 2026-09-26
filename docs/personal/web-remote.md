@@ -12,10 +12,11 @@
 
 | 项目 | 说明 |
 |---|---|
-| 运行实例 | 默认只允许开发实例（数据目录 `~/.proma-dev`）；正式目录需显式设置 `PROMA_WEB_REMOTE_ALLOW_PROD=1` |
-| 启动开关 | 环境变量 `PROMA_WEB_REMOTE=1` **且** 配置 `enabled: true` |
+| 运行实例 | 个人版安装包（日常使用，数据 `~/.proma`）；或开发实例（数据 `~/.proma-dev`，用于预演）。官方打包版一律拒绝 |
+| 启动开关 | 安装版：配置 `enabled: true`（完整界面另需 `fullUi: true`），无需环境变量。开发实例：环境变量 `PROMA_WEB_REMOTE=1` **且** 配置 `enabled: true` |
 | 监听 | 只监听 `127.0.0.1:17888`，对外只经 Tailscale Serve（仅 tailnet 可达） |
-| 数据目录 | `~/.proma-dev/web-remote/`：`config.json`、`devices.json`、`pairing.json`、`push-subscriptions.json`、`vapid.json`（均 0600，不入库） |
+| 数据目录 | 安装版 `~/.proma/web-remote/`，开发实例 `~/.proma-dev/web-remote/`：`config.json`、`devices.json`、`pairing.json`、`push-subscriptions.json`、`vapid.json`（均 0600，不入库） |
+| 端口冲突 | 两者都用 17888，安装版运行时开发实例的手机访问无法启动（见 `PERSONAL.md` 已知问题） |
 
 启动开发实例：
 

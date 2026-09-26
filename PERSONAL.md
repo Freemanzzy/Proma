@@ -42,7 +42,7 @@
 - 钉钉、Slack 桥接：设置入口隐藏；桥接源码与 IPC 保留以兼容旧数据，但启动注册明确禁止自动连接。
 - GitHub Copilot 订阅渠道：从新增渠道类型列表隐藏；编辑已有 Copilot 渠道时仍保留选项，不影响旧数据使用。
 - Agent Island：设置入口隐藏；启动时不初始化状态机或 macOS helper；electron-builder 不再打包 helper，相关源码和开发构建脚本保留。
-- 远程网页（实验）：仅在开发实例设置 `PROMA_WEB_REMOTE=1` 且 `~/.proma-dev/web-remote/config.json` 明确启用时启动；主进程只监听回环地址，配对、设备撤销和 Tailscale Serve 建议命令由 `scripts/personal/web-remote.sh` 管理；不打包进安装版。
+- 远程网页（手机访问）：个人版安装包（`app.isPackaged` 且有 `personal-build.json`）由 `~/.proma/web-remote/config.json` 的 `enabled`（完整界面另需 `fullUi`）控制，无需环境变量；开发实例仍需 `PROMA_WEB_REMOTE=1` 且 `~/.proma-dev/web-remote/config.json` 启用；官方打包版一律拒绝。主进程只监听回环地址 17888，对外只经 Tailscale Serve；配对、设备撤销由桌面“设置 → 远程连接 → 手机访问”或 `scripts/personal/web-remote.sh` 管理。
 
 ## 数据导入
 
@@ -77,6 +77,8 @@ python3 scripts/personal/import-proma-backup.py \\
 - `brew install oven-sh/bun/bun` 因本机 Xcode/Command Line Tools 版本过旧而失败；按计划改用 Bun 官方安装脚本，安装 `bun 1.4.2` 成功。未执行需要 sudo 的系统升级。
 - Electron 43.2.0 的 Node 下载流程受当前代理环境影响，`node node_modules/electron/install.js` 报 `TypeError: fetch failed`；已用官方 GitHub Release URL 通过 `curl` 下载并解压到本地 `node_modules/electron/dist`，随后开发版成功启动。后续如重新安装依赖，需确认 Electron 二进制是否完整。
 - 构建阶段的 `node-pty`、macOS agent-island helper、EventKit native helper 和 officecli 均构建/校验成功。
+
+- 安装版与开发实例的手机访问都监听 127.0.0.1:17888（Tailscale Serve 只转发这一端口）。个人版安装版运行时，开发实例的手机访问无法启动，同步预演中的手机回归（CLAUDE.md §6 第 6 项）需另定方案（例如开发实例改用其他端口并另开一条 Serve），在此之前不要对安装版运行会创建/删除会话的 harness。
 
 ## 变更记录
 
@@ -460,3 +462,11 @@ python3 scripts/personal/import-proma-backup.py \\
 
 - 经用户同意：`/Applications` 只保留当前个人版 `Proma.app`（`29e7a81e`）。三个旧个人版（`22d69abe`、`bf63f7db`、首次失败包 `bf63f7db`）手机端均有缺陷且可从已推送提交重建，移入废纸篓（`~/.Trash/Proma-personal-22d69abe.app`、`Proma-personal-bf63f7db.app`、`Proma-failed-bf63f7db.app`），未清空。
 - 官方版 0.19.58（Team ID `55P2K523PB`）移出 `/Applications`，存放于 `~/.proma-switch-backups/official-Proma-0.19.58.app`，避免同名同 ID 被 Spotlight 或链接误启动并自动更新；外置硬盘 `official-Proma-0.19.58-20260926.app.zip` 保留。回退官方版的位置已写入 fallback-runbook §3 第 4 步。下次安装更新时，安装脚本会重新生成 `Proma.previous.app`（上一版个人版）。
+
+## 2026-09-27: 切换后文档对齐与 SSOT 规则
+
+- 用户要求：以后所有修改遵循 SSOT 规则；每次安装后在安装版上做手机验收。
+- `CLAUDE.md`：新增 §7「文档规则（SSOT）」（权威位置划分、变更记录只追加、影响权威内容时同一提交内同步更新、验证结果直接写入、快照与 SSOT 冲突以 SSOT 为准），原 §7 汇报改为 §8；§6 新增第 7 项「安装版手机验收（每次安装后必做）」，其后编号顺延；§2 关键位置补“安装版手机访问配置 `~/.proma/web-remote/`”。
+- `PERSONAL.md` 差异清单：“远程网页（实验）…不打包进安装版”已过时，改为安装版由 `~/.proma/web-remote/config.json` 控制的当前行为。
+- `docs/personal/web-remote.md` §2：运行实例、启动开关、数据目录改为安装版与开发实例两种情况，新增端口冲突说明。
+- 待用户在 Proma 内修改（定时任务在 `~/.proma`，不入库）：“Proma 个人版 · 官方版本周检（只读）”第 3 步仍按官方版读取 `/Applications/Proma.app` 版本，应改为读取 `personal-build.json` 并与 `personal` HEAD 对比；第 4 行“个人版版本必须不低于官方已安装版本”改为“只看最新官方正式 tag 与个人版基线”。
