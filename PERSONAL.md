@@ -481,3 +481,9 @@ python3 scripts/personal/import-proma-backup.py \\
   - 全文已无“官方已安装”“CFBundleShortVersionString”“交叉核对”“不低于官方”等旧说法。
 - 实测当前差异：已安装 `29e7a81e` → `personal` HEAD 之间只改动 `CLAUDE.md`、`PERSONAL.md`、`docs/personal/fallback-runbook.md`、`docs/personal/web-remote.md`，按新规则应判为“仅文档，无需重装”。
 - 待修正（用户在 Proma 内修改）：`apps/electron/default-skills/**/SKILL.md`（36 个文件）由 `electron-builder.yml` 打进安装包并在启动时同步到 `~/.proma/default-skills/`，改动需要重装；现规则“`*.md` 无需重装”会误判。建议改为：仅文档/脚本 = 仓库根目录 `*.md`、`docs/`、`scripts/personal/`；`apps/`、`packages/` 下任何文件（含 `default-skills` 的 Markdown）都算应用改动。
+
+## 2026-09-27: 周检“是否需重装”分类修正（复查）
+
+- 用户经 `update_automation` 修改周检第 3 步（`updatedAt` 09-27 00:55，仍启用，下次 09-28 09:30），主会话只读复查通过：仅文档/脚本（无需重装）= 仓库根目录 `*.md`、`docs/`、`scripts/personal/`；`apps/`、`packages/`（含 `apps/electron/default-skills/` 的 Markdown）、依赖清单、`patches/` 及其余路径一律算应用改动（需打包安装）。旧规则“`*.md` 无需重装”已不存在。
+- 该规则偏保守（如根目录 `bun.lock`、`.github/` 也算应用改动），误报只会多提示一次重装，不会漏报。
+- 上一条记录中的“待修正”项已完成。
