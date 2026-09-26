@@ -8,10 +8,10 @@
 
 - 上游仓库：`proma-ai/Proma`
 - 个人 Fork：`Freemanzzy/Proma`
-- 基线版本：`v0.19.57`
-- 基线 commit：`4e96c5e859302c4a34618d45db352b29a7ebeb28`
+- 基线版本：`v0.19.58`
+- 基线 commit：`f20943edd047ecdc929df67de9412d6e58cd4312`
 - 当前个人主线：`personal`
-- Electron 版本：`0.19.57`
+- Electron 版本：`0.19.58`
 
 ## 分支策略
 
@@ -69,7 +69,7 @@ python3 scripts/personal/import-proma-backup.py \\
 
 | 日期 | 分支 | 上游基线 | 结果 | 备注 |
 |---|---|---|---|---|
-|  |  |  |  |  |
+| 2026-09-26 | `sync/2026-09-26` | `v0.19.58` (`f20943e`) | 已合并；唯一冲突为 `ChannelForm.tsx`，保留个人版隐藏新增 Copilot 入口与编辑旧 Copilot 回显，并采用上游移除火山套餐/OpenCode Go 的列表 | typecheck 与五项构建通过；全量测试 541/5/1，与基线一致；开发渠道 v7 的 9 项名称/provider/enabled 前后完全一致；上游仅为 Codex 渠道补入 2 个 GPT-6 候选模型；clipproxyapi、Codex 真对话及 EgoBrowser、Android/iPhone smoke 与附件 harness 通过；测试设备与自建会话均清理。详见 2026-09-26 变更记录。 |
 
 ## 已知问题
 
@@ -374,3 +374,15 @@ python3 scripts/personal/import-proma-backup.py \\
 - C2：每周版本检查任务增加“上游新增未分级 IPC 通道”检查，并按 tag 提交时间判断最新正式版本。
 - C3：新增使用说明 `docs/personal/web-remote.md`。
 - 合并到 `personal`。手机完整客户端正式版计划（A/B/C）全部完成。
+
+
+## 2026-09-26: 同步官方 v0.19.58
+
+- 在 `sync/2026-09-26` 基于 `personal` 合并官方 `v0.19.58`（基线提交 `f20943edd047ecdc929df67de9412d6e58cd4312`），唯一冲突为 `apps/electron/src/renderer/components/settings/ChannelForm.tsx`。新建列表不含 GitHub Copilot、编辑已有 Copilot 渠道时动态追加回显逻辑保留；同时完整应用上游移除 OpenCode Go 与火山方舟套餐的目录改动。与 tag 对比，`ChannelForm.tsx` 仅保留这项个人版 Copilot 差异。
+- 自动合并复核：README 中英文个人 Fork 区块保留、`agent-orchestrator.ts` 延续个人版移除内置浏览器并保留 EgoBrowser、`DiffPanelTabBar.tsx` 移除上游浏览器入口、`packages/shared/src/types/agent.ts` 保留 Web Remote 增量。Electron 包版本为 `0.19.58`。
+- Pi 运行时从 `0.86.1` 升至 `0.87.1`；`pi-ai` 补丁改为 `patches/@earendil-works%2Fpi-ai@0.87.1.patch`。`bun install` 成功，四个 `@earendil-works/pi-*` 包均解析为 `0.87.1`，补丁版本登记且已应用。为消除上游类型收窄后的编译错误，Pi provider 判断去掉已退休 `doubao` 类型、渠道迁移清理仍用字符串识别历史套餐类型、Logo 映射移除已退休的 `ark-coding-plan` 与 `doubao` 项。
+- 渠道配置迁移 `v5 → v7`，只清除上游已退休的 OpenCode Go 与火山方舟套餐记录。开发实例 `~/.proma-dev/channels.json` 为 version 7；与迁移前 `/tmp/channels-before-sync.txt` 对比，9 个渠道的名称、provider、enabled 三元组完全一致。上游候选更新器另为 ChatGPT 订阅 (Codex) 渠道追加 2 个 GPT-6 候选模型；没有改动渠道标识、端点或凭据。IPC 分级日志显示覆盖率 100%（invoke=370、event=8）。未读取或修改正式数据目录 `~/.proma`。
+- 验证：`bun run typecheck` 通过。全量 `bun test` 为 541 pass / 5 fail / 1 error（546 tests），与给定基线完全一致；既有问题为 Electron `dialog`/`shell` mock 导出、OAuth proxy scope、proxy-settings-service 测试导出以及 planning-manager 测试中的 Electron binary 类型。`build:main`、`build:agent-runtime`、`build:preload`、`build:renderer`、`build:web-preload` 均通过；renderer 保留既有大 chunk 警告。
+- 真实 Agent 回归：隔离新建会话分别使用 clipproxyapi 主渠道与 ChatGPT 订阅 Codex 渠道完成“只回复 pong”；Pi 0.87.1 运行正常。另一次 Agent 调用确实观察到 `EgoBrowser` 工具调用，打开 `https://example.com` 并返回标题 `Example Domain`。
+- 手机 harness：Android 与 iPhone UA 的 `--suite smoke` 均通过；两种 UA 的 `--suite attachments` 均通过文本附件首行提取、PNG 识别主色及 Markdown 附件链路。iPhone 首次运行的图片答案为小写 `red`，旧 harness 的大小写敏感检查误报；在临时大小写无关检查下复验通过，随后还原 harness 源文件。全部 harness 设备已撤销、临时 Chrome 已退出且 profile 已删除；每次 harness 创建的专用会话都已删除，既有会话清单前后未变。运行中可见音效预加载 XHR 错误，但 JavaScript exceptions 为 0，未影响验证。
+- 本次仅提交同步分支，不 push、不合并到 `personal`；没有停止/手动重启开发实例、改 Web Remote 配置或用户设备，也未触及官方应用或 Tailscale。

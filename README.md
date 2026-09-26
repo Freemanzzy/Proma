@@ -3,7 +3,7 @@
 >
 > 这是 Freemanzzy 基于 [proma-ai/Proma](https://github.com/proma-ai/Proma) 维护的个人 Fork，用于个人测试，与官方版本并存；许可证沿用 [AGPL-3.0](./LICENSE)。个人版代码在 `personal` 分支；`main` 分支保持为官方代码的镜像。
 >
-> **基线**：官方 `v0.19.57`。
+> **基线**：官方 `v0.19.58`。
 >
 > **本 Fork 的改动**
 > - **手机访问（Web Remote）**：经 Tailscale 私有网络，用手机运行与桌面同一套界面，操作 Mac 上的 Proma：实时对话、Skill、附件、提问与计划审批、Todo、定时任务、文件预览、推送通知，可添加到主屏幕。IPC 通道显式分级、默认拒绝。说明见 [`docs/personal/web-remote.md`](./docs/personal/web-remote.md)。
@@ -31,6 +31,12 @@
 
 
 欢迎访问 https://proma.cool 查看更完整的介绍。
+
+
+
+## ⚠️注意
+
+> 由于我们的精力实在过于有限，目前 Proma 开源版本处于无法及时更新的阶段，我们不得不把我们的几乎全部精力投入到 Proma 商业版的建设当中，如果你希望获得到更好的 Agent 体验、更及时的更新和修复，请下载 Proma 商业版：https://proma.cool/download
 
 
 
