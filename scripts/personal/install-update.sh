@@ -11,7 +11,7 @@ SIMULATE_COPY_FAILURE=0
 APPS_DIR="/Applications"
 DATA_DIR="$HOME/.proma"
 BACKUP_ROOT="$HOME/.proma-switch-backups"
-LOGS_DIR="$HOME/Library/Logs/Proma"
+LOGS_DIR="$HOME/Library/Logs/@proma/electron"
 usage() {
   cat <<'EOF'
 用法: install-update.sh NEW_APP [--timeout SEC] [--health-seconds SEC]

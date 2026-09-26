@@ -29,7 +29,7 @@
 | 外置硬盘完整备份 | `/Volumes/Lexar ssd 2tb/proma 备份/*.zip`（`proma-backup` Skill 生成；未挂载时用 `diskutil list` 找到卷后 `diskutil mount <设备>`） |
 | 源码仓库 | `~/Documents/proma-personal`（`personal` 分支；SSOT：`PERSONAL.md`） |
 | 官方上游 | remote `upstream` = proma-ai/Proma；个人版 remote `origin` = Freemanzzy/Proma |
-| 日志 | 用户数据日志 `~/.proma/logs/`；个人版主进程文件日志 `~/Library/Logs/Proma/main.log`（`app.getPath('logs')/main.log`，事件级脱敏、轮转）；开发实例日志 `/tmp/proma-personal-dev-webremote.log` |
+| 日志 | 用户数据日志 `~/.proma/logs/`；个人版主进程文件日志 `~/Library/Logs/@proma/electron/main.log`（`app.getPath('logs')/main.log`，事件级脱敏、轮转）；开发实例日志 `/tmp/proma-personal-dev-webremote.log` |
 | 工具 | bun：`~/.bun/bin/bun`（先 `export PATH="$HOME/.bun/bin:$PATH"`） |
 
 ---
@@ -69,7 +69,7 @@ sqlite3 ~/.proma/planning.db "PRAGMA user_version;"
 # 最近错误
 ls -t ~/.proma/logs | head -3
 tail -200 "$HOME/.proma/logs/$(ls -t ~/.proma/logs | head -1)" | grep -iE "error|fatal|无法|失败" | tail -40
-tail -200 "$HOME/Library/Logs/Proma/main.log" 2>/dev/null | grep -iE '\[FATAL\]|\[ERROR\]|startup' | tail -40
+tail -200 "$HOME/Library/Logs/@proma/electron/main.log" 2>/dev/null | grep -iE '\[FATAL\]|\[ERROR\]|startup' | tail -40
 python3 scripts/personal/health-snapshot.py "$HOME/.proma"
 
 # 可用备份

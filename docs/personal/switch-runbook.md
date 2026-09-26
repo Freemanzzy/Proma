@@ -72,7 +72,7 @@ python3 -c "import json,os;c=json.load(open(os.path.expanduser('~/.proma/web-rem
 ```bash
 bash scripts/personal/install-update.sh apps/electron/out/mac-arm64/Proma.app 2>&1 | tee /tmp/proma-install-$(date +%Y%m%d-%H%M).log
 ```
-脚本依次：检查个人版标记 → 等待 Proma 退出（不强杀）→ 检查 17888 未被其他进程占用 → `cp -a` 备份 `~/.proma` 到 `~/.proma-switch-backups/<时间戳>/proma` 并校验、生成快照 → 官方版改名 `/Applications/Proma.previous.app` → 新包先复制为临时包再原子替换 → 启动 → 60 秒健康检查（进程存活、`~/Library/Logs/Proma/main.log` 本次启动后无 `[FATAL]`、对象计数与各任务/渠道启用状态一致、手机端口由新包进程监听）→ 失败自动：结束新包进程、还原官方版、保留 `Proma.failed-*.app`；**数据不自动还原**。
+脚本依次：检查个人版标记 → 等待 Proma 退出（不强杀）→ 检查 17888 未被其他进程占用 → `cp -a` 备份 `~/.proma` 到 `~/.proma-switch-backups/<时间戳>/proma` 并校验、生成快照 → 官方版改名 `/Applications/Proma.previous.app` → 新包先复制为临时包再原子替换 → 启动 → 60 秒健康检查（进程存活、`~/Library/Logs/@proma/electron/main.log` 本次启动后无 `[FATAL]`、对象计数与各任务/渠道启用状态一致、手机端口由新包进程监听）→ 失败自动：结束新包进程、还原官方版、保留 `Proma.failed-*.app`；**数据不自动还原**。
 - 首次启动 macOS 会弹 Keychain 访问请求：请用户点 **“始终允许”**（可能多次）。若用户误点“拒绝”，**不要在应用里保存任何渠道**（会用空凭据覆盖），退出应用后重新打开再允许。
 - 健康检查可能因用户尚未处理 Keychain 弹窗而失败；此时向用户确认后可重试**一次**（`--health-seconds 120`）。
 - 失败处理：确认 `/Applications/Proma.app` 已是官方版（无 `personal-build.json`）、无 failed 包进程；用快照对比 `~/.proma` 是否被改动；按 fallback-runbook 诊断；向用户报告，由用户决定修复后重试或中止。
@@ -96,7 +96,7 @@ bash scripts/personal/install-update.sh apps/electron/out/mac-arm64/Proma.app 2>
    - 设置 → 关于：显示“个人版由维护流程更新”，无更新检查；
    - 语音听写、日历/提醒等系统权限如被重新请求，按需授权。
 4. 手机：两台手机打开 `/app/`，发一条消息；在手机上点“开启通知”并在桌面“设置 → 远程连接 → 手机访问”发送测试通知。
-5. 日志：`tail -50 ~/Library/Logs/Proma/main.log` 无 `[FATAL]`（`[ERROR]` 行为事件计数，数量多不代表故障）。
+5. 日志：`tail -50 ~/Library/Logs/@proma/electron/main.log` 无 `[FATAL]`（`[ERROR]` 行为事件计数，数量多不代表故障）。
 
 任何一项不符：记录并报告用户，由用户决定继续观察、局部修复，还是回退（fallback-runbook §3：两边版本相同，通常只需换回应用，不需要恢复数据）。
 
