@@ -161,14 +161,21 @@ function openBrowserFileDialog(): Promise<unknown> {
     input.style.left = '-10000px'
     document.body.appendChild(input)
     let settled = false
+    let cancelTimer: number | undefined
     const finish = (value: unknown) => {
       if (settled) return
       settled = true
+      if (cancelTimer !== undefined) window.clearTimeout(cancelTimer)
       input.remove()
       resolve(value)
     }
-    input.addEventListener('cancel', () => finish({ files: [], directories: [] }), { once: true })
+    // Keep the input alive briefly after the browser reports picker cancellation. This also
+    // permits CDP/mobile automation to attach files to the just-created input before cleanup.
+    input.addEventListener('cancel', () => {
+      cancelTimer = window.setTimeout(() => finish({ files: [], directories: [] }), 1_500)
+    }, { once: true })
     input.addEventListener('change', () => {
+      if (cancelTimer !== undefined) window.clearTimeout(cancelTimer)
       void (async () => {
         const files: Array<{ filename: string; mediaType: string; data: string; size: number }> = []
         const skippedFiles: Array<{ filename: string; size: number; reason: 'unreadable'; message: string }> = []

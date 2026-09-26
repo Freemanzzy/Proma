@@ -9,7 +9,7 @@
  * no private hostname is embedded in this file.
  */
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
@@ -189,11 +189,12 @@ async function findElement(client, text, selector = 'body *') {
     const wanted=${quoteJs(text)};
     const nodes=[...document.querySelectorAll(${quoteJs(selector)})];
     const visible=(node)=>{const r=node.getBoundingClientRect();const s=getComputedStyle(node);return r.width>0&&r.height>0&&r.right>0&&r.left<innerWidth&&r.bottom>0&&r.top<innerHeight&&s.visibility!=='hidden'&&s.display!=='none';};
-    const matches=nodes.filter((item)=>visible(item)&&((item.innerText||item.textContent||'').includes(wanted))).sort((a,b)=>{const rank=(item)=>item.matches('button,[role="button"]')?0:((item.innerText||item.textContent||'').trim()===wanted?1:2);const ar=a.getBoundingClientRect();const br=b.getBoundingClientRect();return rank(a)-rank(b)||(ar.width*ar.height)-(br.width*br.height)});
+    const accessibleName=(node)=>{const aria=node.getAttribute('aria-label');if(aria)return aria.trim();const ids=(node.getAttribute('aria-labelledby')||'').split(/\\s+/).filter(Boolean);if(ids.length)return ids.map((id)=>document.getElementById(id)?.innerText||'').join(' ').trim();return(node.innerText||node.textContent||node.getAttribute('title')||'').trim();};
+    const matches=nodes.filter((item)=>visible(item)&&((item.innerText||item.textContent||'').includes(wanted)||accessibleName(item).includes(wanted))).sort((a,b)=>{const rank=(item)=>{const name=accessibleName(item);if(name===wanted&&item.matches('button,[role="button"]'))return 0;if(name===wanted)return 1;if(item.matches('button,[role="button"]'))return 2;return 3};const ar=a.getBoundingClientRect();const br=b.getBoundingClientRect();return rank(a)-rank(b)||(ar.width*ar.height)-(br.width*br.height)});
     const node=matches[0];
-    if(!node)return null; const r=node.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2,tag:node.tagName,text:(node.innerText||node.textContent||'').trim().slice(0,160)};
+    if(!node)return null; const r=node.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2,tag:node.tagName,role:node.getAttribute('role'),ariaLabel:node.getAttribute('aria-label'),text:(node.innerText||node.textContent||'').trim().slice(0,160)};
   })()`)
-  if (!result) throw new Error(`找不到可见文本: ${text}`)
+  if (!result) throw new Error(`找不到可访问名称或可见文本: ${text}`)
   return result
 }
 
@@ -741,32 +742,40 @@ async function runAttachments(harness, options, result) {
   const textPath = join(options.outputDir, 'b1-attachment.txt')
   const imagePath = join(options.outputDir, 'b1-attachment.png')
   writeFileSync(textPath, 'B1_ATTACHMENT_FIRST_LINE\n第二行仅用于确认首行提取。\n')
-  writeFileSync(imagePath, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p0cAAAAASUVORK5CYII=', 'base64'))
+  writeFileSync(imagePath, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAANklEQVRIie3WuQkAQAwDwem/aV0VhgsWnAuMnjVOTwJ6kVy0gqaqWG2qwVmTKaoQeAkdfU3XDzLD/C7nwdQVAAAAAElFTkSuQmCC', 'base64'))
 
-  const captureInstalled = await harness.client.evaluate(`(() => {
-    const api=window.electronAPI;
-    if(!api || typeof api.saveFilesToAgentSession!=='function') return false;
-    window.__B1_SAVED_FILES=[];
-    const original=api.saveFilesToAgentSession.bind(api);
-    api.saveFilesToAgentSession=async(input)=>{const result=await original(input);window.__B1_SAVED_FILES.push({input,result});return result};
-    return api.saveFilesToAgentSession!==original;
-  })()`)
-  if (!captureInstalled) throw new Error('无法在本次专用会话中安装附件保存证据采集器')
+  const attachmentApiAvailable = await harness.client.evaluate(`Boolean(window.electronAPI && typeof window.electronAPI.openFileOrFolderDialog==='function' && typeof window.electronAPI.getAgentSessionPath==='function')`)
+  if (!attachmentApiAvailable) throw new Error('手机 renderer 未暴露文件选择或会话目录 API')
 
-  const paperclip = await findElement(harness.client, '附加文件或文件夹', 'button[aria-label="附加文件或文件夹"]')
-  await touchAt(harness.client, paperclip.x, paperclip.y)
-  await waitUntil(harness.client, `Boolean(document.querySelector('input[type="file"][accept^="image/*"]'))`, 10_000)
-  const document = await harness.client.command('DOM.getDocument', { depth: -1 })
-  const query = await harness.client.command('DOM.querySelector', { nodeId: document.root.nodeId, selector: 'input[type="file"][accept^="image/*"]' })
-  if (!query.nodeId) throw new Error('手机文件选择器 input 未创建')
-  await harness.client.command('DOM.setFileInputFiles', { nodeId: query.nodeId, files: [imagePath, textPath] })
-  await waitUntil(harness.client, `document.body.innerText.includes('b1-attachment.png') && document.body.innerText.includes('b1-attachment.txt')`, 20_000)
-  const attachmentScreenshot = await harness.screenshot('attachments-selected')
-  result.screenshots.push(attachmentScreenshot)
-  const saved = await waitUntil(harness.client, `window.__B1_SAVED_FILES?.length===2 && window.__B1_SAVED_FILES`, 20_000)
-  const savedFiles = saved.flatMap((entry) => entry.result ?? [])
-  const fileEvidence = savedFiles.map((file) => ({ filename: file.filename, targetPath: file.targetPath, exists: existsSync(file.targetPath), size: existsSync(file.targetPath) ? readFileSync(file.targetPath).byteLength : null, firstLine: file.filename.endsWith('.txt') && existsSync(file.targetPath) ? readFileSync(file.targetPath, 'utf8').split(/\r?\n/, 1)[0] : null }))
-  if (fileEvidence.length !== 2 || fileEvidence.some((file) => !file.exists)) throw new Error(`手机附件未写入专用会话目录: ${JSON.stringify(fileEvidence)}`)
+  const sessionDirectory = await harness.invokeApi('getAgentSessionPath', [session.workspaceId, session.id])
+  if (typeof sessionDirectory !== 'string' || !sessionDirectory) throw new Error('无法取得本次专用会话的工作目录')
+  const selectFiles = async (paths, kind, visibleExpression) => {
+    const paperclip = await findElement(harness.client, '附加文件或文件夹', 'button,[role="button"]')
+    result.attachmentButton = paperclip
+    const clicked = await harness.client.evaluate(`(() => {const button=[...document.querySelectorAll('button,[role="button"]')].find((node)=>node.getAttribute('aria-label')==='附加文件或文件夹');if(!button)return false;button.click();return true})()`)
+    if (!clicked) throw new Error('未能通过 aria-label 点击附件按钮')
+    const inputFound = await waitUntil(harness.client, `Boolean(document.querySelector('input[type="file"][accept^="image/*"]'))`, 3_000).catch(() => false)
+    if (!inputFound) {
+      const diagnostic = await harness.client.evaluate(`({webRemote:window.__PROMA_WEB_REMOTE__,inputs:[...document.querySelectorAll('input[type="file"]')].map((n)=>({accept:n.accept,connected:n.isConnected})),buttons:[...document.querySelectorAll('button,[role="button"]')].filter((n)=>n.getAttribute('aria-label')?.includes('附加文件')).map((n)=>({aria:n.getAttribute('aria-label'),pointerEvents:getComputedStyle(n).pointerEvents,opacity:getComputedStyle(n).opacity}))})`)
+      throw new Error(`点击附件入口后未生成手机文件选择器：${JSON.stringify(diagnostic)}`)
+    }
+    const document = await harness.client.command('DOM.getDocument', { depth: -1 })
+    const query = await harness.client.command('DOM.querySelector', { nodeId: document.root.nodeId, selector: 'input[type="file"][accept^="image/*"]' })
+    if (!query.nodeId) throw new Error('手机文件选择器 input 未创建')
+    await harness.client.command('DOM.setFileInputFiles', { nodeId: query.nodeId, files: paths })
+    try { await waitUntil(harness.client, visibleExpression, 20_000) }
+    catch (error) {
+      const diagnostic = await harness.client.evaluate(`({body:document.body.innerText.slice(-1600),rendered:[...document.querySelectorAll('[data-input-mode="agent"] img[alt],[data-input-mode="agent"] span')].map((n)=>n.getAttribute('alt')||n.textContent||'').slice(-10)})`)
+      throw new Error(`${error instanceof Error ? error.message : String(error)}; ${kind} 附件显示诊断=${JSON.stringify(diagnostic)}`)
+    }
+    const screenshotPath = await harness.screenshot(`attachment-${kind}-selected`)
+    result.screenshots.push(screenshotPath)
+    return screenshotPath
+  }
+  const textScreenshot = await selectFiles([textPath], 'text', `(() => [...document.querySelectorAll('[data-input-mode="agent"] span')].some((n)=>n.textContent?.includes('b1-at')&&n.parentElement?.classList.contains('group/attachment')))()`)
+  const textFilePath = join(sessionDirectory, 'attachments', 'b1-attachment.txt')
+  const textFileEvidence = { filename: 'b1-attachment.txt', targetPath: textFilePath, exists: existsSync(textFilePath), size: existsSync(textFilePath) ? readFileSync(textFilePath).byteLength : null, firstLine: existsSync(textFilePath) ? readFileSync(textFilePath, 'utf8').split(/\r?\n/, 1)[0] : null }
+  if (!textFileEvidence.exists) throw new Error(`文本附件未写入专用会话目录: ${JSON.stringify(textFileEvidence)}`)
 
   const textPrompt = '读取我附加的文本文件，只回复其中的第一行。'
   await harness.inputAndSend(textPrompt)
@@ -774,21 +783,27 @@ async function runAttachments(harness, options, result) {
   const textUser = textReply.history.findLast((message) => sdkMessageRole(message) === 'user' && sdkMessageText(message).includes(textPrompt))
   if (!textUser || !sdkMessageText(textUser).includes('b1-attachment.txt')) throw new Error('文本附件未出现在用户消息引用中')
 
-  const imagePrompt = '请查看我附加的 PNG 图像；如果收到图片附件，只回复 B1_IMAGE_RECEIVED。'
+  const imageScreenshot = await selectFiles([imagePath], 'image', `(() => [...document.querySelectorAll('[data-input-mode="agent"] img[alt]')].some((n)=>n.alt.includes('b1-attachment.png')))()`)
+  const imageFilePath = join(sessionDirectory, 'attachments', 'b1-attachment.png')
+  const imageFileEvidence = { filename: 'b1-attachment.png', targetPath: imageFilePath, exists: existsSync(imageFilePath), size: existsSync(imageFilePath) ? readFileSync(imageFilePath).byteLength : null }
+  if (!imageFileEvidence.exists) throw new Error(`图片附件未写入专用会话目录: ${JSON.stringify(imageFileEvidence)}`)
+  const imagePrompt = '请查看我附加的 PNG 图片，说出画面中占主导的颜色，只回复一个英文单词。'
   await harness.inputAndSend(imagePrompt)
-  const imageReply = await harness.waitForAssistantReply(imagePrompt, 'B1_IMAGE_RECEIVED', 90_000)
-  const imageUser = imageReply.history.findLast((message) => sdkMessageRole(message) === 'user' && sdkMessageText(message).includes(imagePrompt))
-  if (!imageUser || !sdkMessageText(imageUser).includes('b1-attachment.png')) throw new Error('图片附件未出现在用户消息引用中')
+  const imageReply = await harness.waitForAssistantReply(imagePrompt, 'Red', 90_000)
+  const imageAnswer = sdkMessageText(imageReply.assistant)
+  if (!/\bred\b/i.test(imageAnswer)) throw new Error(`Agent 未根据已附加 PNG 正确指出红色：${imageAnswer}`)
 
   const finalScreenshot = await harness.screenshot('attachments-sent')
   result.screenshots.push(finalScreenshot)
-  result.attachments = { session: { id: session.id, title: session.title, workspaceId: session.workspaceId }, files: fileEvidence, textUserMessageContainsAttachment: true, textAssistantReplyContainsFirstLine: Boolean(textReply.assistant), imageUserMessageContainsAttachment: true, imageAssistantAcknowledged: Boolean(imageReply.assistant), selectedScreenshot: attachmentScreenshot, finalScreenshot }
+  result.attachments = { session: { id: session.id, title: session.title, workspaceId: session.workspaceId }, files: [textFileEvidence, imageFileEvidence], textUserMessageContainsAttachment: true, textAssistantReplyContainsFirstLine: Boolean(textReply.assistant), imageShownInComposer: true, imageAssistantIdentifiedRed: true, textSelectedScreenshot: textScreenshot, imageSelectedScreenshot: imageScreenshot, finalScreenshot }
 }
 
 async function runSmoke(harness, options, result) {
   result.steps.push({ name: 'load', ok: true, url: new URL('/app/', options.url).toString() })
-  await harness.openSession(options.session)
-  result.steps.push({ name: 'open-session', ok: true, session: options.session })
+  const title = `web-remote-harness-smoke-${Date.now()}`
+  const session = await harness.createHarnessSession(title)
+  result.harnessSession = { id: session.id, title: session.title, workspaceId: session.workspaceId }
+  result.steps.push({ name: 'open-session', ok: true, session: title })
   const smokeMessage = '只回复 pong'
   await harness.inputAndSend(smokeMessage)
   await harness.waitForAssistantReply(smokeMessage, 'pong', 90_000)
