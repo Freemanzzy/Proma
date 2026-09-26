@@ -78,7 +78,7 @@ python3 scripts/personal/import-proma-backup.py \\
 - Electron 43.2.0 的 Node 下载流程受当前代理环境影响，`node node_modules/electron/install.js` 报 `TypeError: fetch failed`；已用官方 GitHub Release URL 通过 `curl` 下载并解压到本地 `node_modules/electron/dist`，随后开发版成功启动。后续如重新安装依赖，需确认 Electron 二进制是否完整。
 - 构建阶段的 `node-pty`、macOS agent-island helper、EventKit native helper 和 officecli 均构建/校验成功。
 
-- 安装版与开发实例的手机访问都监听 127.0.0.1:17888（Tailscale Serve 只转发这一端口）。个人版安装版运行时，开发实例的手机访问无法启动，同步预演中的手机回归（CLAUDE.md §6 第 6 项）需另定方案（例如开发实例改用其他端口并另开一条 Serve），在此之前不要对安装版运行会创建/删除会话的 harness。
+- 已解决（2026-09-27）：安装版与开发实例手机访问端口冲突。开发实例改用 127.0.0.1:17889，同步验证时临时开 Tailscale Serve https 8443 → 17889（见 CLAUDE.md §6 第 6 项）。
 
 ## 变更记录
 
@@ -487,3 +487,10 @@ python3 scripts/personal/import-proma-backup.py \\
 - 用户经 `update_automation` 修改周检第 3 步（`updatedAt` 09-27 00:55，仍启用，下次 09-28 09:30），主会话只读复查通过：仅文档/脚本（无需重装）= 仓库根目录 `*.md`、`docs/`、`scripts/personal/`；`apps/`、`packages/`（含 `apps/electron/default-skills/` 的 Markdown）、依赖清单、`patches/` 及其余路径一律算应用改动（需打包安装）。旧规则“`*.md` 无需重装”已不存在。
 - 该规则偏保守（如根目录 `bun.lock`、`.github/` 也算应用改动），误报只会多提示一次重装，不会漏报。
 - 上一条记录中的“待修正”项已完成。
+
+## 2026-09-27: 开发实例手机访问改用 17889 + 8443 临时转发
+
+- 用户选择方案：开发实例手机访问端口 17888 → 17889，同步验证时临时开 Tailscale Serve https 8443 → `127.0.0.1:17889`，结束后关闭；安装版 17888 ← 443 不变。
+- 本地配置（不入库）：`~/.proma-dev/web-remote/config.json` 的 `port` 改为 17889、`allowedOrigin` 改为带 `:8443` 的地址（`normalizeOrigin` 使用 `URL.origin`，保留端口）；改前备份为同目录 `config.json.bak-20260927-port17888`；安装版 `~/.proma/web-remote/config.json` 未改（port 17888）。
+- 端到端验证（主会话执行）：临时开启 8443 转发；`PROMA_WEB_REMOTE=1 bash scripts/personal/dev.sh` 启动开发实例，日志“full-ui 分级覆盖率 100%（invoke=370, event=8）”“已启动: 127.0.0.1:17889”；此时安装版（PID 90969）仍监听 17888，两者并存。`mobile-harness.mjs --url https://<主机名>:8443 --suite smoke --user-agent android` 退出 0：load、open-session、send-pong、MCP/Skills、Todo、定时任务、文件面板 7 步全部通过，JavaScript exceptions 0（22 条 console error 为既有音效预加载类）；测试设备已撤销、自建会话已删除、既有 5 个会话前后不变、临时 Chrome 与 profile 已清理；安装版设备数 199 不变。结束后停止开发实例（17889、5173 已释放）并关闭 8443 转发，Serve 只剩 443 → 17888。
+- 文档：`CLAUDE.md` §6 第 6 项改为 17889/8443 流程并注明 harness 只对开发实例运行；`docs/personal/web-remote.md` §2 端口说明、转发命令与回归测试说明更新；本文件已知问题中的端口冲突标记为已解决。

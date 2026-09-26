@@ -16,7 +16,7 @@
 | 启动开关 | 安装版：配置 `enabled: true`（完整界面另需 `fullUi: true`），无需环境变量。开发实例：环境变量 `PROMA_WEB_REMOTE=1` **且** 配置 `enabled: true` |
 | 监听 | 只监听 `127.0.0.1:17888`，对外只经 Tailscale Serve（仅 tailnet 可达） |
 | 数据目录 | 安装版 `~/.proma/web-remote/`，开发实例 `~/.proma-dev/web-remote/`：`config.json`、`devices.json`、`pairing.json`、`push-subscriptions.json`、`vapid.json`（均 0600，不入库） |
-| 端口冲突 | 两者都用 17888，安装版运行时开发实例的手机访问无法启动（见 `PERSONAL.md` 已知问题） |
+| 端口 | 安装版 `127.0.0.1:17888` ← Tailscale Serve https 443（常开）；开发实例 `127.0.0.1:17889` ← Tailscale Serve https 8443（仅同步验证期间临时开启，结束即关闭）。开发实例 `allowedOrigin` 带 `:8443` |
 
 启动开发实例：
 
@@ -24,11 +24,18 @@
 PROMA_WEB_REMOTE=1 bash scripts/personal/dev.sh
 ```
 
-暴露给 tailnet（只需一次，可随时撤销）：
+暴露给 tailnet（安装版，只需一次，可随时撤销）：
 
 ```bash
 tailscale serve --bg --https=443 http://127.0.0.1:17888
 tailscale serve --https=443 off   # 撤销
+```
+
+开发实例（同步验证时临时开启，结束后关闭）：
+
+```bash
+tailscale serve --bg --https=8443 http://127.0.0.1:17889
+tailscale serve --https=8443 off
 ```
 
 ## 3. 配置（`config.json`）
@@ -79,4 +86,4 @@ tailscale serve --https=443 off   # 撤销
 | 某个功能在手机上点了没反应 | 可能是上游新增 IPC 通道未分级；查看开发实例日志中的“未分级通道”，在 `channel-policy.ts` 中分级 |
 | 通知收不到 | 确认从主屏幕图标打开并已允许通知；桌面“手机访问”中发送测试通知；检查代理 7897 |
 
-回归测试：`bun scripts/personal/mobile-harness.mjs --url https://<主机名> --suite smoke --user-agent android|iphone`（自动配对、测试、撤销设备并删除自建会话）。同步上游后必须运行。每周一的版本检查任务会报告上游新增、尚未分级的 IPC 通道。
+回归测试（只对开发实例）：`bun scripts/personal/mobile-harness.mjs --url https://<主机名>:8443 --suite smoke --user-agent android|iphone`（自动配对、测试、撤销设备并删除自建会话；需先按上文开启 8443 转发并以 `PROMA_WEB_REMOTE=1` 启动开发实例）。同步上游后必须运行；安装后另由用户在安装版上用两台手机验收（CLAUDE.md §6 第 7 项）。每周一的版本检查任务会报告上游新增、尚未分级的 IPC 通道。
