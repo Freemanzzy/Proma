@@ -73,3 +73,6 @@ pnpm-workspace.yaml
 !**/.env.example
 proma-backup-*.zip
 *.proma-backup
+
+# Python bytecode from personal scripts
+__pycache__/
