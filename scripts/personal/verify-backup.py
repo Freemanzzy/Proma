@@ -55,17 +55,27 @@ def source_entries(root: Path, rules: list[str], presets: list[str]):
     if seen and seen % 1000 != 0: print(f'进度: 已校验 {seen} 条目（{root.name}）', file=sys.stderr)
     return result
 
+def restore_filename(info: zipfile.ZipInfo) -> str:
+    """macOS `zip` writes non-ASCII names as raw UTF-8 bytes without setting the
+    0x800 (UTF-8) flag, so Python decodes them as cp437 and mangles them. Undo
+    that mangling for display/comparison; leave info.orig_filename untouched
+    since archive.open() needs it to match the local file header."""
+    if info.flag_bits & 0x800: return info.filename
+    try: return info.filename.encode('cp437').decode('utf-8')
+    except (UnicodeEncodeError, UnicodeDecodeError): return info.filename
+
 def zip_entries(path: Path, rules: list[str], presets: list[str]):
     result = {}
     with zipfile.ZipFile(path) as archive:
         infos = archive.infolist()
         total = len(infos)
         for i, info in enumerate(infos, 1):
-            rel = info.filename.rstrip('/')
+            name = restore_filename(info)
+            rel = name.rstrip('/')
             if not rel or excluded(rel, rules, presets): continue
             mode = (info.external_attr >> 16) & 0o7777
             kind = stat.S_IFMT(info.external_attr >> 16)
-            if info.is_dir() or info.filename.endswith('/'):
+            if info.is_dir() or name.endswith('/'):
                 result[rel] = ('dir', mode)
             elif kind == stat.S_IFLNK:
                 with archive.open(info) as f: target = f.read().decode('utf-8', errors='surrogateescape')

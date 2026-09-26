@@ -38,6 +38,16 @@ def main():
         (src/'alpha.txt').write_text('changed')
         assert_run(['python3',str(SCRIPTS/'verify-backup.py'),str(src),str(copied)],expected=1)
 
+        zip_src=root/'zip-utf8-source'; zip_src.mkdir()
+        (zip_src/'报告-测试.md').write_text('报告内容\n'); (zip_src/'alpha.txt').write_text('alpha\n')
+        (zip_src/'shortcut').symlink_to('alpha.txt')
+        zip_archive=root/'zip-utf8-backup.zip'
+        subprocess.run(['/usr/bin/zip','-r','-y','-q',str(zip_archive),'.'],cwd=zip_src,check=True)
+        assert_run(['python3',str(SCRIPTS/'verify-backup.py'),str(zip_src),str(zip_archive)])
+        (zip_src/'报告-测试.md').write_text('篡改内容\n')
+        assert_run(['python3',str(SCRIPTS/'verify-backup.py'),str(zip_src),str(zip_archive)],expected=1)
+        print('ZIP UTF-8 FILENAME PASS: macOS zip (no 0x800 flag) filenames verified without false MISSING/EXTRA')
+
         target=root/'target'; big=bytearray(b'x'*(50*1024*1024+1)); marker=os.fsencode(str(Path.home())+'/.proma/big'); big[1024*1024-5:1024*1024-5+len(marker)]=marker
         nonutf=os.fsencode(str(Path.home())+'/.proma/nonutf')+b'\xff\xfe'
         dbfile=root/'planning.db'; con=sqlite3.connect(dbfile); con.execute('create table paths(value text)'); con.execute('insert into paths values (?)',(str(Path.home())+'/.proma/db',)); con.commit(); con.close()
