@@ -758,7 +758,7 @@ async function bootstrap(): Promise<void> {
       }
       return roots
     },
-  })
+  }, { packaged: app.isPackaged })
   registerIpcHandlers()
   registerWebRemoteAdminIpc()
   if (fullUiBridge) {
