@@ -1,8 +1,37 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { getWebRemoteDeniedError } from './denied-channels'
 import { WebRemoteRegistrationTable } from './registration-table'
 import { prepareWebRemoteFullUi } from './prepare'
 import { decodeWebRemoteValue, encodeWebRemoteValue } from './serialization'
+
+/** 临时改写 process.resourcesPath，运行完毕后还原（个人版标记检测依赖它）。 */
+function withResourcesPath(value: string | undefined, run: () => void): void {
+  const proc = process as NodeJS.Process & { resourcesPath?: string }
+  const original = proc.resourcesPath
+  if (value === undefined) delete (proc as { resourcesPath?: string }).resourcesPath
+  else proc.resourcesPath = value
+  try {
+    run()
+  } finally {
+    Object.defineProperty(proc, 'resourcesPath', { value: original, configurable: true, writable: true })
+  }
+}
+
+/** 临时改写 PROMA_WEB_REMOTE，运行完毕后还原。 */
+function withWebRemoteEnv(value: string | undefined, run: () => void): void {
+  const previous = process.env.PROMA_WEB_REMOTE
+  if (value === undefined) delete process.env.PROMA_WEB_REMOTE
+  else process.env.PROMA_WEB_REMOTE = value
+  try {
+    run()
+  } finally {
+    if (previous === undefined) delete process.env.PROMA_WEB_REMOTE
+    else process.env.PROMA_WEB_REMOTE = previous
+  }
+}
 
 describe('web remote full-ui spike', () => {
   test('serializes transport-only values and restores them', () => {
@@ -47,6 +76,47 @@ describe('web remote full-ui spike', () => {
     } finally {
       if (previous === undefined) delete process.env.PROMA_WEB_REMOTE
       else process.env.PROMA_WEB_REMOTE = previous
+    }
+  })
+
+  test('打包的个人版即使没有 .proma-dev 与 PROMA_WEB_REMOTE，标记存在且配置开启也能装上桥', () => {
+    const root = mkdtempSync(join(tmpdir(), 'proma-personal-full-ui-'))
+    try {
+      writeFileSync(join(root, 'personal-build.json'), '{"personal":true}')
+      withWebRemoteEnv(undefined, () => withResourcesPath(root, () => {
+        const target = { handle() {}, on() {} }
+        const bridge = prepareWebRemoteFullUi(target, { enabled: true, fullUi: true }, undefined, { packaged: true })
+        expect(bridge).toBeTruthy()
+      }))
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('打包但没有个人版标记时，不装桥', () => {
+    const root = mkdtempSync(join(tmpdir(), 'proma-personal-full-ui-'))
+    try {
+      withWebRemoteEnv(undefined, () => withResourcesPath(root, () => {
+        const target = { handle() {}, on() {} }
+        const bridge = prepareWebRemoteFullUi(target, { enabled: true, fullUi: true }, undefined, { packaged: true })
+        expect(bridge).toBeNull()
+      }))
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('打包个人版标记存在但 config.fullUi 未开启时，不装桥', () => {
+    const root = mkdtempSync(join(tmpdir(), 'proma-personal-full-ui-'))
+    try {
+      writeFileSync(join(root, 'personal-build.json'), '{"personal":true}')
+      withWebRemoteEnv(undefined, () => withResourcesPath(root, () => {
+        const target = { handle() {}, on() {} }
+        const bridge = prepareWebRemoteFullUi(target, { enabled: true, fullUi: false }, undefined, { packaged: true })
+        expect(bridge).toBeNull()
+      }))
+    } finally {
+      rmSync(root, { recursive: true, force: true })
     }
   })
 })
