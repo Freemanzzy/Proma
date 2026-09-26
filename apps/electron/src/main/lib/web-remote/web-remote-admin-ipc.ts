@@ -8,7 +8,7 @@ import { getWebRemoteConfigPath, getWebRemoteDataDir, readWebRemoteConfig, WebRe
 import { getWebRemoteServer } from './web-remote-service'
 import { listAgentWorkspaces } from '../agent-workspace-manager'
 
-const CHANNELS = ['web-remote:admin-get', 'web-remote:admin-save', 'web-remote:admin-pair', 'web-remote:admin-revoke'] as const
+const CHANNELS = ['web-remote:admin-get', 'web-remote:admin-save', 'web-remote:admin-pair', 'web-remote:admin-revoke', 'web-remote:admin-push-test', 'web-remote:admin-push-delete'] as const
 /**
  * Only the real desktop renderer may manage phone access. The web-remote bridge
  * invokes handlers with a fake event whose senderFrame is null, so it can never
@@ -67,9 +67,11 @@ export function registerWebRemoteAdminIpc(): void {
     assertDesktop(event)
     const config = readWebRemoteConfig(); const server = getWebRemoteServer(); const auth = server?.getAuth() ?? new WebRemoteAuth(config, getWebRemoteDataDir())
     const pairing = auth.getPairingState()
-    return { config, running: !!server, connectedDevices: server?.getConnectedDeviceCount() ?? 0, devices: auth.listDevices().filter((item) => !item.revokedAt), pairing: pairing && pairing.expiresAt > Date.now() ? { code: pairing.code, expiresAt: pairing.expiresAt } : null, candidates: readTailnetCandidates(), workspaces: listAgentWorkspaces().map(({ id, name, slug }) => ({ id, name, slug })) }
+    return { config, running: !!server, connectedDevices: server?.getConnectedDeviceCount() ?? 0, devices: auth.listDevices().filter((item) => !item.revokedAt), pushSubscriptions: server?.getPushStore().list() ?? [], pairing: pairing && pairing.expiresAt > Date.now() ? { code: pairing.code, expiresAt: pairing.expiresAt } : null, candidates: readTailnetCandidates(), workspaces: listAgentWorkspaces().map(({ id, name, slug }) => ({ id, name, slug })) }
   })
   ipcMain.handle(CHANNELS[1], (event, patch: unknown) => { assertDesktop(event); const next = validateConfig(patch, readWebRemoteConfig()); atomicWriteConfig(next); getWebRemoteServer()?.getAuth().refreshFromDisk(); return next })
   ipcMain.handle(CHANNELS[2], (event) => { assertDesktop(event); const server = getWebRemoteServer(); if (!server) throw new Error('远程服务未运行，请先启用并重启开发实例'); return server.getAuth().createPairingCode() })
-  ipcMain.handle(CHANNELS[3], (event, deviceId: unknown) => { assertDesktop(event); if (typeof deviceId !== 'string' || !deviceId || deviceId.length > 160) throw new Error('设备 ID 无效'); const server = getWebRemoteServer(); const auth = server?.getAuth() ?? new WebRemoteAuth(readWebRemoteConfig(), getWebRemoteDataDir()); if (!auth.revokeDevice(deviceId)) throw new Error('设备不存在或已撤销'); return true })
+  ipcMain.handle(CHANNELS[3], (event, deviceId: unknown) => { assertDesktop(event); if (typeof deviceId !== 'string' || !deviceId || deviceId.length > 160) throw new Error('设备 ID 无效'); const server = getWebRemoteServer(); const auth = server?.getAuth() ?? new WebRemoteAuth(readWebRemoteConfig(), getWebRemoteDataDir()); if (!auth.revokeDevice(deviceId)) throw new Error('设备不存在或已撤销'); server?.getPushStore().remove(deviceId); return true })
+  ipcMain.handle(CHANNELS[4], async (event, deviceId: unknown) => { assertDesktop(event); if (typeof deviceId !== 'string' || !deviceId || deviceId.length > 160) throw new Error('设备 ID 无效'); const server = getWebRemoteServer(); if (!server) throw new Error('远程服务未运行'); return server.getPushStore().sendTest(deviceId) })
+  ipcMain.handle(CHANNELS[5], (event, deviceId: unknown) => { assertDesktop(event); if (typeof deviceId !== 'string' || !deviceId || deviceId.length > 160) throw new Error('设备 ID 无效'); return getWebRemoteServer()?.getPushStore().remove(deviceId) ?? false })
 }

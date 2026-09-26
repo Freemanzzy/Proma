@@ -12,13 +12,14 @@ import { listAgentWorkspaces } from '../agent-workspace-manager'
 import { permissionService } from '../agent-permission-service'
 import { redactSensitiveLogValue } from '../bridge-log-redaction'
 import type { PermissionRequest } from '@proma/shared'
-import { WebRemoteAuth, expectedWebRemoteOrigin, makeAuthCookie, parseCookieHeader, type WebRemoteConfig } from './web-remote-auth'
+import { WebRemoteAuth, expectedWebRemoteOrigin, getWebRemoteDataDir, makeAuthCookie, parseCookieHeader, type WebRemoteConfig } from './web-remote-auth'
 import { WebRemoteEventHub } from './web-remote-events'
 import { toWebRemoteHistory, toWebRemotePermissionRequest, type WebRemoteEvent } from './web-remote-dto'
 import { getConfigDirName } from '../config-paths'
 import { renderWebRemoteIcon, renderWebRemoteManifest, renderWebRemoteStatic } from './web-remote-static'
 import type { WebRemoteIpcBridge } from './full-ui/web-remote-ipc'
 import { renderWebRemoteMobilePatch } from './full-ui/mobile-patch'
+import { WebRemotePushStore, mapPushNotice, shouldDedupePush, type PushKind } from './web-remote-push'
 
 const MAX_BODY_BYTES = 100_000
 const MAX_MESSAGE_CHARS = 50_000
@@ -53,6 +54,8 @@ export interface WebRemoteServerOptions {
   webPreloadPath?: string
   webPreloadSourcePaths?: string[]
   buildWebPreload?: () => { success: boolean; error?: string }
+  pushDataDir?: string
+  pushProxyUrl?: string
 }
 
 function json(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
@@ -91,6 +94,8 @@ function sendUpgradeError(socket: Duplex, status: number, message: string): void
   socket.destroy()
 }
 
+const WEB_REMOTE_SERVICE_WORKER = `self.addEventListener('install',event=>event.waitUntil(self.skipWaiting()));self.addEventListener('activate',event=>event.waitUntil(self.clients.claim()));self.addEventListener('fetch',event=>{const url=new URL(event.request.url);if(url.pathname.startsWith('/api/')||url.pathname==='/api/stream'||url.pathname==='/api/ipc')return;if(event.request.mode==='navigate')return;});self.addEventListener('push',event=>{let data={title:'Proma',body:'有一条新通知',url:'/app/'};try{data={...data,...event.data.json()}}catch{};event.waitUntil(self.registration.showNotification(data.title,{body:data.body,icon:'/icon-192.svg',badge:'/icon-192.svg',tag:data.sessionId+':'+data.kind,data:{url:data.url,sessionId:data.sessionId}}))});self.addEventListener('notificationclick',event=>{event.notification.close();const url=new URL(event.notification.data?.url||'/app/',self.location.origin).href;event.waitUntil(self.clients.matchAll({type:'window',includeUncontrolled:true}).then(clients=>{for(const client of clients){if('focus'in client){client.navigate(url);return client.focus()}}return self.clients.openWindow(url)}))});`
+
 export class WebRemoteServer {
   readonly httpServer: Server
   readonly wsServer: WebSocketServer
@@ -102,10 +107,15 @@ export class WebRemoteServer {
   private readonly staticCache = new Map<string, StaticCacheEntry>()
   private staticCacheBytes = 0
   private renderedIndexCache?: { filePath: string; mtimeMs: number; size: number; body: Buffer; nonce: string }
+  private readonly pushStore: WebRemotePushStore
+  private readonly unsubscribePush: () => void
+  private readonly failedRuns = new Map<string, number>()
 
   constructor(private readonly options: WebRemoteServerOptions) {
     this.auth = options.auth
     this.eventHub = options.eventHub ?? new WebRemoteEventHub()
+    this.pushStore = new WebRemotePushStore(options.pushDataDir ?? getWebRemoteDataDir(), this.auth, (sessionId) => getAgentSessionMeta(sessionId)?.workspaceId, options.pushProxyUrl)
+    this.unsubscribePush = agentEventBus.on((sessionId, payload) => { void this.handlePushEvent(sessionId, payload) })
     this.httpServer = createServer((req, res) => { void this.handleHttp(req, res) })
     this.wsServer = new WebSocketServer({ noServer: true })
     this.httpServer.on('upgrade', (req, socket, head) => { void this.handleUpgrade(req, socket, head) })
@@ -124,6 +134,8 @@ export class WebRemoteServer {
     return this.eventHub
   }
 
+  getPushStore(): WebRemotePushStore { return this.pushStore }
+
   async start(port: number, host = '127.0.0.1'): Promise<void> {
     if (this.listening) return
     await new Promise<void>((resolve, reject) => {
@@ -135,7 +147,7 @@ export class WebRemoteServer {
     })
     this.revokeTimer = setInterval(() => {
       this.auth.refreshFromDisk()
-      for (const deviceId of this.auth.getRevokedDeviceIds()) this.eventHub.disconnectDevice(deviceId)
+      for (const deviceId of this.auth.getRevokedDeviceIds()) { this.eventHub.disconnectDevice(deviceId); this.pushStore.remove(deviceId) }
       for (const [ws, remove] of this.connections) {
         const deviceId = (ws as WebSocket & { webRemoteDeviceId?: string }).webRemoteDeviceId
         if (deviceId?.startsWith('tailnet:') && !this.auth.isTrustedTailscaleNode(deviceId.slice('tailnet:'.length))) {
@@ -149,6 +161,7 @@ export class WebRemoteServer {
   }
 
   async stop(): Promise<void> {
+    this.unsubscribePush()
     if (this.revokeTimer) clearInterval(this.revokeTimer)
     this.revokeTimer = undefined
     for (const ws of this.connections.keys()) ws.close(1001, 'server stopping')
@@ -181,6 +194,13 @@ export class WebRemoteServer {
     const method = req.method ?? 'GET'
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
     const path = url.pathname
+
+    // Public, data-free service worker. Its scope is limited to /app/ and it never caches API/WS or authenticated HTML.
+    if (method === 'GET' && path === '/app/sw.js') {
+      res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', 'Service-Worker-Allowed': '/app/', 'X-Content-Type-Options': 'nosniff' })
+      res.end(WEB_REMOTE_SERVICE_WORKER)
+      return
+    }
 
     if (method === 'GET' && path === '/manifest.webmanifest') {
       res.writeHead(200, { 'Content-Type': 'application/manifest+json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' })
@@ -255,6 +275,20 @@ export class WebRemoteServer {
     if (this.options.config.workspaceScope !== 'all'
       && (!Array.isArray(this.options.config.allowedWorkspaceIds) || this.options.config.allowedWorkspaceIds.length === 0)) {
       json(res, 403, { error: 'no workspaces allowed' })
+      return
+    }
+
+    if (method === 'GET' && path === '/api/push/key') { json(res, 200, { publicKey: this.pushStore.getPublicKey() }); return }
+    if (method === 'GET' && path === '/api/push/subscription') { json(res, 200, { subscribed: this.pushStore.has(identity.deviceId) }); return }
+    if (method === 'POST' && path === '/api/push/subscription') {
+      try { const body = await readBody(req); this.pushStore.register(identity.deviceId, typeof body.label === 'string' ? body.label : '手机设备', body.subscription); json(res, 201, { subscribed: true }) }
+      catch (error) { json(res, 400, { error: error instanceof Error ? error.message : 'invalid subscription' }) }
+      return
+    }
+    if (method === 'DELETE' && path === '/api/push/subscription') { this.pushStore.remove(identity.deviceId); json(res, 200, { subscribed: false }); return }
+    if (method === 'POST' && path === '/api/push/presence') {
+      try { const body = await readBody(req); const sessionId = typeof body.sessionId === 'string' ? body.sessionId : null; const visible = body.visible === true; if (sessionId && !this.sessionAllowed(sessionId)) { json(res, 404, { error: 'session not found' }); return } this.pushStore.setPresence(identity.deviceId, sessionId, visible); json(res, 204, {}) }
+      catch (error) { json(res, 400, { error: error instanceof Error ? error.message : 'invalid presence' }) }
       return
     }
 
@@ -391,7 +425,7 @@ export class WebRemoteServer {
       body = rendered.body
       nonce = rendered.nonce
       headers['Content-Type'] = 'text/html; charset=utf-8'
-      headers['Content-Security-Policy'] = `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; manifest-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data: blob:; font-src 'self' data:; base-uri 'none'; frame-ancestors 'none'`
+      headers['Content-Security-Policy'] = `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; worker-src 'self'; manifest-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data: blob:; font-src 'self' data:; base-uri 'none'; frame-ancestors 'none'`
     } else {
       const ext = safePath.split('.').pop()?.toLowerCase()
       headers['Content-Type'] = ({ js: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8', json: 'application/json; charset=utf-8', svg: 'image/svg+xml', png: 'image/png', webp: 'image/webp', ico: 'image/x-icon', woff: 'font/woff', woff2: 'font/woff2' } as Record<string, string>)[ext ?? ''] ?? 'application/octet-stream'
@@ -407,6 +441,39 @@ export class WebRemoteServer {
     }
     res.writeHead(200, headers)
     res.end(representation.body)
+  }
+
+  private async handlePushEvent(sessionId: string, payload: { kind?: string; event?: Record<string, unknown> }): Promise<void> {
+    const session = this.sessionAllowed(sessionId)
+    if (!session) return
+    const event = payload.kind === 'proma_event' ? payload.event : undefined
+    if (!event || typeof event.type !== 'string') return
+    let kind: PushKind | undefined
+    let summary = ''
+    if (event.type === 'run_completed') { if ((this.failedRuns.get(sessionId) ?? 0) > Date.now()) { this.failedRuns.delete(sessionId); return }; kind = event.stoppedByUser === true ? undefined : event.source === 'automation' ? 'automation' : 'completed'; summary = event.source === 'automation' ? '定时任务执行结束' : '本轮任务已结束' }
+    else if (event.type === 'web_remote_push_error' || (event.type === 'retry' && event.status === 'failed')) { this.failedRuns.set(sessionId, Date.now() + 30_000); kind = 'failed'; summary = 'Agent 执行遇到错误' }
+    else if (event.type === 'permission_request') { kind = 'permission'; summary = '需要处理工具权限审批' }
+    else if (event.type === 'ask_user_request') { kind = 'question'; summary = 'Agent 正在等待你的回答' }
+    else if (event.type === 'exit_plan_mode_request') { kind = 'plan'; summary = 'Agent 正在等待计划审批' }
+    else if (event.type === 'task_notification' && (event.status === 'completed' || event.status === 'failed')) { kind = 'automation'; summary = '定时任务执行结束' }
+    if (!kind || !shouldDedupePush(sessionId, kind)) return
+    const notice = mapPushNotice(sessionId, session.title || '未命名会话', kind, summary)
+    const result = await this.pushStore.sendToAll(notice)
+    for (const item of result) console.info(`[Web Remote Push] kind=${kind} status=${item.status ?? 'error'}${item.error ? ` detail=${item.error}` : ''}`)
+  }
+
+  private latestAssistantSummary(sessionId: string): string {
+    try {
+      const messages = getAgentSessionSDKMessages(sessionId)
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const message = messages[i] as { type?: string; message?: { content?: unknown }; content?: unknown }
+        if (message.type !== 'assistant') continue
+        const content = message.message?.content ?? message.content
+        if (typeof content === 'string') return content
+        if (Array.isArray(content)) return content.filter((block): block is { type: string; text: string } => !!block && typeof block === 'object' && (block as { type?: unknown }).type === 'text' && typeof (block as { text?: unknown }).text === 'string').map((block) => block.text).join(' ')
+      }
+    } catch {}
+    return ''
   }
 
   private getWebPreloadPath(rendererRoot: string): string {

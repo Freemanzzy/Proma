@@ -1,4 +1,5 @@
 import { getConfigDirName } from '../config-paths'
+import { getEffectiveProxyUrl } from '../proxy-settings-service'
 import { readWebRemoteConfig, getWebRemoteConfigPath, getWebRemoteDataDir, WebRemoteAuth, type WebRemoteConfig } from './web-remote-auth'
 import { WebRemoteServer } from './web-remote-server'
 import { setWebRemoteEventHub, notifyWebRemoteInteractionResolved } from './web-remote-events'
@@ -28,10 +29,12 @@ export async function startWebRemoteIfEnabled(): Promise<void> {
   if (!isWebRemoteEnabled(config)) return
   if (server) return
   const ipcBridge = config.fullUi === true ? getWebRemoteIpcBridge() ?? undefined : undefined
+  const configuredPushProxy = getConfigDirName() === '.proma-dev' ? await getEffectiveProxyUrl().catch(() => undefined) : undefined
   const candidate = new WebRemoteServer({
     config,
     auth: new WebRemoteAuth(config, getWebRemoteDataDir()),
     ipcBridge,
+    ...(configuredPushProxy ? { pushProxyUrl: configuredPushProxy } : {}),
   })
   try {
     await candidate.start(Number.isInteger(config.port) ? config.port! : 17888, '127.0.0.1')

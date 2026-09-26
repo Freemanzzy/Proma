@@ -210,6 +210,8 @@ export interface ElectronAPI {
   saveWebRemoteAdminConfig: (patch: Record<string, unknown>) => Promise<unknown>
   createWebRemotePairingCode: () => Promise<{ code: string; expiresAt: number }>
   revokeWebRemoteDevice: (deviceId: string) => Promise<boolean>
+  sendWebRemotePushTest: (deviceId: string) => Promise<{ status: number | null; error?: string }>
+  deleteWebRemotePushSubscription: (deviceId: string) => Promise<boolean>
   // ===== 运行时相关 =====
 
   /**
@@ -1382,6 +1384,8 @@ const electronAPI = {
   saveWebRemoteAdminConfig: (patch: Record<string, unknown>) => ipcRenderer.invoke('web-remote:admin-save', patch),
   createWebRemotePairingCode: () => ipcRenderer.invoke('web-remote:admin-pair'),
   revokeWebRemoteDevice: (deviceId: string) => ipcRenderer.invoke('web-remote:admin-revoke', deviceId),
+  sendWebRemotePushTest: (deviceId: string) => ipcRenderer.invoke('web-remote:admin-push-test', deviceId),
+  deleteWebRemotePushSubscription: (deviceId: string) => ipcRenderer.invoke('web-remote:admin-push-delete', deviceId),
   // 运行时
   getRuntimeStatus: () => {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_RUNTIME_STATUS)

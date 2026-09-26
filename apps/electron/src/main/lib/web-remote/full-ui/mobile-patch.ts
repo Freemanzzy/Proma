@@ -23,6 +23,7 @@ export function renderWebRemoteMobilePatch(): string {
   [data-web-remote-sidebar="left"] button[aria-label="打开设置"] { display:none!important; }
   [data-web-remote-mobile-topbar] { position:fixed; inset:0 0 auto; z-index:10004; display:flex; align-items:center; gap:8px; height:56px; padding:max(7px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) 7px max(8px,env(safe-area-inset-left)); background:hsl(var(--background)/.94); border-bottom:1px solid hsl(var(--border)); backdrop-filter:blur(12px); }
   [data-web-remote-mobile-topbar] [data-web-remote-mobile-menu], [data-web-remote-mobile-topbar] [data-web-remote-panel-toggle] { position:static!important; flex:none; box-shadow:none; }
+  [data-web-remote-notification-entry] { position:static!important; min-height:38px; padding:7px 10px; border:1px solid hsl(var(--border)); border-radius:10px; background:hsl(var(--background)); color:hsl(var(--foreground)); font-size:12px; }
   [data-web-remote-mobile-topbar-title] { min-width:0; flex:1; overflow:hidden; text-align:center; text-overflow:ellipsis; white-space:nowrap; font-size:15px; font-weight:650; color:hsl(var(--foreground)); }
   [data-web-remote-settings-notice] { position:fixed; inset:56px 12px auto; z-index:10005; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border:1px solid hsl(var(--border)); border-radius:14px; background:hsl(var(--background)); color:hsl(var(--foreground)); box-shadow:0 8px 26px rgba(0,0,0,.2); font-size:14px; }
   [data-web-remote-settings-notice] button { min-height:36px; padding:6px 12px; border-radius:9px; background:hsl(var(--primary)); color:hsl(var(--primary-foreground)); }
@@ -86,12 +87,42 @@ export function renderWebRemoteMobilePatch(): string {
       var title=document.createElement('div'); title.dataset.webRemoteMobileTopbarTitle='true'; topbar.appendChild(title); document.body.appendChild(topbar);
     }
     var topbar=document.querySelector('[data-web-remote-mobile-topbar]');
+    if (topbar && !topbar.querySelector('[data-web-remote-notification-entry]')) {
+      var notify=document.createElement('button'); notify.type='button'; notify.dataset.webRemoteNotificationEntry='true'; notify.textContent='开启通知';
+      notify.addEventListener('click',async function(){
+        try {
+          if (/iPhone|iPad|iPod/i.test(navigator.userAgent) && !navigator.standalone && !window.matchMedia('(display-mode: standalone)').matches) { alert('请先将 /app/ 添加到主屏幕，再开启通知。'); return; }
+          if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) { alert('此浏览器暂不支持 Web Push 通知。'); return; }
+          var permission=await Notification.requestPermission(); if(permission!=='granted'){alert('未获得通知权限；可在系统设置中重新开启。');return;}
+          var registration=await navigator.serviceWorker.register('/app/sw.js',{scope:'/app/'}); await navigator.serviceWorker.ready;
+          var keyResponse=await fetch('/api/push/key',{credentials:'include'}); if(!keyResponse.ok)throw new Error('无法读取推送公钥'); var key=(await keyResponse.json()).publicKey;
+          var applicationServerKey=Uint8Array.from(atob(key.replace(/-/g,'+').replace(/_/g,'/')),function(c){return c.charCodeAt(0)});
+          var subscription=await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:applicationServerKey});
+          var saved=await fetch('/api/push/subscription',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({subscription:subscription.toJSON(),label:/Android/i.test(navigator.userAgent)?'Android 手机':'iPhone'})}); if(!saved.ok)throw new Error('订阅登记失败'); notify.textContent='通知已开启'; notify.disabled=true;
+        } catch(error) { alert('开启通知失败：'+(error&&error.message||String(error))); }
+      }); topbar.appendChild(notify);
+    }
+    var topbar=document.querySelector('[data-web-remote-mobile-topbar]');
     var title=topbar && topbar.querySelector('[data-web-remote-mobile-topbar-title]');
     var menu=document.querySelector('[data-web-remote-mobile-menu]'); var panelToggle=document.querySelector('[data-web-remote-panel-toggle]');
     if (topbar && menu && panelToggle) {
       if (menu.parentElement !== topbar) topbar.insertBefore(menu, topbar.firstChild);
       if (panelToggle.parentElement !== topbar) topbar.appendChild(panelToggle);
       if (title && title.parentElement !== topbar) topbar.insertBefore(title, panelToggle);
+    }
+    if (!window.__PROMA_PUSH_PRESENCE_INSTALLED) {
+      window.__PROMA_PUSH_PRESENCE_INSTALLED=true;
+      var reportPresence=function(){
+        var button=document.querySelector('button[aria-label^="会话菜单："]'); var titleText=button?button.getAttribute('aria-label').replace(/^会话菜单：/,''):'';
+        var requested=new URLSearchParams(location.search).get('session');
+        Promise.resolve(window.electronAPI?.listAgentSessions?.()).then(function(items){
+          var session=(items||[]).find(function(item){return requested?item.id===requested:item.title===titleText});
+          fetch('/api/push/presence',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:session?.id||null,visible:document.visibilityState==='visible'&&!!session})}).catch(function(){});
+        }).catch(function(){});
+      };
+      document.addEventListener('visibilitychange',reportPresence); window.setInterval(reportPresence,5000); window.addEventListener('popstate',reportPresence);
+      var requestedSession=new URLSearchParams(location.search).get('session');
+      if(requestedSession){var tries=0;var selectRequested=function(){Promise.resolve(window.electronAPI?.listAgentSessions?.()).then(function(items){var session=(items||[]).find(function(item){return item.id===requestedSession});if(!session)return;var candidates=Array.from(document.querySelectorAll('button,[role="button"], [data-web-remote-sidebar] *'));var target=candidates.find(function(node){return node.innerText?.trim()===session.title});if(target){target.click();history.replaceState(null,'',location.pathname);setTimeout(reportPresence,800)}else if(tries++<40)setTimeout(selectRequested,250)}).catch(function(){})};setTimeout(selectRequested,500)}
     }
     if (title) {
       var selectedTab=document.querySelector('[data-web-remote-panel="right"] [role="tab"][aria-selected="true"]');

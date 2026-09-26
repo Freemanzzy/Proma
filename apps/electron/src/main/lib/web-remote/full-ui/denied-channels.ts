@@ -10,7 +10,7 @@ export const WEB_REMOTE_FULL_UI_DENIED_CHANNELS = new Set<string>([
   ...Object.values(QUICK_TASK_IPC_CHANNELS),
   ...Object.values(WINDOWS_AGENT_ISLAND_IPC_CHANNELS),
   'shell:open-external',
-  'web-remote:admin-get', 'web-remote:admin-save', 'web-remote:admin-pair', 'web-remote:admin-revoke',
+  'web-remote:admin-get', 'web-remote:admin-save', 'web-remote:admin-pair', 'web-remote:admin-revoke', 'web-remote:admin-push-test', 'web-remote:admin-push-delete',
   'agent:show-in-folder',
   'agent:open-terminal',
   'agent:open-workspace-folder',
