@@ -455,3 +455,8 @@ python3 scripts/personal/import-proma-backup.py \\
 - 验证：全量测试 552 pass / 5 fail / 1 error（基线 547/5/1 + 5 个新用例），typecheck 通过；两次打包均退出 0，主会话在 asar 内 `main.cjs` 确认修复代码存在。两次安装（23:32、23:51）均通过安装脚本健康检查，主会话复跑快照与切换前 `SNAPSHOT MATCH`。最终安装版 marker commit `29e7a81e`，安装前备份 `~/.proma-switch-backups/20260926-235153-90861/`。用户用两台手机验收通过（`/app/` 进入完整界面、发消息收到实时回复、通知）。
 - Google 收录完成度监测（每周）：用户经 Proma 定时任务接口（运行中的应用写入）将提示词第 4、11 行改为只用 ego-browser；主会话只读复查确认，任务仍启用，第 18 行不变。
 - 当前 `/Applications`：`Proma.app`（个人版 `29e7a81e`）、`Proma.previous.app`（个人版 `22d69abe`，手机卡启动页）、`Proma.previous.20260926-235153-90861.app`（个人版 `bf63f7db`，手机不可用）、`Proma.previous.20260926-233222-86078.app`（官方版 0.19.58）、`Proma.failed-20260926-225616-72208.app`（首次失败包，同 `bf63f7db`）。整理方式待用户决定。
+
+## 2026-09-26: 整理旧版应用
+
+- 经用户同意：`/Applications` 只保留当前个人版 `Proma.app`（`29e7a81e`）。三个旧个人版（`22d69abe`、`bf63f7db`、首次失败包 `bf63f7db`）手机端均有缺陷且可从已推送提交重建，移入废纸篓（`~/.Trash/Proma-personal-22d69abe.app`、`Proma-personal-bf63f7db.app`、`Proma-failed-bf63f7db.app`），未清空。
+- 官方版 0.19.58（Team ID `55P2K523PB`）移出 `/Applications`，存放于 `~/.proma-switch-backups/official-Proma-0.19.58.app`，避免同名同 ID 被 Spotlight 或链接误启动并自动更新；外置硬盘 `official-Proma-0.19.58-20260926.app.zip` 保留。回退官方版的位置已写入 fallback-runbook §3 第 4 步。下次安装更新时，安装脚本会重新生成 `Proma.previous.app`（上一版个人版）。

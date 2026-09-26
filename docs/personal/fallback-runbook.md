@@ -102,7 +102,7 @@ open "/Applications/Proma.app"
 ```
 
 3. 如果上一版启动后报数据版本过高（新版已迁移数据），转 §4 恢复更新前备份。
-4. 如果 `previous.app` 不存在：从仓库构建上一个已知可用版本（§6）。
+4. 如果 `previous.app` 不存在：个人版上一版从仓库构建（§6）；需要退回官方版时，官方 0.19.58 存放在 `~/.proma-switch-backups/official-Proma-0.19.58.app`（`mv` 回 `/Applications/Proma.app` 前先把当前应用改名保留），外置硬盘另有 `official-Proma-0.19.58-20260926.app.zip`。官方版会自动更新，放回后只在确需回退时打开。
 
 ---
 
