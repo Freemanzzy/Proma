@@ -367,3 +367,10 @@ python3 scripts/personal/import-proma-backup.py \\
 - Android Chrome headless 实测：CDP 授权通知，PushManager 真实订阅（端点为 FCM），服务端订阅登记成功；Agent 因开发实例 ChatGPT OAuth 登录失效而产生失败事件，服务端推送请求获得端点 HTTP 201，Service Worker 收到并展示与本次 harness 会话对应的失败通知。此轮未验证正常 pong 回复完成通知；双 UA Android/iPhone smoke 均完成页面加载与会话打开，但 pong 验证因同一 ChatGPT OAuth 失效未通过。真实桌面 IPC“发送测试通知”目前只通过订阅 store 定向单测验证，不记为桌面 E2E 已通过；iPhone Web Push 真机验收仍待用户进行。
 - 清理：harness 临时设备均撤销、专用 harness 会话均由脚本删除；会话清单中既有 ID/标题/权限模式前后未变；Chrome 进程退出、profile 删除，`/tmp/proma-mobile-chrome-*` 为 0；开发订阅文件最终 0 条。保留本地 VAPID key 以免重建用户订阅所需密钥。未改 `~/.proma-dev/web-remote/config.json`，没有改 Tailscale、官方版或用户手机。
 - 真机开启与测试：Android Chrome 或 iPhone Safari 先打开 `/app/` 并“添加到主屏幕”；iPhone 必须从主屏幕启动独立模式。登录后在移动顶栏点“开启通知”并允许系统通知。随后在桌面“设置 → 远程连接 → 手机访问 → 通知订阅”检查设备状态，点“发送测试通知”；会话运行结束/失败、权限请求、提问或计划审批时会收到对应通知。若手机正在前台打开同一会话，该设备按规则静默。
+
+## 2026-09-26: 手机完整客户端阶段 C 验收通过
+
+- C1 Web Push：用户真机验证通过（两台手机开启通知、桌面测试通知、真实运行完成通知与点击定位会话）。父会话复核：65/65 web-remote 测试、全量 541/5/1、VAPID 私钥与订阅仅存本机、新增依赖 `web-push`（MPL-2.0）。
+- C2：每周版本检查任务增加“上游新增未分级 IPC 通道”检查，并按 tag 提交时间判断最新正式版本。
+- C3：新增使用说明 `docs/personal/web-remote.md`。
+- 合并到 `personal`。手机完整客户端正式版计划（A/B/C）全部完成。
