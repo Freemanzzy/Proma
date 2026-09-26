@@ -322,3 +322,14 @@ python3 scripts/personal/import-proma-backup.py \\
 - 用户在 OPPO（Android Chrome）与 iPhone（Safari）真机验收通过：受信 Tailnet 设备免配对、两台同时在线、实时输出、计划审批卡（手机端批准）、中止、iPhone 底部栏与输入栏左侧控件可点。
 - 已知注意：重建 renderer 会清空 `dist/renderer/preload.js`，必须随后运行 `scripts/personal/build-web-preload.ts`，否则手机端空白（阶段 B 改为自动生成并在缺失时显式报错）。
 - 合并到 `personal`。
+
+## 2026-09-26: 手机完整客户端 B1（实现完成，真机验收待续）
+
+- Web preload 产物改为独立 `apps/electron/dist/web-remote/preload.js`，不再依赖 `dist/renderer/`；`build:web-preload` 加入 Electron 完整 build 链路。`/app/` 请求前校验产物是否早于 `src/preload/index.ts` 或浏览器 shim；开发模式自动重建，失败时返回中文说明页和修复命令，不再将空白页当作成功加载。
+- full-ui shim 接管 Agent 回形针按钮调用，动态创建支持多选、相册/拍照类型的浏览器文件选择器；浏览器将文件读取为 base64。AgentView 在附件选择、粘贴和拖放路径中经现有 `saveFilesToAgentSession` 立即写入当前会话附件目录，并以桌面端附件预览项/文件引用方式挂入输入区；上传过程中显示 toast，失败显示错误提示。手机端单文件上限为 25MB，桌面既有 100MB 上限保持不变。
+- Web Remote IPC 服务端拒绝路径分隔符、控制字符和 `.`/`..` 文件名，验证 base64、附件大小，并核对 session 所属 workspace 与设备授权范围；拒绝结果以可读错误传回手机。
+- 自动测试：`bun run typecheck` 通过；Web Remote 57 pass / 0 fail；`scripts/personal/mobile-harness.test.mjs` 2 pass / 0 fail；新增覆盖 preload 存在并注入、缺失且重建失败时显示错误页、开发模式自动重建，以及附件路径穿越/25MB 超限/未授权会话/正常保存通道。
+- 构建：`build:main`、`build:renderer`、`build:web-preload` 均通过。生成 web preload 后再次运行 renderer build，独立产物仍保留（119,478 bytes）；旧 `dist/renderer/preload.js` 不存在；版本仍为 0.19.57。
+- 全量 `bun test`：531 pass / 5 fail / 1 error，相对基线 527/5/1 未增加失败或错误；失败仍包括 Electron 测试环境缺少 `dialog`/`shell` 导出、OAuth proxy scope rejection、`redactProxyUrl` 导出缺失与 planning-manager Electron binary 类型问题。
+- 真机验收阻塞（截至本轮验收）：开发实例日志最后更新时间为 11:24；本机 17888 端口无监听，受信 URL 返回 502。按红线未手动停止或重启开发实例。Android/iPhone 附件 harness、双 UA smoke、真实页面删除 preload 后自愈截图及既有会话清单前后比较均未验证；最终截图目录尚未生成。
+- Harness 配对请求在浏览器 fetch 阶段失败，未完成配对、未新建 harness 会话或设备；临时 Chrome 已退出、profile 已删除，`/tmp/proma-mobile-chrome-*` 数量为 0。未操作用户 Web Remote 配置、既有设备、官方版或 `~/.proma`。

@@ -722,6 +722,69 @@ async function runExtra(harness, options, result) {
   if (!skillChanged) throw new Error('只读 Skill 未出现新的最终回复文本')
 }
 
+async function runPreloadRecovery(harness, options, result) {
+  const preloadPath = join(REPO_ROOT, 'apps/electron/dist/web-remote/preload.js')
+  if (!existsSync(preloadPath)) throw new Error(`测试前 web preload 产物不存在：${preloadPath}`)
+  rmSync(preloadPath, { force: true })
+  result.preloadRecovery = { intentionallyDeleted: true, path: preloadPath }
+  await harness.navigate('/app/')
+  const page = await harness.client.evaluate('({title:document.title,text:document.body.innerText.slice(0,1200),root:Boolean(document.querySelector("#root")),errorPage:document.body.innerText.includes("手机界面暂不可用")})')
+  const screenshotPath = await harness.screenshot('preload-recovery')
+  result.screenshots.push(screenshotPath)
+  result.preloadRecovery = { ...result.preloadRecovery, restored: existsSync(preloadPath), bytes: existsSync(preloadPath) ? readFileSync(preloadPath).byteLength : 0, page, screenshot: screenshotPath }
+  if (!result.preloadRecovery.restored || page.errorPage || !page.text.includes('Agent')) throw new Error(`preload 删除后未自动恢复为可用页面：${JSON.stringify(result.preloadRecovery)}`)
+}
+
+async function runAttachments(harness, options, result) {
+  const title = `web-remote-harness-attachments-${Date.now()}`
+  const session = await harness.createHarnessSession(title)
+  const textPath = join(options.outputDir, 'b1-attachment.txt')
+  const imagePath = join(options.outputDir, 'b1-attachment.png')
+  writeFileSync(textPath, 'B1_ATTACHMENT_FIRST_LINE\n第二行仅用于确认首行提取。\n')
+  writeFileSync(imagePath, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p0cAAAAASUVORK5CYII=', 'base64'))
+
+  const captureInstalled = await harness.client.evaluate(`(() => {
+    const api=window.electronAPI;
+    if(!api || typeof api.saveFilesToAgentSession!=='function') return false;
+    window.__B1_SAVED_FILES=[];
+    const original=api.saveFilesToAgentSession.bind(api);
+    api.saveFilesToAgentSession=async(input)=>{const result=await original(input);window.__B1_SAVED_FILES.push({input,result});return result};
+    return api.saveFilesToAgentSession!==original;
+  })()`)
+  if (!captureInstalled) throw new Error('无法在本次专用会话中安装附件保存证据采集器')
+
+  const paperclip = await findElement(harness.client, '附加文件或文件夹', 'button[aria-label="附加文件或文件夹"]')
+  await touchAt(harness.client, paperclip.x, paperclip.y)
+  await waitUntil(harness.client, `Boolean(document.querySelector('input[type="file"][accept^="image/*"]'))`, 10_000)
+  const document = await harness.client.command('DOM.getDocument', { depth: -1 })
+  const query = await harness.client.command('DOM.querySelector', { nodeId: document.root.nodeId, selector: 'input[type="file"][accept^="image/*"]' })
+  if (!query.nodeId) throw new Error('手机文件选择器 input 未创建')
+  await harness.client.command('DOM.setFileInputFiles', { nodeId: query.nodeId, files: [imagePath, textPath] })
+  await waitUntil(harness.client, `document.body.innerText.includes('b1-attachment.png') && document.body.innerText.includes('b1-attachment.txt')`, 20_000)
+  const attachmentScreenshot = await harness.screenshot('attachments-selected')
+  result.screenshots.push(attachmentScreenshot)
+  const saved = await waitUntil(harness.client, `window.__B1_SAVED_FILES?.length===2 && window.__B1_SAVED_FILES`, 20_000)
+  const savedFiles = saved.flatMap((entry) => entry.result ?? [])
+  const fileEvidence = savedFiles.map((file) => ({ filename: file.filename, targetPath: file.targetPath, exists: existsSync(file.targetPath), size: existsSync(file.targetPath) ? readFileSync(file.targetPath).byteLength : null, firstLine: file.filename.endsWith('.txt') && existsSync(file.targetPath) ? readFileSync(file.targetPath, 'utf8').split(/\r?\n/, 1)[0] : null }))
+  if (fileEvidence.length !== 2 || fileEvidence.some((file) => !file.exists)) throw new Error(`手机附件未写入专用会话目录: ${JSON.stringify(fileEvidence)}`)
+
+  const textPrompt = '读取我附加的文本文件，只回复其中的第一行。'
+  await harness.inputAndSend(textPrompt)
+  const textReply = await harness.waitForAssistantReply(textPrompt, 'B1_ATTACHMENT_FIRST_LINE', 90_000)
+  const textUser = textReply.history.findLast((message) => sdkMessageRole(message) === 'user' && sdkMessageText(message).includes(textPrompt))
+  if (!textUser || !sdkMessageText(textUser).includes('b1-attachment.txt')) throw new Error('文本附件未出现在用户消息引用中')
+
+  const imagePrompt = '请查看我附加的 PNG 图像；如果收到图片附件，只回复 B1_IMAGE_RECEIVED。'
+  await harness.inputAndSend(imagePrompt)
+  const imageReply = await harness.waitForAssistantReply(imagePrompt, 'B1_IMAGE_RECEIVED', 90_000)
+  const imageUser = imageReply.history.findLast((message) => sdkMessageRole(message) === 'user' && sdkMessageText(message).includes(imagePrompt))
+  if (!imageUser || !sdkMessageText(imageUser).includes('b1-attachment.png')) throw new Error('图片附件未出现在用户消息引用中')
+
+  const finalScreenshot = await harness.screenshot('attachments-sent')
+  result.screenshots.push(finalScreenshot)
+  result.attachments = { session: { id: session.id, title: session.title, workspaceId: session.workspaceId }, files: fileEvidence, textUserMessageContainsAttachment: true, textAssistantReplyContainsFirstLine: Boolean(textReply.assistant), imageUserMessageContainsAttachment: true, imageAssistantAcknowledged: Boolean(imageReply.assistant), selectedScreenshot: attachmentScreenshot, finalScreenshot }
+}
+
 async function runSmoke(harness, options, result) {
   result.steps.push({ name: 'load', ok: true, url: new URL('/app/', options.url).toString() })
   await harness.openSession(options.session)
@@ -782,6 +845,8 @@ async function main() {
     else if (options.suite === 'interactions') await runInteractions(harness, options, result)
     else if (options.suite === 'abort') await runAbort(harness, options, result)
     else if (options.suite === 'extra') await runExtra(harness, options, result)
+    else if (options.suite === 'attachments') await runAttachments(harness, options, result)
+    else if (options.suite === 'preload-recovery') await runPreloadRecovery(harness, options, result)
     else if (options.suite === 'all') { await runSmoke(harness, options, result); await runRecovery(harness, options, result); await runInteractions(harness, options, result); await runAbort(harness, options, result); await runExtra(harness, options, result) }
     else throw new Error(`未知套件: ${options.suite}`)
   } catch (error) {

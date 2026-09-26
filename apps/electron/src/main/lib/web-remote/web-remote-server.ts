@@ -2,7 +2,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createHash, randomBytes } from 'node:crypto'
 import { brotliCompressSync, gzipSync } from 'node:zlib'
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { join, normalize } from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { dirname, join, normalize, resolve } from 'node:path'
 import type { Duplex } from 'node:stream'
 import WebSocket, { WebSocketServer } from 'ws'
 import { agentEventBus, isAgentSessionActive, listActiveAgentSessionSnapshots, queueAgentMessage, runAgentHeadless, stopAgent } from '../agent-service'
@@ -14,6 +15,7 @@ import type { PermissionRequest } from '@proma/shared'
 import { WebRemoteAuth, expectedWebRemoteOrigin, makeAuthCookie, parseCookieHeader, type WebRemoteConfig } from './web-remote-auth'
 import { WebRemoteEventHub } from './web-remote-events'
 import { toWebRemoteHistory, toWebRemotePermissionRequest, type WebRemoteEvent } from './web-remote-dto'
+import { getConfigDirName } from '../config-paths'
 import { renderWebRemoteIcon, renderWebRemoteManifest, renderWebRemoteStatic } from './web-remote-static'
 import type { WebRemoteIpcBridge } from './full-ui/web-remote-ipc'
 import { renderWebRemoteMobilePatch } from './full-ui/mobile-patch'
@@ -48,6 +50,9 @@ export interface WebRemoteServerOptions {
   stopSession?: (sessionId: string) => void
   ipcBridge?: WebRemoteIpcBridge
   rendererDir?: string
+  webPreloadPath?: string
+  webPreloadSourcePaths?: string[]
+  buildWebPreload?: () => { success: boolean; error?: string }
 }
 
 function json(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
@@ -332,15 +337,24 @@ export class WebRemoteServer {
     const root = this.options.rendererDir ?? join(__dirname, 'renderer')
     const relativePath = path === '/app' || path === '/app/' ? 'index.html' : decodeURIComponent(path.slice('/app/'.length))
     const safePath = normalize(relativePath).replace(/^([.][.][/\\])+/, '')
-    const filePath = join(root, safePath)
-    if (!filePath.startsWith(root) || !existsSync(filePath) || !statSync(filePath).isFile()) {
+    const isHtml = safePath === 'index.html'
+    if (isHtml) {
+      const preload = this.ensureWebPreload(root)
+      if (!preload.ready) {
+        const reason = preload.error ?? '独立 web preload 产物缺失或过期。'
+        res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' })
+        res.end(this.renderPreloadErrorPage(reason))
+        return
+      }
+    }
+    const filePath = safePath === 'preload.js' ? this.getWebPreloadPath(root) : join(root, safePath)
+    if (!filePath.startsWith(root) && safePath !== 'preload.js' || !existsSync(filePath) || !statSync(filePath).isFile()) {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
       res.end('Not Found')
       return
     }
 
     const sourceStat = statSync(filePath) as { mtimeMs: number; size: number; mtime: Date }
-    const isHtml = safePath === 'index.html'
     const isPreload = safePath === 'preload.js'
     const isHashedAsset = safePath.startsWith('assets/') && HASHED_ASSET.test(safePath.split('/').pop() ?? '')
     const etag = `"${createHash('sha1').update(`${sourceStat.size}:${sourceStat.mtimeMs}`).digest('hex')}"`
@@ -383,6 +397,43 @@ export class WebRemoteServer {
     }
     res.writeHead(200, headers)
     res.end(representation.body)
+  }
+
+  private getWebPreloadPath(rendererRoot: string): string {
+    return this.options.webPreloadPath ?? resolve(rendererRoot, '../web-remote/preload.js')
+  }
+
+  private ensureWebPreload(rendererRoot: string): { ready: boolean; error?: string } {
+    const output = this.getWebPreloadPath(rendererRoot)
+    const sources = this.options.webPreloadSourcePaths ?? [
+      resolve(__dirname, '../src/preload/index.ts'),
+      resolve(__dirname, '../src/main/lib/web-remote/full-ui/web-electron-shim.ts'),
+    ]
+    const isCurrent = (): boolean => {
+      try {
+        const outputTime = statSync(output).mtimeMs
+        return outputTime >= Math.max(...sources.map((source) => statSync(source).mtimeMs))
+      } catch { return false }
+    }
+    if (isCurrent()) return { ready: true }
+    if (process.env.NODE_ENV === 'production' && getConfigDirName() !== '.proma-dev') return { ready: false, error: '正式构建中的独立 web preload 缺失或早于源文件；请重新执行完整构建。' }
+
+    try {
+      const build = this.options.buildWebPreload?.() ?? (() => {
+        const script = resolve(__dirname, '../../../scripts/personal/build-web-preload.ts')
+        const result = spawnSync('bun', [script], { cwd: resolve(__dirname, '..'), encoding: 'utf8', timeout: 30_000 })
+        return { success: result.status === 0, error: result.error?.message || result.stderr || `退出码 ${result.status ?? '未知'}` }
+      })()
+      if (build.success && isCurrent()) return { ready: true }
+      return { ready: false, error: `开发模式尝试自动重建 web preload 失败。${build.error ? `原因：${String(build.error).trim()}` : ''}` }
+    } catch (error) {
+      return { ready: false, error: `开发模式尝试自动重建 web preload 时出错：${error instanceof Error ? error.message : String(error)}` }
+    }
+  }
+
+  private renderPreloadErrorPage(reason: string): string {
+    const safeReason = reason.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!)
+    return `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Proma 手机界面暂不可用</title><body style="font:16px system-ui,sans-serif;max-width:680px;margin:12vh auto;padding:24px;color:#172033;background:#f4f6fb"><main style="background:white;border:1px solid #d9dfeb;border-radius:16px;padding:24px"><h1 style="font-size:22px">手机界面暂不可用</h1><p>手机端加载所需的 web preload 文件缺失或过期，页面已阻止继续加载，避免显示空白。</p><p>${safeReason}</p><p>请在项目根目录运行以下命令后刷新页面：</p><pre style="white-space:pre-wrap;background:#eef1f7;padding:12px;border-radius:8px">bun scripts/personal/build-web-preload.ts</pre></main></body></html>`
   }
 
   private getRenderedIndex(filePath: string, sourceStat: { mtimeMs: number; size: number; mtime: Date }, sourceBody: Buffer): { body: Buffer; nonce: string } {

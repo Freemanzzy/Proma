@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test'
 import { connect } from 'node:net'
 import WebSocket from 'ws'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WebRemoteAuth } from './web-remote-auth'
@@ -30,6 +30,9 @@ let server: InstanceType<typeof WebRemoteServer>
 let port: number
 let cookie: string
 let rendererDir: string
+let webPreloadPath: string
+let webPreloadSourcePaths: string[]
+let allowPreloadRebuild = false
 
 beforeAll(async () => {
   WebRemoteServer = (await import('./web-remote-server')).WebRemoteServer
@@ -43,9 +46,17 @@ beforeAll(async () => {
   rendererDir = mkdtempSync(join(tmpdir(), 'proma-web-remote-renderer-'))
   mkdirSync(join(rendererDir, 'assets'))
   writeFileSync(join(rendererDir, 'index.html'), '<!doctype html><html><body><div id="root"></div><script type="module" src="./assets/main-12345678.js"></script></body></html>')
-  writeFileSync(join(rendererDir, 'preload.js'), 'window.__PRELOAD__=true;'.repeat(200))
+  webPreloadPath = join(rendererDir, '../web-remote/preload.js')
+  mkdirSync(join(rendererDir, '../web-remote'), { recursive: true })
+  webPreloadSourcePaths = [join(rendererDir, 'preload-source.ts'), join(rendererDir, 'shim-source.ts')]
+  for (const source of webPreloadSourcePaths) writeFileSync(source, 'source')
+  writeFileSync(webPreloadPath, 'window.__PRELOAD__=true;'.repeat(200))
   writeFileSync(join(rendererDir, 'assets', 'main-12345678.js'), 'console.log("cached");'.repeat(200))
-  server = new WebRemoteServer({ config, auth, rendererDir, ipcBridge: { attachWebSocket: (ws: WebSocket) => ws.send(Buffer.from(JSON.stringify({ type: 'ready' }))) } as never })
+  server = new WebRemoteServer({ config, auth, rendererDir, webPreloadPath, webPreloadSourcePaths, buildWebPreload: () => {
+    if (!allowPreloadRebuild) return { success: false, error: 'test rebuild disabled' }
+    writeFileSync(webPreloadPath, 'window.__PRELOAD_RECOVERED__=true;'.repeat(200))
+    return { success: true }
+  }, ipcBridge: { attachWebSocket: (ws: WebSocket) => ws.send(Buffer.from(JSON.stringify({ type: 'ready' }))) } as never })
   await server.start(0)
   port = (server.httpServer.address() as { port: number }).port
 })
@@ -119,6 +130,51 @@ describe('WebRemoteServer loopback integration', () => {
     const response = await fetch(`http://127.0.0.1:${port}/`, { redirect: 'manual', headers })
     expect(response.status).toBe(302)
     expect(response.headers.get('location')).toBe('/app/')
+  })
+
+  test('preload 独立于 renderer 输出目录并正常注入', async () => {
+    const headers = { Cookie: cookie, 'Tailscale-User-Login': 'lee@example.com' }
+    const index = await fetch(`http://127.0.0.1:${port}/app/`, { headers })
+    expect(index.status).toBe(200)
+    expect(await index.text()).toContain('<script src="/app/preload.js"></script>')
+    const preload = await fetch(`http://127.0.0.1:${port}/app/preload.js`, { headers })
+    expect(preload.status).toBe(200)
+    expect(await preload.text()).toContain('window.__PRELOAD__=true;')
+  })
+
+  test('preload 缺失且开发模式重建失败时返回中文错误页而非空白页面', async () => {
+    const headers = { Cookie: cookie, 'Tailscale-User-Login': 'lee@example.com' }
+    const backup = readFileSync(webPreloadPath)
+    try {
+      const { unlinkSync } = await import('node:fs')
+      unlinkSync(webPreloadPath)
+      const response = await fetch(`http://127.0.0.1:${port}/app/`, { headers })
+      const html = await response.text()
+      expect(response.status).toBe(503)
+      expect(response.headers.get('cache-control')).toBe('no-store')
+      expect(html).toContain('手机界面暂不可用')
+      expect(html).toContain('bun scripts/personal/build-web-preload.ts')
+      expect(html).toContain('test rebuild disabled')
+    } finally {
+      writeFileSync(webPreloadPath, backup)
+    }
+  })
+
+  test('开发模式访问 /app/ 时自动重建缺失的独立 preload', async () => {
+    const headers = { Cookie: cookie, 'Tailscale-User-Login': 'lee@example.com' }
+    const backup = readFileSync(webPreloadPath)
+    try {
+      const { unlinkSync } = await import('node:fs')
+      unlinkSync(webPreloadPath)
+      allowPreloadRebuild = true
+      const response = await fetch(`http://127.0.0.1:${port}/app/`, { headers })
+      expect(response.status).toBe(200)
+      expect(await response.text()).toContain('<script src="/app/preload.js"></script>')
+      expect(readFileSync(webPreloadPath, 'utf8')).toContain('window.__PRELOAD_RECOVERED__=true;')
+    } finally {
+      allowPreloadRebuild = false
+      writeFileSync(webPreloadPath, backup)
+    }
   })
 
   test('完整界面静态资源提供压缩、长缓存和协商缓存', async () => {

@@ -450,6 +450,12 @@ interface AgentViewProps {
   embedded?: boolean
 }
 
+const WEB_REMOTE_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024
+
+function isWebRemoteFullUi(): boolean {
+  return Boolean((window as Window & { __PROMA_WEB_REMOTE__?: boolean }).__PROMA_WEB_REMOTE__)
+}
+
 export function AgentView({ sessionId, embedded = false }: AgentViewProps): React.ReactElement {
   const store = useStore()
   const stopShortcutTarget = React.useMemo(() => ({ kind: 'agent' as const, sessionId }), [sessionId])
@@ -1450,6 +1456,10 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
           continue
         }
 
+        if (isWebRemoteFullUi() && file.size > WEB_REMOTE_ATTACHMENT_MAX_BYTES) {
+          rejectedLargeFiles.push(file.name)
+          continue
+        }
         const base64 = await fileToBase64(file)
         const previewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined
         const uniqueFilename = makeUniqueFilename(file.name, usedNames)
@@ -1463,24 +1473,46 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
           previewUrl,
         }
 
-        if (!window.__pendingAgentFileData) {
-          window.__pendingAgentFileData = new Map<string, string>()
+        if (isWebRemoteFullUi()) {
+          const workspace = workspaces.find((item) => item.id === currentWorkspaceId)
+          if (!workspace?.slug) throw new Error('当前会话没有可用的工作区')
+          const toastId = `mobile-upload-${pending.id}`
+          toast.loading(`正在上传 ${uniqueFilename}…`, { id: toastId })
+          try {
+            const [saved] = await window.electronAPI.saveFilesToAgentSession({
+              workspaceSlug: workspace.slug,
+              sessionId,
+              files: [{ filename: uniqueFilename, data: base64 }],
+            })
+            if (!saved?.targetPath) throw new Error('服务端未返回已保存文件')
+            pending.filename = saved.filename
+            pending.sourcePath = saved.targetPath
+            toast.success(`附件已加入：${saved.filename}`, { id: toastId })
+          } catch (error) {
+            toast.error(error instanceof Error ? error.message : '附件上传失败', { id: toastId })
+            throw error
+          }
+        } else {
+          if (!window.__pendingAgentFileData) window.__pendingAgentFileData = new Map<string, string>()
+          window.__pendingAgentFileData.set(pending.id, base64)
         }
-        window.__pendingAgentFileData.set(pending.id, base64)
-
         setPendingFiles((prev) => [...prev, pending])
       } catch (error) {
         console.error('[AgentView] 添加附件失败:', error)
+        toast.error(`附件上传失败：${file.name}`, { description: error instanceof Error ? error.message : '请重试。' })
       }
     }
 
+    if (rejectedLargeFiles.length > 0 && isWebRemoteFullUi()) {
+      toast.error(`以下文件超过手机端 25MB 上限，已跳过：${formatFileNames(rejectedLargeFiles)}`)
+    }
     if (pathBackedFiles.length > 0) {
       toast.success(`已将大文件作为附加文件引用：${formatFileNames(pathBackedFiles)}`)
     }
-    if (rejectedLargeFiles.length > 0) {
+    if (rejectedLargeFiles.length > 0 && !isWebRemoteFullUi()) {
       toast.error(`以下文件超过 100MB 且无法取得本地路径，已跳过：${formatFileNames(rejectedLargeFiles)}`)
     }
-  }, [attachSessionFile, makeUniqueFilename, setPendingFiles])
+  }, [attachSessionFile, currentWorkspaceId, makeUniqueFilename, sessionId, setPendingFiles, workspaces])
 
   const addLargeDialogFilesAsReferences = React.useCallback(async (files: FileDialogLargeFile[]): Promise<void> => {
     if (files.length === 0) return
@@ -1523,40 +1555,64 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
     const largeFiles = result.largeFiles ?? []
     const skippedFiles = result.skippedFiles ?? []
     const oversized: string[] = []
-
-    for (const fileInfo of result.files) {
-      if (fileInfo.size > MAX_ATTACHMENT_SIZE) {
-        oversized.push(fileInfo.filename)
-        continue
+    const webRemote = isWebRemoteFullUi()
+    const validFiles = result.files.filter((file) => {
+      const maxBytes = webRemote ? Math.min(MAX_ATTACHMENT_SIZE, WEB_REMOTE_ATTACHMENT_MAX_BYTES) : MAX_ATTACHMENT_SIZE
+      if (file.size > maxBytes) { oversized.push(file.filename); return false }
+      return true
+    })
+    let savedFiles: Array<{ filename: string; targetPath: string }> = []
+    if (webRemote && validFiles.length > 0) {
+      const workspace = workspaces.find((item) => item.id === currentWorkspaceId)
+      if (!workspace?.slug) {
+        toast.error('当前会话没有可用的工作区，无法保存手机附件。')
+        return
       }
+      const toastId = `mobile-dialog-upload-${Date.now()}`
+      toast.loading(`正在上传 ${validFiles.length} 个附件…`, { id: toastId })
+      try {
+        savedFiles = await window.electronAPI.saveFilesToAgentSession({
+          workspaceSlug: workspace.slug,
+          sessionId,
+          files: validFiles.map(({ filename, data }) => ({ filename, data })),
+        })
+        if (savedFiles.length !== validFiles.length) throw new Error('服务端返回的附件数量不完整')
+        toast.success(`已上传 ${savedFiles.length} 个附件`, { id: toastId })
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : '附件上传失败', { id: toastId })
+        return
+      }
+    }
+
+    validFiles.forEach((fileInfo, index) => {
       const previewUrl = fileInfo.mediaType.startsWith('image/')
         ? `data:${fileInfo.mediaType};base64,${fileInfo.data}`
         : undefined
-
       const pending: AgentPendingFile = {
-        id: `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        filename: fileInfo.filename,
+        id: `pending-${Date.now()}-${Math.random().toString(36).slice(2)}-${index}`,
+        filename: savedFiles[index]?.filename ?? fileInfo.filename,
         mediaType: fileInfo.mediaType,
         size: fileInfo.size,
         previewUrl,
+        ...(savedFiles[index]?.targetPath ? { sourcePath: savedFiles[index]!.targetPath } : {}),
       }
-
-      if (!window.__pendingAgentFileData) {
-        window.__pendingAgentFileData = new Map<string, string>()
+      if (!webRemote) {
+        if (!window.__pendingAgentFileData) window.__pendingAgentFileData = new Map<string, string>()
+        window.__pendingAgentFileData.set(pending.id, fileInfo.data)
       }
-      window.__pendingAgentFileData.set(pending.id, fileInfo.data)
-
       setPendingFiles((prev) => [...prev, pending])
-    }
+    })
 
     if (oversized.length > 0) {
-      toast.error(`以下文件超过 100MB 且无法取得本地路径，已跳过：${formatFileNames(oversized)}`)
+      toast.error(webRemote
+        ? `以下文件超过手机端 25MB 限制，已跳过：${formatFileNames(oversized)}`
+        : `以下文件超过 100MB 且无法取得本地路径，已跳过：${formatFileNames(oversized)}`)
     }
     await addLargeDialogFilesAsReferences(largeFiles)
     if (skippedFiles.length > 0) {
-      toast.warning(`以下文件无法读取，已跳过：${formatFileNames(skippedFiles.map((file) => file.filename))}`)
+      toast.warning(`${webRemote ? '以下文件超过手机端 25MB 限制或无法读取' : '以下文件无法读取'}，已跳过：${formatFileNames(skippedFiles.map((file) => file.filename))}`)
     }
-  }, [addLargeDialogFilesAsReferences, setPendingFiles])
+  }, [addLargeDialogFilesAsReferences, currentWorkspaceId, sessionId, setPendingFiles, workspaces])
 
   /** 打开混合选择器：文件作为附件，文件夹仅授权给当前会话。 */
   const handleAttachContent = React.useCallback(async (): Promise<void> => {

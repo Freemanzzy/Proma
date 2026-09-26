@@ -4,7 +4,7 @@ import { dirname, resolve } from 'node:path'
 
 const repoRoot = resolve(import.meta.dir, '../..')
 const electronRoot = resolve(repoRoot, 'apps/electron')
-const outfile = resolve(electronRoot, 'dist/renderer/preload.js')
+const outfile = resolve(electronRoot, 'dist/web-remote/preload.js')
 const shim = resolve(electronRoot, 'src/main/lib/web-remote/full-ui/web-electron-shim.ts')
 
 await mkdir(dirname(outfile), { recursive: true })
