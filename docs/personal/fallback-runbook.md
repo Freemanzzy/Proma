@@ -36,6 +36,12 @@
 
 ## 2. 诊断（只读）
 
+**先判断阶段**：`ls /Applications/Proma.app/Contents/Resources/personal-build.json`
+- 不存在 → 仍是官方版（并存期或切换失败已回退）。个人版问题只影响开发实例（`~/.proma-dev`），不要动 `/Applications` 与 `~/.proma`；§3 不适用。
+- 存在 → 已切换，按下文处理。
+- 对照基线：`~/.proma-switch-backups/pre-switch-snapshot.json`（切换前）与每次更新备份目录里的快照；`python3 scripts/personal/health-snapshot.py ~/.proma --output /tmp/now.json && python3 scripts/personal/health-snapshot.py --compare <基线> /tmp/now.json`。
+- 周检报告只是生成时刻的快照；同步完成后以 `PERSONAL.md` 为准。
+
 ```bash
 # 应用与版本
 ls -la /Applications | grep -i proma
@@ -83,6 +89,8 @@ ls -lt "/Volumes/Lexar ssd 2tb/proma 备份/" 2>/dev/null | head
 
 ## 3. 回退 A：恢复上一版应用
 
+> 换应用前先按 §4 第 2 步把当前 `~/.proma` 另存一份（`cp -a`，不移动），再换应用。两边版本相同时通常不需要恢复数据。
+
 1. 退出个人版（让用户手动退出；无响应时，确认 PID 的命令行属于 `/Applications/Proma.app` 后 `kill <PID>`，等待 10 秒）。
 2. 保留坏版本、换回上一版：
 
@@ -99,6 +107,9 @@ open "/Applications/Proma.app"
 ---
 
 ## 4. 回退 B：恢复数据
+
+> 恢复前检查：`df -h ~` 空间足够（≥ 备份大小 × 2）；zip 先 `unzip -t` 通过，并 `unzip -l <zip> | head` 确认顶层就是 `channels.json` 等（不是多一层 `.proma/`）；2026-09-26 之前生成的 zip 未保留符号链接（链接被展开为副本），恢复后需核对 Skill 链接。
+> 恢复旧数据后首次启动：已过期的定时任务不会补跑（调度器顺延到下一个周期），但飞书/微信桥会立即连接；如担心重复处理，恢复后启动前请用户确认。
 
 > 必须先取得用户同意，并先保存当前数据。
 
@@ -134,6 +145,12 @@ sqlite3 ~/.proma/planning.db "PRAGMA integrity_check;"
 ---
 
 ## 5. 局部问题（不回退整个应用）
+
+- **渠道密钥读不出 / Keychain 被拒绝**：不要在应用里保存该渠道（会覆盖原凭据）；退出应用，重新打开并在 Keychain 弹窗点“始终允许”。每次安装新构建（ad-hoc 签名变化）都会再次弹出。
+- **定时任务异常**：先看应用内该任务的运行记录与错误；依赖网页的任务个人版需使用 ego-browser（无内置浏览器）；不要批量启停，逐个经用户确认。
+- **飞书 / 微信桥断开**：在设置中查看连接状态与错误；凭据失效（如 `app_id or app_secret is invalid`）需用户在应用内重新填写。
+- **渠道登录过期（ChatGPT / xAI 等 OAuth）**：在设置中重新登录，不需要回退。
+- **手机访问**：个人版由 `~/.proma/web-remote/config.json` 的 `enabled` 控制（不需要环境变量）；桌面“设置 → 远程连接 → 手机访问”可管理；检查 `lsof -nP -iTCP:17888 -sTCP:LISTEN` 的进程是否为 `/Applications/Proma.app`，以及 `tailscale serve status`。
 
 - **手机页面空白**：`cd ~/Documents/proma-personal/apps/electron && bun run build:web-preload`，然后重启个人版。
 - **手机提示需要配对**：手机的 Tailscale 设备名变了。在个人版“设置 → 远程连接 → 手机访问”里添加新设备名。

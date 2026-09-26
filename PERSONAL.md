@@ -413,3 +413,11 @@ python3 scripts/personal/import-proma-backup.py \\
 - 安装脚本的成功、模拟健康失败、模拟 staging 复制失败三种演练均使用 `/tmp` 临时应用与数据目录：成功退出 0 并切换假包；健康失败退出 4、恢复旧假包并保留 `Proma.failed-*.app`；复制失败退出 7、旧假包始终未移动且 partial staging 被清理。各自的 `proma/` 副本都经完整性校验无差异，快照/统计只写在时间戳目录外层。没有接触 `/Applications/Proma.app`、`~/.proma` 或官方进程；未 push。
 - 验证：`bun run typecheck` 通过；新增个人日志单测与 P1/Web Remote 测试共 6 pass / 0 fail；集成脚本中的语法检查、备份预设目录/zip 校验、导入和三种安装演练全部通过。最终运行 `package-personal.sh` 的全量测试为 547 pass / 5 fail / 1 error，相对记录基线 541/5/1 增加 6 个通过测试，失败/错误数相同；全部 Electron build（含 web preload、CLI/native helpers）与实际 arm64 目录打包通过。曾有一次 `pi-ego-browser-tool` 测试超过 5 秒导致 6 fail / 2 errors，立即重跑恢复到基线 5/1；测试脚本现正确解析 Bun 的 `errors` 复数总结，不会漏报。
 - 新产物：`apps/electron/out/mac-arm64/Proma.app`，`0.19.58` / `com.proma.app` / arm64，marker commit `4601e74a74051183fda00c3dab06254a2e41e372`，`builtAt=2026-09-26T14:09:45.267Z`；`app-update.yml` absent，`codesign` 显示 adhoc、无 Team ID。未启动产物。主进程原先无文件日志 transport：`app.getPath('logs')` 仅被用于展示位置，无 electron-log；现已加入限量轮转、事件级脱敏的 `main.log`。macOS 默认路径为 `~/Library/Logs/Proma/main.log`，本批未启动应用实测该绝对位置。
+
+## 2026-09-26: 切换准备复核、切换手册定稿与交接
+
+- 父会话复核 P1–P3 与复核修复：typecheck 通过；全量测试 547 pass / 5 fail / 1 error（基线内）；`/tmp` 三种安装演练（成功、健康失败回滚、复制失败）亲自复跑通过；打包产物 `personal-build.json`、无 `app-update.yml`、ad-hoc 签名已核对；`health-snapshot.py` 在正式数据上只读运行正常（不含密钥）。合并 `7751fec7`。
+- 用户决定：**不做真实数据预演（P5），直接切换**；失败回到官方版，由 Claude 恢复。首次启动验收承担预演职责。
+- 新增 `docs/personal/switch-runbook.md`（定稿）；fallback-runbook 补“先判断阶段”、恢复前检查、Keychain/定时任务/桥/手机访问排错；CLAUDE.md 增加切换手册与职责交接说明。
+- 已知：调度器启动时顺延过期任务，切换期间错过的定时任务不补跑。
+- 交接：此后切换与维护由 Claude Code 负责（见 CLAUDE.md）。

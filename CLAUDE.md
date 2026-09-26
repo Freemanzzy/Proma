@@ -6,8 +6,9 @@
 
 1. `PERSONAL.md` — 唯一事实来源：基线版本、与上游的差异清单、同步规则、同步记录、变更记录（末尾最新）。
 2. `docs/personal/fallback-runbook.md` — 故障诊断、回滚应用、恢复数据、从源码重建。
-3. `docs/personal/web-remote.md` — 手机访问功能与排错（涉及手机问题时）。
-4. 最近的周检报告：`~/.proma/agent-workspaces/default/workspace-files/.context/proma-personal/upstream-watch/`（`report-*.md`、`pre-upgrade-assessment-*.md`）。
+3. `docs/personal/switch-runbook.md` — 从官方版切换到个人版的逐步执行手册（切换时的主依据）。
+4. `docs/personal/web-remote.md` — 手机访问功能与排错（涉及手机问题时）。
+5. 最近的周检报告（只是生成时刻的快照；同步完成后以 PERSONAL.md 为准）：`~/.proma/agent-workspaces/default/workspace-files/.context/proma-personal/upstream-watch/`（`report-*.md`、`pre-upgrade-assessment-*.md`）。
 
 ## 2. 关键位置
 
@@ -25,6 +26,8 @@
 
 ## 3. 你的职责
 
+> 自 2026-09-26 起，切换（`docs/personal/switch-runbook.md`）及之后的全部维护由你负责；原 Proma 中控会话不再修改本仓库。
+
 1. **官方更新同步**（收到周检报告或用户要求时）：评估 → 用户确认 → 在 `sync/YYYY-MM-DD` 分支合并官方正式 tag → 验证 → 用户确认 → 合并 `personal` 并推送 → 打包 → 安装（安装脚本自动备份与回滚）→ 记录。
 2. **故障回滚**：按 `docs/personal/fallback-runbook.md` 诊断与处理。
 3. **突发问题**：应用打不开、数据异常、手机访问失效、渠道或登录失效、定时任务或飞书/微信桥异常等。先诊断、说明、再处理。
@@ -36,7 +39,7 @@
 - **官方安装包**：不要下载或安装官方 Proma（同名同 ID，会覆盖个人版）。个人版必须保持官方自动更新关闭。
 - **Git**：不 `push --force`，不 `reset --hard` 已推送分支；一件事一个分支，`--no-ff` 合并；每个提交信息末尾唯一一行 `Made-with: Proma`，不加 Co-Authored-By；提交邮箱用仓库已配置的 noreply。
 - **公开仓库**：不提交密钥、令牌、`/Users/<用户名>` 绝对路径、IP、Tailscale 主机名与设备名、邮箱；推送前扫描 diff。
-- **进程**：禁止 `pkill` / `killall`；只按 PID 结束确认属于个人版的进程。
+- **进程**：禁止 `pkill` / `killall`；只按 PID 结束进程，且先征得用户同意。例外说明：切换时可按 PID 结束无响应的官方版进程与开发实例进程（仍需同意）。
 - **输出**：不打印密钥与 API Key；读取配置只取需要的字段（如 `version`）。
 - **网络**：git 用 `GIT_TERMINAL_PROMPT=0 perl -e 'alarm 120; exec @ARGV' git -c http.proxy=http://127.0.0.1:7897 ...`；其他下载设 `HTTPS_PROXY=http://127.0.0.1:7897`；bun 在 `~/.bun/bin`（先 `export PATH="$HOME/.bun/bin:$PATH"`）；macOS 无 `timeout`，用 `perl -e 'alarm N; exec @ARGV'`。
 
