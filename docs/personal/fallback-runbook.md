@@ -29,7 +29,7 @@
 | 外置硬盘完整备份 | `/Volumes/Lexar ssd 2tb/proma 备份/*.zip`（`proma-backup` Skill 生成；未挂载时用 `diskutil list` 找到卷后 `diskutil mount <设备>`） |
 | 源码仓库 | `~/Documents/proma-personal`（`personal` 分支；SSOT：`PERSONAL.md`） |
 | 官方上游 | remote `upstream` = proma-ai/Proma；个人版 remote `origin` = Freemanzzy/Proma |
-| 日志 | `~/.proma/logs/`；开发实例日志 `/tmp/proma-personal-dev-webremote.log` |
+| 日志 | 用户数据日志 `~/.proma/logs/`；个人版主进程文件日志 `~/Library/Logs/Proma/main.log`（`app.getPath('logs')/main.log`，事件级脱敏、轮转）；开发实例日志 `/tmp/proma-personal-dev-webremote.log` |
 | 工具 | bun：`~/.bun/bin/bun`（先 `export PATH="$HOME/.bun/bin:$PATH"`） |
 
 ---
@@ -63,6 +63,8 @@ sqlite3 ~/.proma/planning.db "PRAGMA user_version;"
 # 最近错误
 ls -t ~/.proma/logs | head -3
 tail -200 "$HOME/.proma/logs/$(ls -t ~/.proma/logs | head -1)" | grep -iE "error|fatal|无法|失败" | tail -40
+tail -200 "$HOME/Library/Logs/Proma/main.log" 2>/dev/null | grep -iE '\[FATAL\]|\[ERROR\]|startup' | tail -40
+python3 scripts/personal/health-snapshot.py "$HOME/.proma"
 
 # 可用备份
 ls -lt ~/.proma-switch-backups/ 2>/dev/null | head
@@ -158,13 +160,16 @@ bash scripts/personal/package-personal.sh
 bash scripts/personal/install-update.sh "apps/electron/out/mac-arm64/Proma.app"
 # 仅在 /tmp 的假应用目录与临时数据目录演练；绝不对正式目录做 dry-run 以外测试：
 bash scripts/personal/install-update.sh /tmp/fake/Proma.app --apps-dir /tmp/apps --data-dir /tmp/promadata --backup-root /tmp/promabackups --dry-run
-# 完整性校验可接收目录或 zip；按需重复传入 glob 排除项：
-python3 scripts/personal/verify-backup.py "$HOME/.proma" "/path/to/backup.zip"
+# 完整性校验可接收目录或 zip；proma-backup preset 排除 .DS_Store、*.lock、__MACOSX：
+python3 scripts/personal/verify-backup.py "$HOME/.proma" "/path/to/backup.zip" --preset proma-backup
+# 需要对比更新前后时，health-snapshot 是只读数据输入；快照文件可放入独立备份目录：
+python3 scripts/personal/health-snapshot.py "$HOME/.proma" --output /tmp/health-snapshot-before.json
+python3 scripts/personal/health-snapshot.py --compare /tmp/health-snapshot-before.json /tmp/health-snapshot-after.json
 ```
 
 - 不要在 `personal` 分支上 `reset --hard` 或强推；在 `recover/*` 分支修复，验证通过后请用户确认再合并。
 - `scripts/personal/package-personal.sh` 负责安装依赖、typecheck、基线测试、全部 Electron 构建及 arm64 目录包；产物仅写入仓库 `apps/electron/out/`，不启动、不安装。
-- `scripts/personal/install-update.sh NEW_APP` 默认安装到 `/Applications/Proma.app` 并备份 `~/.proma`；只可在隔离目录用 `--apps-dir`、`--data-dir`、`--backup-root` 演练。`--dry-run` 只核验 personal 标记和打印计划；`--simulate-health-failure --test-mode` 用于隔离回滚演练。脚本不强杀进程，不自动还原数据。
+- `scripts/personal/install-update.sh NEW_APP` 默认安装到 `/Applications/Proma.app` 并备份 `~/.proma`；安装时先复制到同卷 `.Proma.installing-*`，再原子改名，并用 EXIT/ERR/INT/TERM 恢复原应用。只可在 `/tmp` 用 `--test-mode --apps-dir --data-dir --backup-root` 演练。`--dry-run` 不写数据；`--simulate-health-failure` 与 `--simulate-copy-failure` 可分别演练健康失败回滚和 staging 复制中断。新版失败时会在停止本次跟踪的新版 PID/子进程后保留 `Proma.failed-*.app`；脚本不自动还原数据或移动官方更新缓存。默认健康观察 60 秒，更新前后快照写在时间戳备份目录的外层，不污染 `proma/` 副本。
 - `python3 scripts/personal/verify-backup.py SRC BACKUP` 对比目录或 zip 的文件内容、大小、SHA-256、符号链接目标和权限；可多次传 `--exclude GLOB`。
 - 修复后在 `PERSONAL.md` 末尾追加 `## YYYY-MM-DD: 故障回退记录`（原因、操作、结果）。
 

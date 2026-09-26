@@ -403,3 +403,11 @@ python3 scripts/personal/import-proma-backup.py \\
 - 打包产物：`apps/electron/out/mac-arm64/Proma.app`，版本 `0.19.58`，`appId=com.proma.app`，架构 arm64；包内 marker 为 `personal=true`、`version=0.19.58`、`commit=ff39f31d982c511f046a6ecad5008700cefd7271`、`builtAt=2026-09-26T13:30:36.688Z`。`Contents/Resources/app-update.yml` 不存在。`codesign -dv` 确认为 `Signature=adhoc`、`TeamIdentifier=not set`。本地 ad-hoc 签名不代表 Apple Developer 身份签名，也没有公证；此目录包没有启动。
 - /tmp 集成演练：临时假包成功安装路径退出 0，回滚演练用 `--simulate-health-failure` 退出 4 并还原原假应用，数据保持未自动还原；没有触及默认应用/数据目录。导入实测 52,428,825 字节文件与非 UTF-8 文件路径改写、符号链接保留、SQLite 文本字段改写，3 处路径替换，完整性/安全校验通过。verify-backup 目录与 zip 均 PASS，人工篡改 alpha.txt 时按预期退出 1。
 - `verify-backup.py ~/.proma-dev <临时 cp -a 副本>` 只读自检 PASS：77 MiB，2,997 条目，missing/extra/mismatch 均为 0。未读取或写入 `~/.proma`，未访问 `/Applications/Proma.app`，未启动打包产物、停止开发实例或操作官方进程；未 push。
+
+## 2026-09-26: P1–P3 外部复核修复
+
+- 原子安装：安装脚本在任何 app bundle 改名之前安装 EXIT/ERR/INT/TERM 处理；新包先复制到同卷 `.Proma.installing-<时间戳>.app`，校验 marker 完整一致后才 `mv` 到 `Proma.app`。健康失败时先对本次跟踪的新进程及其子进程发送 SIGTERM，最多等待 20 秒，再保留失败包为 `Proma.failed-*.app` 并恢复 `Proma.previous.app`；不会使用 `pkill`/`killall`。新增 `--simulate-copy-failure`，仅在 `/tmp` 的 `--test-mode` 演练。
+- 健康校验：默认观察 60 秒；安装前检查 17888（以及配置启用时的自定义端口）是否被非应用进程占用；安装后验证端口监听 PID 可执行路径属于本次 app。新增 `health-snapshot.py`，比较配置版本、会话数、Automation `id→active`、渠道 `id→name/provider/enabled`、符号链接数和 `planning.db` user_version。更新前后快照只写入时间戳备份目录外层；`proma/` 副本保持 `cp -a` 原样，不写入 object-counts 或 `.personal-migration`。后者是备份导入器写入其导入目标的迁移清单，不是更新备份的附加文件。
+- 日志复核：源码原先没有 electron-log 或主进程文件 transport，`app.getPath('logs')` 只用于显示路径。个人版现写入 `app.getPath('logs')/main.log`（macOS 默认 `~/Library/Logs/Proma/main.log`），最大 5 MiB、保留 3 份轮转，0600 文件权限；日志仅记录 startup/error/fatal 分类，不写错误对象或消息详情，避免泄露密钥。
+- 完整性预设：`verify-backup.py --preset proma-backup` 对目录和 zip 同步排除 `.DS_Store`、`*.lock` 与 `__MACOSX`，也保留自定义 `--exclude`。
+- 安装脚本的成功、模拟健康失败、模拟 staging 复制失败三种演练均使用 `/tmp` 临时应用与数据目录；每项均核对原应用可恢复、staging 清理及备份副本未被脚本改写。全量 typecheck、测试和打包结果在本节验证补录中记录。没有接触 `/Applications/Proma.app`、`~/.proma` 或官方进程；未 push。

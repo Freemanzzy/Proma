@@ -1,5 +1,9 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, screen, shell } from 'electron'
+import { initializePersonalMainLog } from './lib/personal-main-log'
 import { join } from 'path'
+
+// Personal packaged builds keep a bounded, secret-free main-process health log under app.getPath('logs').
+initializePersonalMainLog()
 import { pathToFileURL } from 'url'
 import { existsSync } from 'fs'
 import { registerWebRemoteAdminIpc } from './lib/web-remote/web-remote-admin-ipc'

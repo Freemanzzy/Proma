@@ -11,6 +11,7 @@ import sys
 import zipfile
 
 CHUNK = 1024 * 1024
+PROMA_BACKUP_EXCLUDES = ('.DS_Store', '*.lock', '__MACOSX')
 
 def digest_stream(handle):
     digest = hashlib.sha256(); size = 0
@@ -20,19 +21,24 @@ def digest_stream(handle):
         size += len(block); digest.update(block)
     return size, digest.hexdigest()
 
-def excluded(name: str, rules: list[str]) -> bool:
+def excluded(name: str, rules: list[str], presets: list[str]) -> bool:
+    parts = PurePosixPath(name).parts
+    if 'proma-backup' in presets:
+        basename = parts[-1] if parts else name
+        if basename == '.DS_Store' or basename.endswith('.lock') or '__MACOSX' in parts:
+            return True
     return any(fnmatch.fnmatchcase(name, rule) or PurePosixPath(name).match(rule) for rule in rules)
 
-def source_entries(root: Path, rules: list[str]):
+def source_entries(root: Path, rules: list[str], presets: list[str]):
     result = {}
     seen = 0
     for base, dirs, files in os.walk(root, followlinks=False):
         base_path = Path(base)
-        dirs[:] = sorted(d for d in dirs if not excluded((base_path / d).relative_to(root).as_posix(), rules))
+        dirs[:] = sorted(d for d in dirs if not excluded((base_path / d).relative_to(root).as_posix(), rules, presets))
         for name in sorted(dirs + files):
             path = base_path / name
             rel = path.relative_to(root).as_posix()
-            if excluded(rel, rules): continue
+            if excluded(rel, rules, presets): continue
             seen += 1
             if seen % 1000 == 0: print(f'进度: 已校验 {seen} 条目（{root.name}）', file=sys.stderr)
             try: st = path.lstat()
@@ -49,14 +55,14 @@ def source_entries(root: Path, rules: list[str]):
     if seen and seen % 1000 != 0: print(f'进度: 已校验 {seen} 条目（{root.name}）', file=sys.stderr)
     return result
 
-def zip_entries(path: Path, rules: list[str]):
+def zip_entries(path: Path, rules: list[str], presets: list[str]):
     result = {}
     with zipfile.ZipFile(path) as archive:
         infos = archive.infolist()
         total = len(infos)
         for i, info in enumerate(infos, 1):
             rel = info.filename.rstrip('/')
-            if not rel or excluded(rel, rules): continue
+            if not rel or excluded(rel, rules, presets): continue
             mode = (info.external_attr >> 16) & 0o7777
             kind = stat.S_IFMT(info.external_attr >> 16)
             if info.is_dir() or info.filename.endswith('/'):
@@ -75,12 +81,13 @@ def main():
     p.add_argument('src', type=Path)
     p.add_argument('backup', type=Path)
     p.add_argument('--exclude', action='append', default=[], help='glob pattern to exclude (repeatable)')
+    p.add_argument('--preset', action='append', choices=['proma-backup'], default=[], help='inherit a backup tool exclusion preset (repeatable)')
     args = p.parse_args()
     src = args.src.expanduser().resolve(); backup = args.backup.expanduser().resolve()
     if not src.is_dir(): p.error(f'SRC is not a directory: {src}')
     if not backup.exists(): p.error(f'BACKUP does not exist: {backup}')
-    expected = source_entries(src, args.exclude)
-    actual = zip_entries(backup, args.exclude) if zipfile.is_zipfile(backup) else source_entries(backup, args.exclude)
+    expected = source_entries(src, args.exclude, args.preset)
+    actual = zip_entries(backup, args.exclude, args.preset) if zipfile.is_zipfile(backup) else source_entries(backup, args.exclude, args.preset)
     missing = sorted(expected.keys() - actual.keys()); extra = sorted(actual.keys() - expected.keys())
     mismatches = []
     for name in sorted(expected.keys() & actual.keys()):
