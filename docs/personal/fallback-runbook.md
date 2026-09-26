@@ -10,8 +10,8 @@
 
 1. **先诊断、后操作**。每一步都先打印将要执行的命令与理由；任何删除、覆盖、恢复数据的操作，必须先向用户说明影响并取得明确同意。
 2. **永远先备份当前状态再回退**：回退前把当前 `~/.proma` 另存一份（即使它已损坏），命名带时间戳，放在 `~/.proma-switch-backups/`。
-3. **禁止**：`rm -rf ~/.proma`（只允许 `mv` 改名保留）；`pkill` / `killall`（只按 PID 结束确认属于 Proma Personal 的进程）；`git push --force`；修改或删除任何备份文件；把密钥、令牌、API Key 打印到输出或写进文件。
-4. **不要启动官方 Proma（`/Applications/Proma.app`）来“修复”**：官方版会自动更新并把数据迁移到更高版本，个人版可能随之无法读取。
+3. **禁止**：`rm -rf ~/.proma`（只允许 `mv` 改名保留）；`pkill` / `killall`（只按 PID 结束确认属于个人版 Proma（/Applications/Proma.app） 的进程）；`git push --force`；修改或删除任何备份文件；把密钥、令牌、API Key 打印到输出或写进文件。
+4. **不要从官网下载或安装官方 Proma**：个人版与官方版同名、同应用 ID（`com.proma.app`），官方安装包会直接覆盖个人版，且官方版会自动更新并把数据迁移到更高版本。判断当前 `/Applications/Proma.app` 是否为个人版：看 `Contents/Resources/personal-build.json` 是否存在（个人版打包时写入，含版本、提交与构建时间）。
 5. 需要网络（git、bun install）时使用代理：`export HTTPS_PROXY=http://127.0.0.1:7897`；git 使用 `git -c http.proxy=http://127.0.0.1:7897 ...`；命令加超时，疑似卡住就停止并报告。
 6. 结束时给用户一份中文报告：发生了什么、做了哪些操作、当前版本与数据状态、还剩什么问题。
 
@@ -21,8 +21,8 @@
 
 | 项目 | 位置 |
 |---|---|
-| 个人版应用 | `/Applications/Proma Personal.app`（切换后） |
-| 上一版应用（安装脚本保留） | `/Applications/Proma Personal.previous.app` |
+| 个人版应用 | `/Applications/Proma.app`（切换后） |
+| 上一版应用（安装脚本保留） | `/Applications/Proma.previous.app` |
 | 用户数据 | `~/.proma`（个人版切换后直接使用） |
 | 开发/预演数据 | `~/.proma-dev`（与正式数据隔离） |
 | 更新前自动备份 | `~/.proma-switch-backups/<时间戳>/`（安装脚本在替换应用前生成） |
@@ -39,10 +39,11 @@
 ```bash
 # 应用与版本
 ls -la /Applications | grep -i proma
-defaults read "/Applications/Proma Personal.app/Contents/Info.plist" CFBundleShortVersionString
-defaults read "/Applications/Proma Personal.app/Contents/Info.plist" CFBundleIdentifier
+defaults read "/Applications/Proma.app/Contents/Info.plist" CFBundleShortVersionString
+defaults read "/Applications/Proma.app/Contents/Info.plist" CFBundleIdentifier
+cat "/Applications/Proma.app/Contents/Resources/personal-build.json"   # 不存在 = 不是个人版
 
-# 进程（确认命令行属于 Proma Personal 再考虑处理）
+# 进程（确认命令行属于个人版 Proma（/Applications/Proma.app） 再考虑处理）
 ps -axo pid,lstart,command | grep -i "Proma" | grep -v grep
 
 # 仓库状态
@@ -80,14 +81,14 @@ ls -lt "/Volumes/Lexar ssd 2tb/proma 备份/" 2>/dev/null | head
 
 ## 3. 回退 A：恢复上一版应用
 
-1. 退出个人版（让用户手动退出；无响应时，确认 PID 的命令行属于 `/Applications/Proma Personal.app` 后 `kill <PID>`，等待 10 秒）。
+1. 退出个人版（让用户手动退出；无响应时，确认 PID 的命令行属于 `/Applications/Proma.app` 后 `kill <PID>`，等待 10 秒）。
 2. 保留坏版本、换回上一版：
 
 ```bash
 cd /Applications
-mv "Proma Personal.app" "Proma Personal.broken-$(date +%Y%m%d-%H%M%S).app"
-cp -R "Proma Personal.previous.app" "Proma Personal.app"
-open "/Applications/Proma Personal.app"
+mv "Proma.app" "Proma.broken-$(date +%Y%m%d-%H%M%S).app"
+cp -R "Proma.previous.app" "Proma.app"
+open "/Applications/Proma.app"
 ```
 
 3. 如果上一版启动后报数据版本过高（新版已迁移数据），转 §4 恢复更新前备份。
