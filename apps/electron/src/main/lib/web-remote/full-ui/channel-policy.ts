@@ -18,7 +18,7 @@ const EXPORTED_CHANNELS = new Set<string>([
   ...channelValues(UPDATER_IPC_CHANNELS),
 ])
 
-const RUNTIME_LITERAL_CHANNELS = new Set(['file:exists-batch', 'file:office-to-html', 'file:prepare-pdf-preview', 'file:read-binary-base64', 'file:resolve-and-read', 'file:resolve-html-preview-path', 'file:resolve-markdown-media', 'file:resolve-path', 'file:write-text', 'migration:open-data-folder', 'web-remote:admin-get', 'web-remote:admin-save', 'web-remote:admin-pair', 'web-remote:admin-revoke'])
+const RUNTIME_LITERAL_CHANNELS = new Set(['file:exists-batch', 'file:office-to-html', 'file:prepare-pdf-preview', 'file:read-binary-base64', 'file:resolve-and-read', 'file:resolve-html-preview-path', 'file:resolve-markdown-media', 'file:resolve-path', 'file:write-text', 'migration:open-data-folder', 'web-remote:admin-get', 'web-remote:admin-save', 'web-remote:admin-pair', 'web-remote:admin-revoke', 'web-remote:admin-push-test', 'web-remote:admin-push-delete'])
 
 /** Explicit reviewed table. Do not replace this with runtime regex inference. */
 export const WEB_REMOTE_CHANNEL_POLICY: Readonly<Record<string, WebRemoteChannelPolicyEntry>> = Object.freeze({
@@ -26,6 +26,8 @@ export const WEB_REMOTE_CHANNEL_POLICY: Readonly<Record<string, WebRemoteChannel
   "web-remote:admin-save": { level: "denied", scope: "none", rationale: "仅桌面远程连接设置使用，手机禁止修改手机访问配置。" },
   "web-remote:admin-pair": { level: "denied", scope: "none", rationale: "仅桌面远程连接设置使用，手机禁止生成配对码。" },
   "web-remote:admin-revoke": { level: "denied", scope: "none", rationale: "仅桌面远程连接设置使用，手机禁止撤销设备。" },
+  "web-remote:admin-push-test": { level: "denied", scope: "none", rationale: "仅桌面设置发送测试通知，手机桥接禁止调用。" },
+  "web-remote:admin-push-delete": { level: "denied", scope: "none", rationale: "仅桌面设置删除手机推送订阅，手机桥接禁止调用。" },
   "agent-island:mark-session-viewed": { level: "denied", scope: "none", rationale: "原生窗口、终端、凭据、设置写入或外部副作用，不向手机 renderer 暴露。" },
   "agent:active-sessions-snapshot": { level: "read", scope: "none", rationale: "只读结果或状态事件；列表和设置结果在返回前按允许范围/敏感字段过滤。" },
   "agent:active-worktree-updated": { level: "session", scope: "session", rationale: "参数必须能解析出 sessionId 或 workspaceId/slug，并校验其在远程允许范围内。" },

@@ -84,7 +84,7 @@ describe('Web Remote full-ui security policy', () => {
   })
 
   test('手机访问桌面管理 IPC 全部显式分级为 denied', () => {
-    for (const channel of ['web-remote:admin-get', 'web-remote:admin-save', 'web-remote:admin-pair', 'web-remote:admin-revoke']) {
+    for (const channel of ['web-remote:admin-get', 'web-remote:admin-save', 'web-remote:admin-pair', 'web-remote:admin-revoke', 'web-remote:admin-push-test', 'web-remote:admin-push-delete']) {
       expect(getWebRemoteChannelPolicy(channel)).toMatchObject({ level: 'denied', scope: 'none' })
     }
   })

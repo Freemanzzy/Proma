@@ -816,6 +816,48 @@ async function runAttachments(harness, options, result) {
   result.attachments = { session: { id: session.id, title: session.title, workspaceId: session.workspaceId }, files: [textFileEvidence, imageFileEvidence, { filename: 'b2-preview.md', exists: existsSync(markdownFilePath) }], textUserMessageContainsAttachment: true, textAssistantReplyContainsFirstLine: Boolean(textReply.assistant), imageShownInComposer: true, imageAssistantIdentifiedRed: true, textSelectedScreenshot: textScreenshot, imageSelectedScreenshot: imageScreenshot, markdownSelectedScreenshot, finalScreenshot }
 }
 
+async function runPush(harness, options, result) {
+  if (options.userAgent !== 'android') throw new Error('Web Push 端到端 harness 当前限定 Android Chrome；iPhone Web Push 留待真机验收')
+  const title = `web-remote-harness-push-${Date.now()}`
+  const session = await harness.createHarnessSession(title)
+  result.harnessSession = { id: session.id, title: session.title, workspaceId: session.workspaceId }
+  const channels = await harness.invokeApi('listChannels').catch(() => [])
+  const alternate = Array.isArray(channels) ? channels.find((channel) => channel?.enabled && !/chatgpt/i.test(channel.provider || '') && (channel.models || []).some((model) => model?.enabled)) : null
+  if (alternate) {
+    const model = alternate.models.find((item) => item?.enabled)
+    await harness.invokeApi('updateAgentSessionModel', [session.id, alternate.id, model.id])
+    result.pushTestModel = { provider: alternate.provider, model: model.id }
+  } else result.pushTestModel = { usedSessionDefault: true }
+  const origin = new URL(options.url).origin
+  await harness.client.command('Browser.grantPermissions', { origin, permissions: ['notifications'] })
+  const entry = await findElement(harness.client, '开启通知', 'button')
+  await harness.client.evaluate("document.querySelector('[data-web-remote-notification-entry]')?.click()")
+  await waitUntil(harness.client, `document.querySelector('[data-web-remote-notification-entry]')?.disabled === true`, 30_000)
+  const subscribed = await harness.client.evaluate(`fetch('/api/push/subscription',{credentials:'include'}).then(r=>r.json())`)
+  const browserSubscription = await harness.client.evaluate(`navigator.serviceWorker.ready.then(r=>r.pushManager.getSubscription().then(s=>({registered:!!s,endpointHost:s?new URL(s.endpoint).host:null})))`)
+  result.pushSubscription = { serverRegistered: subscribed.subscribed === true, browser: browserSubscription, permission: await harness.client.evaluate('Notification.permission'), entry }
+  if (!result.pushSubscription.serverRegistered || !browserSubscription.registered) throw new Error(`Push subscription registration failed: ${JSON.stringify(result.pushSubscription)}`)
+
+  const prompt = '只回复 pong'
+  await harness.inputAndSend(prompt)
+  await harness.client.evaluate(`fetch('/api/push/presence',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:null,visible:false})})`)
+  await harness.navigate('/app/')
+  const sessionUrl = `/api/sessions/${encodeURIComponent(session.id)}/messages?limit=200`
+  const deadline = Date.now() + 90_000
+  let reply = false; let notifications = []
+  while (Date.now() < deadline) {
+    const state = await harness.client.evaluate(`Promise.all([fetch(${quoteJs(sessionUrl)},{credentials:'include'}).then(r=>r.json()),navigator.serviceWorker.ready.then(r=>r.getNotifications().then(ns=>ns.map(n=>({title:n.title,body:n.body,sessionId:n.data?.sessionId}))))])`)
+    const messages = state?.[0] ?? []
+    reply = messages.some((message) => message?.role === 'assistant' && JSON.stringify(message).toLowerCase().includes('pong'))
+    notifications = state?.[1] ?? []
+    if (reply && notifications.some((item) => item.sessionId === session.id)) break
+    await delay(500)
+  }
+  result.pushDelivery = { assistantReplied: reply, notifications, received: notifications.some((item) => item.sessionId === session.id) }
+  result.screenshots.push(await harness.screenshot('web-push-result'))
+  if (!result.pushDelivery.received) throw new Error(`No Web Push notification received within 90s: ${JSON.stringify(result.pushDelivery)}`)
+}
+
 async function runSmoke(harness, options, result) {
   result.steps.push({ name: 'load', ok: true, url: new URL('/app/', options.url).toString() })
   const title = `web-remote-harness-smoke-${Date.now()}`
@@ -874,6 +916,7 @@ async function main() {
     result.loadMetrics = { first: paired.firstAppLoad, second: secondAppLoad }
     result.sessionManifestBefore = await harness.readSessionManifest()
     if (options.suite === 'smoke') await runSmoke(harness, options, result)
+    else if (options.suite === 'push') await runPush(harness, options, result)
     else if (options.suite === 'recovery') await runRecovery(harness, options, result)
     else if (options.suite === 'interactions') await runInteractions(harness, options, result)
     else if (options.suite === 'abort') await runAbort(harness, options, result)
@@ -900,7 +943,7 @@ async function main() {
     }
     else if (options.suite === 'desktop-admin-denied') {
       if (options.width < 768 || options.height < 600) throw new Error('desktop-admin-denied 需要桌面视口，例如 1280×800')
-      const channels = ['web-remote:admin-get', 'web-remote:admin-save', 'web-remote:admin-pair', 'web-remote:admin-revoke']
+      const channels = ['web-remote:admin-get', 'web-remote:admin-save', 'web-remote:admin-pair', 'web-remote:admin-revoke', 'web-remote:admin-push-test', 'web-remote:admin-push-delete']
       result.desktopAdminDenied = { mobileViewport: await harness.client.evaluate('window.matchMedia("(max-width: 767px)").matches'), visible: await harness.client.evaluate('document.body.innerText.includes("手机访问")'), denied: [] }
       result.pwaResources = await harness.client.evaluate(`(async()=>{const paths=['/manifest.webmanifest','/icon-192.svg','/icon-512.svg'];const resources=[];for(const path of paths){const response=await fetch(path,{credentials:'omit'});resources.push({path,status:response.status,contentType:response.headers.get('content-type')})}const manifest=await fetch('/manifest.webmanifest',{credentials:'omit'}).then((response)=>response.json());return {resources,manifest:{name:manifest.name,short_name:manifest.short_name,start_url:manifest.start_url,display:manifest.display,icons:manifest.icons?.map((icon)=>({sizes:icon.sizes,type:icon.type}))}}})()`)
       if (result.pwaResources.resources.some((item) => item.status !== 200) || result.pwaResources.manifest.name !== 'Proma' || result.pwaResources.manifest.short_name !== 'Proma' || result.pwaResources.manifest.display !== 'standalone' || result.pwaResources.manifest.icons?.map((item) => item.sizes).join(',') !== '192x192,512x512') throw new Error(`PWA 公共资源/manifest 验证失败: ${JSON.stringify(result.pwaResources)}`)

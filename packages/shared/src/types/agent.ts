@@ -617,6 +617,7 @@ export type AgentEvent =
 
 /** Proma 内部事件类型 */
 export type PromaEvent =
+  | { type: 'web_remote_push_error'; message: string }
   | { type: 'permission_request'; request: PermissionRequest }
   | { type: 'permission_resolved'; requestId: string; behavior: 'allow' | 'deny' }
   | { type: 'ask_user_request'; request: AskUserRequest }

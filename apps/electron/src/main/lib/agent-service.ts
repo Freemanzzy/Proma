@@ -296,6 +296,7 @@ export async function runAgent(
   try {
     await orchestrator.sendMessage(input, {
       onError: (error, opts) => {
+        eventBus.emit(input.sessionId, { kind: 'proma_event', event: { type: 'web_remote_push_error', message: String(error) } })
         const target = streamRoutes.getTargetIfOwner(input.sessionId, route.ownerId)
         if (target) {
           target.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
@@ -424,6 +425,7 @@ export async function runAgentHeadless(
     await orchestrator.sendMessage(runInput, {
       onError: (error, opts) => {
         callbacks.onError(error)
+        eventBus.emit(runInput.sessionId, { kind: 'proma_event', event: { type: 'web_remote_push_error', message: String(error) } })
         const target = route
           ? streamRoutes.getTargetIfOwner(runInput.sessionId, route.ownerId)
           : undefined

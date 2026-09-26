@@ -16,7 +16,7 @@ mock.module('../agent-service', () => ({
   stopAgent: () => {},
 }))
 mock.module('../agent-session-manager', () => ({
-  getAgentSessionMeta: () => ({ id: 's-1', title: '测试', workspaceId: 'ws-1', updatedAt: 1, channelId: 'c-1' }),
+  getAgentSessionMeta: (id: string) => id === 's-1' ? ({ id: 's-1', title: '测试', workspaceId: 'ws-1', updatedAt: 1, channelId: 'c-1' }) : undefined,
   getAgentSessionSDKMessages: () => Array.from({ length: 1_200 }, (_, index) => ({ type: 'user', uuid: String(index), content: `message-${index}` })),
   listAgentSessions: () => [{ id: 's-1', title: '测试', workspaceId: 'ws-1', updatedAt: 1 }],
 }))
@@ -52,7 +52,7 @@ beforeAll(async () => {
   for (const source of webPreloadSourcePaths) writeFileSync(source, 'source')
   writeFileSync(webPreloadPath, 'window.__PRELOAD__=true;'.repeat(200))
   writeFileSync(join(rendererDir, 'assets', 'main-12345678.js'), 'console.log("cached");'.repeat(200))
-  server = new WebRemoteServer({ config, auth, rendererDir, webPreloadPath, webPreloadSourcePaths, buildWebPreload: () => {
+  server = new WebRemoteServer({ config, auth, rendererDir, pushDataDir: mkdtempSync(join(tmpdir(), 'proma-web-remote-push-server-')), webPreloadPath, webPreloadSourcePaths, buildWebPreload: () => {
     if (!allowPreloadRebuild) return { success: false, error: 'test rebuild disabled' }
     writeFileSync(webPreloadPath, 'window.__PRELOAD_RECOVERED__=true;'.repeat(200))
     return { success: true }
@@ -98,6 +98,33 @@ describe('WebRemoteServer loopback integration', () => {
     })
     expect(received.isBinary).toBe(false)
     expect(JSON.parse(received.text).type).toBe('ready')
+  })
+
+  test('Service Worker 路由公开且不包含数据；订阅登记必须鉴权并绑定当前设备', async () => {
+    const sw = await fetch(`http://127.0.0.1:${port}/app/sw.js`)
+    const script = await sw.text()
+    expect(sw.status).toBe(200)
+    expect(sw.headers.get('service-worker-allowed')).toBe('/app/')
+    expect(script).toContain('skipWaiting')
+    expect(script).toContain('clients.claim')
+    expect(script).not.toContain('push-subscriptions')
+    const noAuth = await fetch(`http://127.0.0.1:${port}/api/push/subscription`, { method: 'POST', headers: { Origin: 'https://proma.example', 'Content-Type': 'application/json' }, body: JSON.stringify({ subscription: { endpoint: 'https://push.example/x', keys: { auth: 'a', p256dh: 'b' } } }) })
+    expect(noAuth.status).toBe(401)
+    const headers = { Cookie: cookie, Origin: 'https://proma.example', 'Tailscale-User-Login': 'lee@example.com', 'Content-Type': 'application/json' }
+    const key = await fetch(`http://127.0.0.1:${port}/api/push/key`, { headers })
+    expect(key.status).toBe(200)
+    expect(await key.json()).toHaveProperty('publicKey')
+    const registered = await fetch(`http://127.0.0.1:${port}/api/push/subscription`, { method: 'POST', headers, body: JSON.stringify({ label: 'test', subscription: { endpoint: 'https://push.example/test', keys: { auth: 'auth', p256dh: 'p256dh' } } }) })
+    expect(registered.status).toBe(201)
+    expect(await registered.json()).toEqual({ subscribed: true })
+    const presence = await fetch(`http://127.0.0.1:${port}/api/push/presence`, { method: 'POST', headers, body: JSON.stringify({ sessionId: 's-1', visible: true }) })
+    expect(presence.status).toBe(204)
+    const forbiddenPresence = await fetch(`http://127.0.0.1:${port}/api/push/presence`, { method: 'POST', headers, body: JSON.stringify({ sessionId: 'outside-session', visible: true }) })
+    expect(forbiddenPresence.status).toBe(404)
+    const removed = await fetch(`http://127.0.0.1:${port}/api/push/subscription`, { method: 'DELETE', headers })
+    expect(removed.status).toBe(200)
+    const afterRemoval = await fetch(`http://127.0.0.1:${port}/api/push/subscription`, { headers })
+    expect(await afterRemoval.json()).toEqual({ subscribed: false })
   })
 
   test('受信 Tailnet 设备的 WS 升级与连接后再次鉴权均通过', async () => {

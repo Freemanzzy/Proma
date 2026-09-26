@@ -354,3 +354,16 @@ python3 scripts/personal/import-proma-backup.py \\
 - 用户真机验收通过：文件预览、软键盘不遮挡、添加到主屏幕（standalone）。B1 附件此前已通过。
 - 父会话复核修复：桌面“手机访问”管理 IPC 原仅接受 `file://` 渲染页，开发实例主窗口来自本地 Vite 服务，导致桌面操作全部被拒；已放行开发服务来源（桥接调用 senderFrame 为 null 仍被拒，且通道在远程分级为 denied）。
 - 合并到 `personal`。
+
+## 2026-09-26: 手机完整客户端 C1（Web Push）
+
+- Web Push 使用成熟库 `web-push@3.6.7`（MPL-2.0；安装包约 180 KB），由库实现 RFC 8291/8292 加密；代理使用其原生 `proxy` 选项，优先读取开发实例既有有效代理设置，再回退到代理环境变量或 `http://127.0.0.1:7897`。推送失败最多重试一次，端点返回 404/410 时删除订阅。
+- VAPID key 首次在开发实例数据目录 `web-remote/vapid.json` 生成，目录与 key 为 0700/0600；按设备保存的订阅在 `web-remote/push-subscriptions.json`，0600、原子替换。没有加入密钥到 Git，也没有改 Web Remote 配置值。
+- 仅对当前工作区授权会话的运行完成/失败、权限审批、AskUserQuestion、ExitPlanMode 与 automation 终态发中文推送；标题含会话标题，正文使用安全固定摘要并限制至 120 字。相同会话/事件 30 秒去重；设备若在手机端可见且正打开该会话则静默，桌面状态不参与静默判定。通知点击打开 `/app/?session=...`，注入层切换至会话。
+- `/app/sw.js` 是公开、固定且不含数据的脚本；执行 `skipWaiting`/`clients.claim`、push 与 notificationclick，不缓存页面，不拦截 `/api/*` 或 WS。`/app/` CSP 新增 `worker-src 'self'`。订阅/状态 API 均要求认证，订阅只能写入/删除当前设备记录，presence 会校验会话授权。
+- 注入层提供“开启通知”按钮；iOS 非 standalone 会提示先添加到主屏幕。桌面“手机访问”显示订阅状态，可发送测试通知、删除订阅。新增 `web-remote:admin-push-test` 与 `web-remote:admin-push-delete` 两个 IPC，均为 denied 并沿用 `assertDesktop`；IPC 登记分级覆盖率仍为 100%（invoke=370、event=8）。新增 HTTP 路由清单覆盖 6 个新增路径。
+- 验证：typecheck、Web Remote/设置定向测试通过；新增 push、HTTP 鉴权与 service worker 测试覆盖摘要截断、30 秒去重、前台静默、工作区拒绝、410 清理、失败重试、订阅接口鉴权及 SW 公共路由；新增 harness guard 单测通过。全量 `bun test` 为 541 pass / 5 fail / 1 error（546 tests）；与既有基线 534/5/1 相比增加 7 个通过，无新增失败/错误。既有失败仍为 Electron dialog/shell mock、OAuth proxy scope、proxy-settings export、planning-manager Electron binary 问题。
+- `build:main`、`build:renderer`、`build:web-preload` 通过；renderer 构建仍有仓库原有大 chunk 警告。版本保持 `0.19.57`。
+- Android Chrome headless 实测：CDP 授权通知，PushManager 真实订阅（端点为 FCM），服务端订阅登记成功；Agent 因开发实例 ChatGPT OAuth 登录失效而产生失败事件，服务端推送请求获得端点 HTTP 201，Service Worker 收到并展示与本次 harness 会话对应的失败通知。此轮未验证正常 pong 回复完成通知；双 UA Android/iPhone smoke 均完成页面加载与会话打开，但 pong 验证因同一 ChatGPT OAuth 失效未通过。真实桌面 IPC“发送测试通知”目前只通过订阅 store 定向单测验证，不记为桌面 E2E 已通过；iPhone Web Push 真机验收仍待用户进行。
+- 清理：harness 临时设备均撤销、专用 harness 会话均由脚本删除；会话清单中既有 ID/标题/权限模式前后未变；Chrome 进程退出、profile 删除，`/tmp/proma-mobile-chrome-*` 为 0；开发订阅文件最终 0 条。保留本地 VAPID key 以免重建用户订阅所需密钥。未改 `~/.proma-dev/web-remote/config.json`，没有改 Tailscale、官方版或用户手机。
+- 真机开启与测试：Android Chrome 或 iPhone Safari 先打开 `/app/` 并“添加到主屏幕”；iPhone 必须从主屏幕启动独立模式。登录后在移动顶栏点“开启通知”并允许系统通知。随后在桌面“设置 → 远程连接 → 手机访问 → 通知订阅”检查设备状态，点“发送测试通知”；会话运行结束/失败、权限请求、提问或计划审批时会收到对应通知。若手机正在前台打开同一会话，该设备按规则静默。
