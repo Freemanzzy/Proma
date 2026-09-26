@@ -158,6 +158,11 @@ export class WebRemoteAuth {
     this.devices = readJson<DeviceFile>(join(dataDir, 'devices.json'), { version: 1, devices: [] })
   }
 
+  /** Data directory this auth instance persists to; other stores must reuse it. */
+  getDataDir(): string {
+    return this.dataDir
+  }
+
   getConfig(): WebRemoteConfig {
     return this.config
   }
