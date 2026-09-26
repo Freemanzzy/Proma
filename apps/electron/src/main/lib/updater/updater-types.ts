@@ -6,6 +6,7 @@
 
 /** 更新状态 */
 export type UpdateStatus =
+  | { status: 'managed' }
   | { status: 'idle' }
   | { status: 'checking' }
   | { status: 'available'; version: string; releaseNotes?: string }

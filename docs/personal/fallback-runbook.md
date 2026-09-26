@@ -151,11 +151,21 @@ export PATH="$HOME/.bun/bin:$PATH"
 bun install
 bun run typecheck
 bun test                                     # 对照 PERSONAL.md 记录的基线失败数，不得新增
-# 打包与安装使用仓库中的个人版脚本（切换后提供），例如：
-# bash scripts/personal/package-personal.sh && bash scripts/personal/install-update.sh
+# 先在仓库目录打包（macOS arm64 目录包；使用 ad-hoc 签名，不需要 Apple Developer 证书）：
+# ad-hoc 不是开发者身份签名，也不包含公证；分发到其他机器时 macOS 可能要求用户在系统设置中手动允许打开。
+bash scripts/personal/package-personal.sh
+# 安装前核对新包的 personal-build.json；安装脚本会自动备份数据并校验：
+bash scripts/personal/install-update.sh "apps/electron/out/mac-arm64/Proma.app"
+# 仅在 /tmp 的假应用目录与临时数据目录演练；绝不对正式目录做 dry-run 以外测试：
+bash scripts/personal/install-update.sh /tmp/fake/Proma.app --apps-dir /tmp/apps --data-dir /tmp/promadata --backup-root /tmp/promabackups --dry-run
+# 完整性校验可接收目录或 zip；按需重复传入 glob 排除项：
+python3 scripts/personal/verify-backup.py "$HOME/.proma" "/path/to/backup.zip"
 ```
 
 - 不要在 `personal` 分支上 `reset --hard` 或强推；在 `recover/*` 分支修复，验证通过后请用户确认再合并。
+- `scripts/personal/package-personal.sh` 负责安装依赖、typecheck、基线测试、全部 Electron 构建及 arm64 目录包；产物仅写入仓库 `apps/electron/out/`，不启动、不安装。
+- `scripts/personal/install-update.sh NEW_APP` 默认安装到 `/Applications/Proma.app` 并备份 `~/.proma`；只可在隔离目录用 `--apps-dir`、`--data-dir`、`--backup-root` 演练。`--dry-run` 只核验 personal 标记和打印计划；`--simulate-health-failure --test-mode` 用于隔离回滚演练。脚本不强杀进程，不自动还原数据。
+- `python3 scripts/personal/verify-backup.py SRC BACKUP` 对比目录或 zip 的文件内容、大小、SHA-256、符号链接目标和权限；可多次传 `--exclude GLOB`。
 - 修复后在 `PERSONAL.md` 末尾追加 `## YYYY-MM-DD: 故障回退记录`（原因、操作、结果）。
 
 ---

@@ -36,8 +36,8 @@
 
 个人版保留上游功能源码与旧数据兼容路径；用户选择保留 Chat 模式；仅对下列入口、初始化和打包项做精简，并维护本地脚本和文档区块：
 
-- `scripts/personal/import-proma-backup.py`：从备份 zip 导入到隔离目录，改写 Proma 自身索引路径，停用 Automation/桥接并提供核验。
-- `scripts/personal/dev.sh`：检查官方版与个人开发版进程隔离后，以 `~/.proma-dev` 启动开发版。
+- `scripts/personal/import-proma-backup.py`：从备份 zip 导入到隔离目录，按字节流式改写 Proma 路径，停用 Automation/桥接并核验内容完整性。
+- `scripts/personal/package-personal.sh`、`install-update.sh`、`verify-backup.py`：个人版打包、备份校验与安装/应用回滚。
 - `README.md` 与 `README.en.md` 顶部的 `<!-- personal-fork:start -->` / `<!-- personal-fork:end -->` 独立区块：标明个人 Fork、基线和主要改动，便于读者识别且便于后续同步。
 - 钉钉、Slack 桥接：设置入口隐藏；桥接源码与 IPC 保留以兼容旧数据，但启动注册明确禁止自动连接。
 - GitHub Copilot 订阅渠道：从新增渠道类型列表隐藏；编辑已有 Copilot 渠道时仍保留选项，不影响旧数据使用。
@@ -57,7 +57,7 @@ python3 scripts/personal/import-proma-backup.py \\
   --target ~/.proma-dev --verify-only
 ```
 
-导入过程先在 target 同级临时目录完成，再原子改名；已有非空 target 会整体改名为带时间戳的 `.bak-*`，不删除。排除项及原因：`cloud-auth.json`、`sync-state.json`（避免个人版复用官方云登录刷新令牌或触发同步）、`logs/`、`fc-bridge/`、`fc-bridge-group/`（由官方版外部进程使用），以及文件名含 `.bak` 的备份文件。UTF-8 文本中的正式 `~/.proma` 路径会改写为 target；`agent-workspaces/*/workspace-files/` 保持原样。超过 50 MB 或非 UTF-8 文件不改写，并记录在 manifest 中；SQLite 的 `planning.db` 通过标准库 sqlite3 只改写导入副本中的文本字段。
+导入过程先在 target 同级临时目录完成，再原子改名；已有非空 target 会整体改名为带时间戳的 `.bak-*`，不删除。排除项及原因：`cloud-auth.json`、`sync-state.json`（避免个人版复用官方云登录刷新令牌或触发同步）、`logs/`、`fc-bridge/`、`fc-bridge-group/`（由官方版外部进程使用），以及文件名含 `.bak` 的备份文件。UTF-8 文本中的正式 `~/.proma` 路径会改写为 target；`agent-workspaces/*/workspace-files/` 保持原样。超过 50 MB 与非 UTF-8 文件均按字节流式改写路径，不因大小或编码跳过；导入 manifest 保存改写后文件的 SHA-256/大小及符号链接目标，导入结束自动做完整性、安全与配置校验。SQLite 的 `planning.db` 通过标准库 sqlite3 只改写导入副本中的文本字段。备份目录或 zip 的比对命令为 `python3 scripts/personal/verify-backup.py SRC BACKUP`。
 
 为避免重复执行，导入会把全部 Automation 设为 `active=false`，把 `feishu.json` 的 `bots[].enabled` 和 `wechat.json` 的 `enabled` 设为 false，并按源码合法值将 `settings.json` 的 `feishuSessionMirror.mode` 设为 `off`。源码依据：`apps/electron/src/main/lib/settings-service.ts` 默认/回退值为 `{ mode: 'off' }`，`apps/electron/src/main/index.ts` 仅在桥接配置 enabled 且凭据存在时自动启动飞书、钉钉、Slack、微信 Bridge；导入备份未发现独立的钉钉或 Slack 配置文件。导入前 active Automation 的 id/name 会保存到 `<target>/.personal-migration/automations-active-before.json`，完整统计与源 zip SHA-256 在 `manifest.json`。
 
@@ -392,3 +392,11 @@ python3 scripts/personal/import-proma-backup.py \\
 - 新增 `docs/personal/fallback-runbook.md`：供 Claude Code 在个人版不可用时诊断、回退应用、恢复数据、从源码重建。
 - 父会话发现 C1 的服务端默认把推送密钥写到 `getWebRemoteDataDir()`，在测试环境会解析为官方 `~/.proma`，留下 `~/.proma/web-remote/vapid.json`（已移至 /tmp，官方版不读取该文件）；已改为复用 auth 数据目录（`001aada3`），全量测试后确认不再生成。
 - `proma-backup` Skill 的 zip 改为 `-y` 保留符号链接（`~/.proma` 内约 50 个 Skill 链接，此前会被展开成副本）。
+
+## 2026-09-26: 切换准备 P1–P3
+
+- P1：新增包内 `personal-build.json`（personal、版本、commit、builtAt）；个人版启动时跳过 electron-updater 初始化、官方检查/下载/安装与空闲安装调度，设置页显示“个人版由维护流程更新”。个人构建 afterPack 清除可能由 electron-builder 生成的 `app-update.yml`；官方构建不写个人标记。`package-personal.sh` 执行依赖安装、typecheck、受基线约束的全测、完整 Electron build、macOS arm64 目录打包与 ad-hoc 签名。
+- P1 Web Remote：个人版打包标记允许正式数据目录仅由 `web-remote/config.json` 的 `enabled` 控制启动，不再要求环境变量；开发实例仍需既有环境开关，官方打包版无论环境 override 均拒绝。桌面管理 IPC 仅允许个人版正式包 `file://` 渲染页或开发实例桌面页。
+- P2：新增 `install-update.sh`，参数化应用目录、数据目录与备份根目录，支持超时等待（不杀进程）、cp -a 备份 + 完整性校验、previous 轮换、启动/健康检查和应用自动回滚；不自动还原用户数据。`--dry-run` 不写入，`--test-mode` 用于隔离假包成功路径，`--simulate-health-failure` 用于回滚演练。
+- P3：新增 `verify-backup.py`，逐文件比较文件数、大小、SHA-256、类型/链接目标与权限，支持目录/zip 和重复 `--exclude`。导入器改为字节流式替换 >50 MB 与非 UTF-8 文件中的 `.proma` 路径，保留 zip 符号链接；SQLite 仍仅修改导入副本。导入完成后生成内容完整性清单并运行完整性及原安全/配置校验。此前 2026-09-24 记录的“大文件/非 UTF-8 跳过”是已修复的旧状态。
+- 本批只修改源码、脚本和文档；没有切换安装，没有接触 `/Applications/Proma.app`、`~/.proma` 或官方进程。验证与最终产物、提交信息待本节后续补录。

@@ -20,7 +20,7 @@
 | 预演数据 | `~/.proma-dev`（开发实例，可用于预演更新；手机访问配置在其 `web-remote/`） |
 | 更新前自动备份 | `~/.proma-switch-backups/<时间戳>/` |
 | 外置硬盘完整备份 | `/Volumes/Lexar ssd 2tb/proma 备份/*.zip`（未挂载时 `diskutil list` + `diskutil mount <设备>`） |
-| 个人版脚本 | `scripts/personal/`（开发实例 `dev.sh`、导入 `import-proma-backup.py`、打包与安装脚本、手机回归 `mobile-harness.mjs`、`web-remote.sh`） |
+| 个人版脚本 | `scripts/personal/`（开发实例 `dev.sh`、导入 `import-proma-backup.py`、完整性校验 `verify-backup.py`、打包 `package-personal.sh`、安装更新 `install-update.sh`、手机回归 `mobile-harness.mjs`、`web-remote.sh`） |
 | 周检任务 | Proma 内定时任务“Proma 个人版 · 官方版本周检（只读）”，每周一 09:30 生成报告 |
 
 ## 3. 你的职责
@@ -50,11 +50,12 @@
 
 1. `bun install` 成功；`patches/` 中的补丁已应用。
 2. `bun run typecheck` 通过；`bun test` 失败/错误数不超过 `PERSONAL.md` 记录的基线（新增失败逐条说明）。
-3. `apps/electron` 下 `build:main`、`build:agent-runtime`、`build:preload`、`build:renderer`、`build:web-preload` 全部通过。
-4. 在开发实例（`PROMA_WEB_REMOTE=1 bash scripts/personal/dev.sh`）预演：日志中 “full-ui 分级覆盖率 100%”；上游新增 IPC 通道已在 `apps/electron/src/main/lib/web-remote/full-ui/channel-policy.ts` 分级；渠道清单（名称/provider/enabled）与更新前一致；真实对话一次；EgoBrowser 调用一次。
-5. 手机回归：`bun scripts/personal/mobile-harness.mjs --url <手机访问地址> --suite smoke --user-agent android`（及 `iphone`、`attachments`）；地址见 `~/.proma-dev/web-remote/config.json` 的 `allowedOrigin`。
-6. 数据格式：比较上游 diff 中的 `CONFIG_VERSION`、`INDEX_VERSION`、`PLANNING_SCHEMA_VERSION`、`user_version` 等变化，写入报告。
-7. `PERSONAL.md`：更新基线、同步记录表，末尾追加 `## YYYY-MM-DD: ...` 记录。
+3. `apps/electron` 下 `build:main`、`build:agent-runtime`、`build:terminal-runtime`、`build:preload`、`build:renderer`、`build:web-preload`、`build:cli` 与 native helpers 全部通过。
+4. 个人版实际打包使用 `bash scripts/personal/package-personal.sh`；脚本生成 macOS arm64 目录包与 ad-hoc 签名，不启动产物。更新使用 `bash scripts/personal/install-update.sh <Proma.app>`，默认目标为 `/Applications` 与 `~/.proma`，真实执行前需确保用户明确授权；演练必须传临时 `--apps-dir`、`--data-dir`、`--backup-root`。完整性核验：`python3 scripts/personal/verify-backup.py SRC BACKUP`。
+5. 在开发实例（`PROMA_WEB_REMOTE=1 bash scripts/personal/dev.sh`）预演：日志中 “full-ui 分级覆盖率 100%”；上游新增 IPC 通道已在 `apps/electron/src/main/lib/web-remote/full-ui/channel-policy.ts` 分级；渠道清单（名称/provider/enabled）与更新前一致；真实对话一次；EgoBrowser 调用一次。
+6. 手机回归：`bun scripts/personal/mobile-harness.mjs --url <手机访问地址> --suite smoke --user-agent android`（及 `iphone`、`attachments`）；地址见 `~/.proma-dev/web-remote/config.json` 的 `allowedOrigin`。
+7. 数据格式：比较上游 diff 中的 `CONFIG_VERSION`、`INDEX_VERSION`、`PLANNING_SCHEMA_VERSION`、`user_version` 等变化，写入报告。
+8. `PERSONAL.md`：更新基线、同步记录表，末尾追加 `## YYYY-MM-DD: ...` 记录。
 
 ## 7. 汇报
 

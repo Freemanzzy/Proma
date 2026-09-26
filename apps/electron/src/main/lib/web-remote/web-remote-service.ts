@@ -1,4 +1,8 @@
+import { app } from 'electron'
 import { getConfigDirName } from '../config-paths'
+import { isPersonalBuild } from '../personal-build'
+import { isWebRemoteActivationAllowed } from './web-remote-policy'
+export { isWebRemoteActivationAllowed } from './web-remote-policy'
 import { getEffectiveProxyUrl } from '../proxy-settings-service'
 import { readWebRemoteConfig, getWebRemoteConfigPath, getWebRemoteDataDir, WebRemoteAuth, type WebRemoteConfig } from './web-remote-auth'
 import { WebRemoteServer } from './web-remote-server'
@@ -9,7 +13,14 @@ export { prepareWebRemoteFullUi } from './full-ui/prepare'
 let server: WebRemoteServer | null = null
 
 export function isWebRemoteEnabled(config: WebRemoteConfig): boolean {
-  return process.env.PROMA_WEB_REMOTE === '1' && config.enabled === true
+  return isWebRemoteActivationAllowed({
+    enabled: config.enabled === true,
+    personalBuild: isPersonalBuild(),
+    packaged: app.isPackaged,
+    configDirName: getConfigDirName(),
+    allowProd: process.env.PROMA_WEB_REMOTE_ALLOW_PROD === '1',
+    envEnabled: process.env.PROMA_WEB_REMOTE === '1',
+  })
 }
 
 // prepareWebRemoteFullUi lives in full-ui/prepare.ts to keep service tests Electron-free.
@@ -18,6 +29,12 @@ export function isWebRemoteConfigDirAllowed(configDirName: string, allowProd = p
 }
 
 export function isWebRemoteRuntimeAllowed(): boolean {
+  const personal = isPersonalBuild()
+  if (app.isPackaged) {
+    if (personal) return true
+    console.error('[Web Remote] 已拒绝：非个人版打包应用不允许启用手机访问。')
+    return false
+  }
   if (isWebRemoteConfigDirAllowed(getConfigDirName())) return true
   console.error('[Web Remote] 已拒绝：仅允许在 PROMA_DEV=1 的个人开发实例运行。若明确确认风险，可设置 PROMA_WEB_REMOTE_ALLOW_PROD=1。')
   return false

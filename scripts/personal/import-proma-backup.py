@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import tempfile
@@ -126,6 +127,56 @@ def replacement_pattern() -> re.Pattern[str]:
     return re.compile(
         rf"(?:{home}/\.proma|~/\.proma|\$HOME/\.proma|<HOME>/\.proma)(?![-A-Za-z0-9])"
     )
+
+
+def replacement_pattern_bytes() -> re.Pattern[bytes]:
+    home = re.escape(os.fsencode(str(Path.home())))
+    return re.compile(rb"(?:" + home + rb"/\.proma|~/\.proma|\$HOME/\.proma|<HOME>/\.proma)(?![-A-Za-z0-9])")
+
+
+def stream_rewrite(source: Any, destination: Any, pattern: re.Pattern[bytes], target: bytes) -> int:
+    """Replace path prefixes in bounded memory, including tokens split across blocks."""
+    token_lengths = [len(os.fsencode(str(Path.home()))) + len(b"/.proma"), len(b"~/.proma"), len(b"$HOME/.proma"), len(b"<HOME>/.proma")]
+    overlap = max(token_lengths) + 2
+    carry = b""
+    replacements = 0
+    while True:
+        block = source.read(1024 * 1024)
+        combined = carry + block
+        if not block:
+            replaced, count = pattern.subn(target, combined)
+            destination.write(replaced)
+            replacements += count
+            return replacements
+        safe_end = max(0, len(combined) - overlap)
+        cursor = 0
+        for match in pattern.finditer(combined):
+            if match.start() >= safe_end:
+                break
+            destination.write(combined[cursor:match.start()])
+            destination.write(target)
+            cursor = match.end()
+            replacements += 1
+        flush_end = max(safe_end, cursor)
+        destination.write(combined[cursor:flush_end])
+        carry = combined[flush_end:]
+
+
+def stream_copy(source: Any, destination: Any) -> None:
+    while True:
+        block = source.read(1024 * 1024)
+        if not block:
+            return
+        destination.write(block)
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
 
 
 def active_automations(data: Any) -> list[dict[str, str]]:
@@ -246,6 +297,34 @@ def rewrite_planning_db(db_path: Path, target: Path, pattern: re.Pattern[str], s
         bucket["replacements"] += replacements
 
 
+def build_import_integrity(root: Path) -> dict[str, Any]:
+    entries: dict[str, Any] = {}
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root).as_posix()
+        if relative == ".personal-migration" or relative.startswith(".personal-migration/"):
+            continue
+        info = path.lstat()
+        if stat.S_ISLNK(info.st_mode):
+            entries[relative] = {"type": "symlink", "target": os.readlink(path)}
+        elif stat.S_ISREG(info.st_mode):
+            entries[relative] = {"type": "file", "size": info.st_size, "sha256": file_sha256(path)}
+        elif stat.S_ISDIR(info.st_mode):
+            entries[relative] = {"type": "directory"}
+    return entries
+
+
+def verify_import_integrity(root: Path, expected: dict[str, Any]) -> bool:
+    actual = build_import_integrity(root)
+    if actual == expected:
+        print(f"IMPORT INTEGRITY PASS entries={len(actual)}")
+        return True
+    print(f"IMPORT INTEGRITY FAIL expected={len(expected)} actual={len(actual)}")
+    for name in sorted(expected.keys() | actual.keys()):
+        if expected.get(name) != actual.get(name):
+            print(f"INTEGRITY DIFF {name}")
+    return False
+
+
 def format_stats(stats: dict[str, Any]) -> None:
     print(f"archive_files={stats['archive_files']}")
     print(f"copied_files={stats['copied_files']}")
@@ -316,31 +395,23 @@ def import_backup(zip_path: Path, target: Path, replace: bool, dry_run: bool) ->
                     stats["excluded_files"] += 1
                     stats["excluded_by_reason"][reason] = stats["excluded_by_reason"].get(reason, 0) + 1
                     continue
-                raw = archive.read(info)
-                output = raw
+                output_path = temp_dir.joinpath(*parts) if not dry_run and temp_dir is not None else None
+                if output_path is not None:
+                    output_path.parent.mkdir(parents=True, exist_ok=True)
                 path_replacements = 0
-                if should_rewrite_path(parts):
-                    if info.file_size > MAX_REWRITE_BYTES:
-                        stats["skipped_over_50mb"] += 1
-                        stats["skipped_files"]["over_50mb"].append(info.filename)
-                    else:
-                        suffix = Path(parts[-1]).suffix.lower()
-                        extensionless_sdk_file = not suffix and parts[0] == "sdk-config"
-                        if suffix in TEXT_SUFFIXES or extensionless_sdk_file:
-                            try:
-                                text = raw.decode("utf-8")
-                            except UnicodeDecodeError:
-                                stats["skipped_non_utf8"] += 1
-                                stats["skipped_files"]["non_utf8"].append(info.filename)
-                            else:
-                                text, path_replacements = pattern.subn(str(target), text)
-                                output = text.encode("utf-8")
-                    # Binary files are copied unchanged.
                 name = json_name_for(parts)
                 actions: list[dict[str, str]] = []
-                if name and info.file_size <= MAX_REWRITE_BYTES:
+                mode = (info.external_attr >> 16) & 0o7777
+                if stat.S_ISLNK(info.external_attr >> 16):
+                    link_target = archive.read(info).decode("utf-8", errors="surrogateescape")
+                    if output_path is not None:
+                        os.symlink(link_target, output_path)
+                elif name and info.file_size <= MAX_REWRITE_BYTES:
+                    raw = archive.read(info)
+                    if should_rewrite_path(parts):
+                        raw, path_replacements = replacement_pattern_bytes().subn(os.fsencode(str(target)), raw)
                     try:
-                        data = json.loads(output.decode("utf-8"))
+                        data = json.loads(raw.decode("utf-8"))
                     except (UnicodeDecodeError, json.JSONDecodeError):
                         if name in KNOWN_CONFIGS:
                             fail(f"无法解析配置文件 {info.filename}")
@@ -350,7 +421,26 @@ def import_backup(zip_path: Path, target: Path, replace: bool, dry_run: bool) ->
                             active_before.extend(before)
                         data, actions = disable_json_config(name, data, disabled)
                         if actions:
-                            output = (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+                            raw = (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+                    if output_path is not None:
+                        output_path.write_bytes(raw)
+                        if mode and not stat.S_ISLNK(info.external_attr >> 16):
+                            output_path.chmod(mode)
+                elif output_path is not None:
+                    suffix = Path(parts[-1]).suffix.lower()
+                    extensionless_sdk_file = not suffix and parts[0] == "sdk-config"
+                    rewrite = should_rewrite_path(parts) and (suffix in TEXT_SUFFIXES or extensionless_sdk_file)
+                    with archive.open(info) as src, output_path.open("wb") as dst:
+                        if rewrite:
+                            path_replacements = stream_rewrite(src, dst, replacement_pattern_bytes(), os.fsencode(str(target)))
+                        else:
+                            stream_copy(src, dst)
+                    if stat.S_ISREG(info.external_attr >> 16) and mode:
+                        output_path.chmod(mode)
+                else:
+                    # Dry-run still consumes the entry in bounded memory to validate the zip stream.
+                    with archive.open(info) as src, open(os.devnull, "wb") as dst:
+                        stream_copy(src, dst)
                 if path_replacements:
                     stats["rewritten_files"] += 1
                     stats["path_replacements"] += path_replacements
@@ -359,10 +449,6 @@ def import_backup(zip_path: Path, target: Path, replace: bool, dry_run: bool) ->
                     bucket["files"] += 1
                     bucket["replacements"] += path_replacements
                 stats["copied_files"] += 1
-                if not dry_run and temp_dir is not None:
-                    output_path = temp_dir.joinpath(*parts)
-                    output_path.parent.mkdir(parents=True, exist_ok=True)
-                    output_path.write_bytes(output)
         if not dry_run and temp_dir is not None:
             rewrite_planning_db(temp_dir / "planning.db", target, pattern, stats)
         stats["active_before"] = active_before
@@ -375,8 +461,10 @@ def import_backup(zip_path: Path, target: Path, replace: bool, dry_run: bool) ->
             (migration / "automations-active-before.json").write_text(
                 json.dumps(active_before, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
             )
+            integrity = build_import_integrity(temp_dir)
             manifest = {
                 "source_zip_sha256": digest,
+                "integrity": integrity,
                 "imported_at": datetime.now(timezone.utc).isoformat(),
                 "target": str(target),
                 "excluded": {"files": sorted(EXCLUDED_FILES), "directories": sorted(EXCLUDED_DIRS), "filename_contains": ".bak", "counts": stats["excluded_by_reason"]},
@@ -391,6 +479,10 @@ def import_backup(zip_path: Path, target: Path, replace: bool, dry_run: bool) ->
             (migration / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             temp_dir.rename(target)
             temp_dir = None
+            if not verify_import_integrity(target, integrity):
+                fail("导入后完整性校验失败")
+            if verify_target(target) != 0:
+                fail("导入后安全/配置校验失败")
         return stats
     finally:
         if temp_dir is not None:
@@ -407,8 +499,11 @@ def verify_target(target: Path) -> int:
         re.compile(rb"<HOME>\\/.proma(?![-A-Za-z0-9])"),
     ]
     skipped_files: set[str] = set()
+    integrity_manifest: dict[str, Any] | None = None
     try:
         migration = json.loads((target / ".personal-migration" / "manifest.json").read_text(encoding="utf-8"))
+        if isinstance(migration.get("integrity"), dict):
+            integrity_manifest = migration["integrity"]
         skipped = migration.get("skipped", {}).get("files", {})
         skipped_files.update(str(item) for item in skipped.get("over_50mb", []))
         skipped_files.update(str(item) for item in skipped.get("non_utf8", []))
@@ -435,11 +530,22 @@ def verify_target(target: Path) -> int:
                 continue
             try:
                 with path.open("rb") as handle:
-                    data = handle.read()
+                    carry = b""
+                    overlap = len(str(Path.home()).encode()) + 12
+                    found = False
+                    while True:
+                        block = handle.read(1024 * 1024)
+                        if not block:
+                            break
+                        data = carry + block
+                        if any(pattern.search(data) for pattern in residual_patterns):
+                            found = True
+                            break
+                        carry = data[-overlap:]
             except OSError:
                 continue
-            if any(pattern.search(data) for pattern in residual_patterns):
-                residuals.append(str(relative))
+            if found:
+                residuals.append(str(relative) + " [" + ",".join(str(pattern.pattern) for pattern in residual_patterns if pattern.search(data)) + "]")
     checks.append(("no official .proma residual outside workspace-files", not residuals, ", ".join(residuals[:8])))
     automations_ok = False
     automation_detail = "missing or invalid"
@@ -488,6 +594,9 @@ def verify_target(target: Path) -> int:
     except (OSError, ValueError, AttributeError):
         pass
     checks.append(("feishuSessionMirror off", settings_ok, settings_detail))
+    if integrity_manifest is not None:
+        integrity_ok = verify_import_integrity(target, integrity_manifest)
+        checks.append(("imported files match integrity manifest", integrity_ok, "manifest entry verification"))
     for label, ok, detail in checks:
         print(f"{'PASS' if ok else 'FAIL'} {label}" + (f" ({detail})" if detail else ""))
     return 0 if all(ok for _, ok, _ in checks) else 1
