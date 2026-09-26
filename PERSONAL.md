@@ -439,3 +439,10 @@ python3 scripts/personal/import-proma-backup.py \\
   - `verify-backup.py` 读取 zip 时需对未设 UTF-8 标志的条目还原文件名（另开分支修复并补测试）。
   - `/Applications/Proma.failed-20260926-225616-72208.app` 保留，观察期后经用户确认移出。
   - 观察期（3–7 天）：定时任务成功率、飞书/微信桥、手机访问、`main.log`；fc-bridge 由用户在应用内重新配置；“Google 收录完成度监测（每周）”提示词改为只用 ego-browser（需用户确认）。观察期通过后 `Proma.previous.app` 移到 `~/.proma-switch-backups/`。
+
+## 2026-09-26: 切换收尾与 verify-backup zip 文件名修复
+
+- 收尾（用户同意）：官方版 `Proma.previous.app` 以 `ditto` 存档到外置硬盘 `official-Proma-0.19.58-20260926.app.zip`（244 MB，2,769 文件，`unzip -t` 无错误），应用本身观察期内仍留在 `/Applications`；官方更新缓存 `com.proma.app.ShipIt`、`cool.proma.app.ShipIt`、`@promaelectron-updater`（224 MB）移入 `~/.proma-switch-backups/updater-caches-20260926/`，未删除。
+- `verify-backup.py`：新增 `restore_filename()`，对未设置 0x800 标志的 zip 条目做 cp437→UTF-8 还原后再参与排除规则与比较；`archive.open()` 仍用原始 ZipInfo。`test-personal-scripts.py` 增加中文文件名 + 符号链接的 macOS `zip -r -y` 用例（校验通过、篡改后失败）；去掉修复时该用例失败，证明能捕获该问题。
+- 验证（主会话复跑）：`test-personal-scripts.py` 退出 0；用修复后的仓库脚本校验真实外置备份 `proma-backup-20260926-2250.zip` 对比安装前冻结目录备份 `20260926-225616-72208/proma`（`--preset proma-backup`，排除之后才迁入的 `web-remote/`）：20,750 / 20,750，missing/extra/mismatched 均 0，`BACKUP VERIFY PASS`。
+- 仍待办：观察期检查；fc-bridge 重配；“Google 收录完成度监测（每周）”提示词第 4、11 行改为只用 ego-browser（用户在应用内修改）；观察期后移出 `Proma.previous.app` 与 `Proma.failed-20260926-225616-72208.app`。
