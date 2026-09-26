@@ -35,6 +35,10 @@ const WEB_REMOTE_PNG_ICON_FILES: Readonly<Record<string, string>> = Object.freez
   '/icon-512-maskable.png': 'icon-512-maskable.png',
 })
 
+// /app/ 的 renderer index.html 本身没有 manifest/apple-touch-icon 等 head 标签（只有根配对页 / 有），
+// 导致「添加到主屏幕」在 Android/iOS 上读不到 manifest、拿不到新图标。渲染时补齐，与根页保持一致。
+const WEB_REMOTE_APP_HEAD_LINKS = '<link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Proma"><meta name="theme-color" content="#2563eb">'
+
 type StaticEncoding = 'br' | 'gzip'
 
 interface StaticCacheEntry {
@@ -553,6 +557,7 @@ export class WebRemoteServer {
     if (existing && existing.filePath === filePath && existing.mtimeMs === sourceStat.mtimeMs && existing.size === sourceStat.size) return existing
     const nonce = randomBytes(16).toString('base64url')
     let html = sourceBody.toString('utf8')
+    html = html.replace('</head>', `${WEB_REMOTE_APP_HEAD_LINKS}</head>`)
     html = html.replace(/<script>([\s\S]*?)<\/script>/, `<script nonce="${nonce}">$1</script>`)
     html = html.replace(/<script type="module"/, '<script src="/app/preload.js"></script><script type="module"')
     html = html.replace('</body>', renderWebRemoteMobilePatch().replaceAll('__PROMA_NONCE__', nonce) + '</body>')

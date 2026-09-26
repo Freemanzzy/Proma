@@ -52,7 +52,7 @@ beforeAll(async () => {
   cookie = `proma_web_remote=${paired.token}`
   rendererDir = mkdtempSync(join(tmpdir(), 'proma-web-remote-renderer-'))
   mkdirSync(join(rendererDir, 'assets'))
-  writeFileSync(join(rendererDir, 'index.html'), '<!doctype html><html><body><div id="root"></div><script type="module" src="./assets/main-12345678.js"></script></body></html>')
+  writeFileSync(join(rendererDir, 'index.html'), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module" src="./assets/main-12345678.js"></script></body></html>')
   webPreloadPath = join(rendererDir, '../web-remote/preload.js')
   mkdirSync(join(rendererDir, '../web-remote'), { recursive: true })
   webPreloadSourcePaths = [join(rendererDir, 'preload-source.ts'), join(rendererDir, 'shim-source.ts')]
@@ -178,6 +178,23 @@ describe('WebRemoteServer loopback integration', () => {
     const preload = await fetch(`http://127.0.0.1:${port}/app/preload.js`, { headers })
     expect(preload.status).toBe(200)
     expect(await preload.text()).toContain('window.__PRELOAD__=true;')
+  })
+
+  test('/app/ 注入 manifest 与 apple-touch-icon 等 head 标签（renderer 源 HTML 本身没有），且各自只出现一次', async () => {
+    const headers = { Cookie: cookie, 'Tailscale-User-Login': 'lee@example.com' }
+    const html = await (await fetch(`http://127.0.0.1:${port}/app/`, { headers })).text()
+    const manifestLink = '<link rel="manifest" href="/manifest.webmanifest">'
+    const appleTouchIconLink = '<link rel="apple-touch-icon" href="/apple-touch-icon.png">'
+    const faviconLink = '<link rel="icon" href="/icon.svg">'
+    expect(html).toContain(manifestLink)
+    expect(html).toContain(appleTouchIconLink)
+    expect(html).toContain(faviconLink)
+    expect(html.split(manifestLink)).toHaveLength(2)
+    expect(html.split(appleTouchIconLink)).toHaveLength(2)
+    expect(html.split(faviconLink)).toHaveLength(2)
+    expect(html).toContain('name="apple-mobile-web-app-capable" content="yes"')
+    expect(html).toContain('name="theme-color" content="#2563eb"')
+    expect(html.indexOf(manifestLink)).toBeLessThan(html.indexOf('</head>'))
   })
 
   test('preload 缺失且开发模式重建失败时返回中文错误页而非空白页面', async () => {
