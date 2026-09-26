@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { isDesktopAdminAllowed, isWebRemoteActivationAllowed } from './web-remote-policy'
+import { isDesktopAdminAllowed, isWebRemoteActivationAllowed, resolveWebRemoteIconDir } from './web-remote-policy'
 
 const enabled = { enabled: true, configDirName: '.proma', allowProd: false, envEnabled: false }
 
@@ -22,5 +22,12 @@ describe('Web Remote activation policy', () => {
     expect(isDesktopAdminAllowed({ personalPackaged: false, configDirName: '.proma', packaged: true, url: 'file:///Applications/Proma.app/index.html' })).toBe(false)
     expect(isDesktopAdminAllowed({ personalPackaged: false, configDirName: '.proma-dev', packaged: false, url: 'http://127.0.0.1:5173/settings' })).toBe(true)
     expect(isDesktopAdminAllowed({ personalPackaged: true, configDirName: '.proma', packaged: true, url: undefined })).toBe(false)
+  })
+
+  test('手机图标目录：安装包取 resourcesPath/web-remote，开发实例取源码树 resources/web-remote', () => {
+    expect(resolveWebRemoteIconDir({ packaged: true, resourcesPath: '/App/Contents/Resources', moduleDir: '/App/Contents/Resources/app.asar/dist' }))
+      .toBe('/App/Contents/Resources/web-remote')
+    expect(resolveWebRemoteIconDir({ packaged: false, resourcesPath: '/unused', moduleDir: '/repo/apps/electron/dist' }))
+      .toBe('/repo/apps/electron/resources/web-remote')
   })
 })

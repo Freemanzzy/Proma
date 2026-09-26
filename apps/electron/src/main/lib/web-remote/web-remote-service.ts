@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { getConfigDirName } from '../config-paths'
 import { isPersonalBuild } from '../personal-build'
-import { isWebRemoteActivationAllowed } from './web-remote-policy'
+import { isWebRemoteActivationAllowed, resolveWebRemoteIconDir } from './web-remote-policy'
 export { isWebRemoteActivationAllowed } from './web-remote-policy'
 import { getEffectiveProxyUrl } from '../proxy-settings-service'
 import { readWebRemoteConfig, getWebRemoteConfigPath, getWebRemoteDataDir, WebRemoteAuth, type WebRemoteConfig } from './web-remote-auth'
@@ -47,10 +47,12 @@ export async function startWebRemoteIfEnabled(): Promise<void> {
   if (server) return
   const ipcBridge = config.fullUi === true ? getWebRemoteIpcBridge() ?? undefined : undefined
   const configuredPushProxy = getConfigDirName() === '.proma-dev' ? await getEffectiveProxyUrl().catch(() => undefined) : undefined
+  const iconDir = resolveWebRemoteIconDir({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, moduleDir: __dirname })
   const candidate = new WebRemoteServer({
     config,
     auth: new WebRemoteAuth(config, getWebRemoteDataDir()),
     ipcBridge,
+    iconDir,
     ...(configuredPushProxy ? { pushProxyUrl: configuredPushProxy } : {}),
   })
   try {

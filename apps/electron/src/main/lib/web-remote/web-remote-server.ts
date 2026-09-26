@@ -16,6 +16,7 @@ import { WebRemoteAuth, expectedWebRemoteOrigin, makeAuthCookie, parseCookieHead
 import { WebRemoteEventHub } from './web-remote-events'
 import { toWebRemoteHistory, toWebRemotePermissionRequest, type WebRemoteEvent } from './web-remote-dto'
 import { getConfigDirName } from '../config-paths'
+import { resolveWebRemoteIconDir } from './web-remote-policy'
 import { renderWebRemoteIcon, renderWebRemoteManifest, renderWebRemoteStatic } from './web-remote-static'
 import type { WebRemoteIpcBridge } from './full-ui/web-remote-ipc'
 import { renderWebRemoteMobilePatch } from './full-ui/mobile-patch'
@@ -25,6 +26,18 @@ const MAX_BODY_BYTES = 100_000
 const MAX_MESSAGE_CHARS = 50_000
 const STATIC_CACHE_MAX_BYTES = 64 * 1024 * 1024
 const HASHED_ASSET = /(?:^|[-_.])[a-z0-9]{8,}(?=\.)/i
+
+// 手机主屏 PNG 图标：固定文件名白名单，路径不来自请求，杜绝路径穿越。
+const WEB_REMOTE_PNG_ICON_FILES: Readonly<Record<string, string>> = Object.freeze({
+  '/apple-touch-icon.png': 'apple-touch-icon.png',
+  '/icon-192.png': 'icon-192.png',
+  '/icon-512.png': 'icon-512.png',
+  '/icon-512-maskable.png': 'icon-512-maskable.png',
+})
+
+// /app/ 的 renderer index.html 本身没有 manifest/apple-touch-icon 等 head 标签（只有根配对页 / 有），
+// 导致「添加到主屏幕」在 Android/iOS 上读不到 manifest、拿不到新图标。渲染时补齐，与根页保持一致。
+const WEB_REMOTE_APP_HEAD_LINKS = '<link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Proma"><meta name="theme-color" content="#2563eb">'
 
 type StaticEncoding = 'br' | 'gzip'
 
@@ -51,6 +64,7 @@ export interface WebRemoteServerOptions {
   stopSession?: (sessionId: string) => void
   ipcBridge?: WebRemoteIpcBridge
   rendererDir?: string
+  iconDir?: string
   webPreloadPath?: string
   webPreloadSourcePaths?: string[]
   buildWebPreload?: () => { success: boolean; error?: string }
@@ -94,7 +108,7 @@ function sendUpgradeError(socket: Duplex, status: number, message: string): void
   socket.destroy()
 }
 
-const WEB_REMOTE_SERVICE_WORKER = `self.addEventListener('install',event=>event.waitUntil(self.skipWaiting()));self.addEventListener('activate',event=>event.waitUntil(self.clients.claim()));self.addEventListener('fetch',event=>{const url=new URL(event.request.url);if(url.pathname.startsWith('/api/')||url.pathname==='/api/stream'||url.pathname==='/api/ipc')return;if(event.request.mode==='navigate')return;});self.addEventListener('push',event=>{let data={title:'Proma',body:'有一条新通知',url:'/app/'};try{data={...data,...event.data.json()}}catch{};event.waitUntil(self.registration.showNotification(data.title,{body:data.body,icon:'/icon-192.svg',badge:'/icon-192.svg',tag:data.sessionId+':'+data.kind,data:{url:data.url,sessionId:data.sessionId}}))});self.addEventListener('notificationclick',event=>{event.notification.close();const url=new URL(event.notification.data?.url||'/app/',self.location.origin).href;event.waitUntil(self.clients.matchAll({type:'window',includeUncontrolled:true}).then(clients=>{for(const client of clients){if('focus'in client){client.navigate(url);return client.focus()}}return self.clients.openWindow(url)}))});`
+const WEB_REMOTE_SERVICE_WORKER = `self.addEventListener('install',event=>event.waitUntil(self.skipWaiting()));self.addEventListener('activate',event=>event.waitUntil(self.clients.claim()));self.addEventListener('fetch',event=>{const url=new URL(event.request.url);if(url.pathname.startsWith('/api/')||url.pathname==='/api/stream'||url.pathname==='/api/ipc')return;if(event.request.mode==='navigate')return;});self.addEventListener('push',event=>{let data={title:'Proma',body:'有一条新通知',url:'/app/'};try{data={...data,...event.data.json()}}catch{};event.waitUntil(self.registration.showNotification(data.title,{body:data.body,icon:'/icon-192.png',badge:'/icon-192.png',tag:data.sessionId+':'+data.kind,data:{url:data.url,sessionId:data.sessionId}}))});self.addEventListener('notificationclick',event=>{event.notification.close();const url=new URL(event.notification.data?.url||'/app/',self.location.origin).href;event.waitUntil(self.clients.matchAll({type:'window',includeUncontrolled:true}).then(clients=>{for(const client of clients){if('focus'in client){client.navigate(url);return client.focus()}}return self.clients.openWindow(url)}))});`
 
 export class WebRemoteServer {
   readonly httpServer: Server
@@ -217,6 +231,11 @@ export class WebRemoteServer {
     if (method === 'GET' && path === '/icon.svg') {
       res.writeHead(200, { 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' })
       res.end(renderWebRemoteIcon())
+      return
+    }
+
+    if (method === 'GET' && Object.prototype.hasOwnProperty.call(WEB_REMOTE_PNG_ICON_FILES, path)) {
+      this.servePngIcon(res, WEB_REMOTE_PNG_ICON_FILES[path]!)
       return
     }
 
@@ -476,6 +495,21 @@ export class WebRemoteServer {
     return ''
   }
 
+  private getIconDir(): string {
+    return this.options.iconDir ?? resolveWebRemoteIconDir({ packaged: false, resourcesPath: '', moduleDir: __dirname })
+  }
+
+  private servePngIcon(res: ServerResponse, filename: string): void {
+    const filePath = join(this.getIconDir(), filename)
+    if (!existsSync(filePath) || !statSync(filePath).isFile()) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' })
+      res.end('Not Found')
+      return
+    }
+    res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400', 'X-Content-Type-Options': 'nosniff' })
+    res.end(readFileSync(filePath))
+  }
+
   private getWebPreloadPath(rendererRoot: string): string {
     return this.options.webPreloadPath ?? resolve(rendererRoot, '../web-remote/preload.js')
   }
@@ -523,6 +557,7 @@ export class WebRemoteServer {
     if (existing && existing.filePath === filePath && existing.mtimeMs === sourceStat.mtimeMs && existing.size === sourceStat.size) return existing
     const nonce = randomBytes(16).toString('base64url')
     let html = sourceBody.toString('utf8')
+    html = html.replace('</head>', `${WEB_REMOTE_APP_HEAD_LINKS}</head>`)
     html = html.replace(/<script>([\s\S]*?)<\/script>/, `<script nonce="${nonce}">$1</script>`)
     html = html.replace(/<script type="module"/, '<script src="/app/preload.js"></script><script type="module"')
     html = html.replace('</body>', renderWebRemoteMobilePatch().replaceAll('__PROMA_NONCE__', nonce) + '</body>')

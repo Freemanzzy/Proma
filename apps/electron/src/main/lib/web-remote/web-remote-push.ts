@@ -19,6 +19,10 @@ export const WEB_REMOTE_PUSH_HTTP_ROUTE_POLICY = Object.freeze({
   'POST /api/push/subscription': { access: 'authenticated-device-self-write', rationale: '仅以当前认证设备 ID 写入其订阅。' },
   'DELETE /api/push/subscription': { access: 'authenticated-device-self-delete', rationale: '仅删除当前认证设备自身订阅。' },
   'POST /api/push/presence': { access: 'authenticated-device-session-scope', rationale: '仅允许上报当前设备对已授权会话的可见状态。' },
+  'GET /apple-touch-icon.png': { access: 'public-static', rationale: '固定文件名白名单返回本地 PNG 图标，不接受任意路径，不返回用户数据。' },
+  'GET /icon-192.png': { access: 'public-static', rationale: '固定文件名白名单返回本地 PNG 图标，不接受任意路径，不返回用户数据。' },
+  'GET /icon-512.png': { access: 'public-static', rationale: '固定文件名白名单返回本地 PNG 图标，不接受任意路径，不返回用户数据。' },
+  'GET /icon-512-maskable.png': { access: 'public-static', rationale: '固定文件名白名单返回本地 PNG 图标，不接受任意路径，不返回用户数据。' },
 } as const)
 
 export function truncatePushText(value: string, max = 120): string {
