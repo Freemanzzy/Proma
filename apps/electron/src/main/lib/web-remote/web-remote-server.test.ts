@@ -33,6 +33,13 @@ let rendererDir: string
 let webPreloadPath: string
 let webPreloadSourcePaths: string[]
 let allowPreloadRebuild = false
+let iconDir: string
+const iconFixtures: Record<string, Buffer> = {
+  'apple-touch-icon.png': Buffer.from('fixture-apple-touch-icon'),
+  'icon-192.png': Buffer.from('fixture-icon-192'),
+  'icon-512.png': Buffer.from('fixture-icon-512'),
+  'icon-512-maskable.png': Buffer.from('fixture-icon-512-maskable'),
+}
 
 beforeAll(async () => {
   WebRemoteServer = (await import('./web-remote-server')).WebRemoteServer
@@ -52,7 +59,9 @@ beforeAll(async () => {
   for (const source of webPreloadSourcePaths) writeFileSync(source, 'source')
   writeFileSync(webPreloadPath, 'window.__PRELOAD__=true;'.repeat(200))
   writeFileSync(join(rendererDir, 'assets', 'main-12345678.js'), 'console.log("cached");'.repeat(200))
-  server = new WebRemoteServer({ config, auth, rendererDir, pushDataDir: mkdtempSync(join(tmpdir(), 'proma-web-remote-push-server-')), webPreloadPath, webPreloadSourcePaths, buildWebPreload: () => {
+  iconDir = mkdtempSync(join(tmpdir(), 'proma-web-remote-icons-'))
+  for (const [filename, body] of Object.entries(iconFixtures)) writeFileSync(join(iconDir, filename), body)
+  server = new WebRemoteServer({ config, auth, rendererDir, iconDir, pushDataDir: mkdtempSync(join(tmpdir(), 'proma-web-remote-push-server-')), webPreloadPath, webPreloadSourcePaths, buildWebPreload: () => {
     if (!allowPreloadRebuild) return { success: false, error: 'test rebuild disabled' }
     writeFileSync(webPreloadPath, 'window.__PRELOAD_RECOVERED__=true;'.repeat(200))
     return { success: true }
@@ -84,6 +93,7 @@ describe('WebRemoteServer loopback integration', () => {
     expect(html).toContain('allowedRoles')
     expect(html).toContain('run_completed')
     expect(html).toContain('visibilitychange')
+    expect(html).toContain('<link rel="apple-touch-icon" href="/apple-touch-icon.png">')
     const script = html.match(/<script nonce="[^"]+">([\s\S]*)<\/script>/)?.[1]
     expect(script).toBeString()
     expect(() => new Function(script!)).not.toThrow()
@@ -108,6 +118,7 @@ describe('WebRemoteServer loopback integration', () => {
     expect(script).toContain('skipWaiting')
     expect(script).toContain('clients.claim')
     expect(script).not.toContain('push-subscriptions')
+    expect(script).toContain('/icon-192.png')
     const noAuth = await fetch(`http://127.0.0.1:${port}/api/push/subscription`, { method: 'POST', headers: { Origin: 'https://proma.example', 'Content-Type': 'application/json' }, body: JSON.stringify({ subscription: { endpoint: 'https://push.example/x', keys: { auth: 'a', p256dh: 'b' } } }) })
     expect(noAuth.status).toBe(401)
     const headers = { Cookie: cookie, Origin: 'https://proma.example', 'Tailscale-User-Login': 'lee@example.com', 'Content-Type': 'application/json' }
@@ -277,14 +288,66 @@ describe('WebRemoteServer loopback integration', () => {
   test('manifest 与图标路由无需登录且不泄露会话数据', async () => {
     const manifest = await fetch(`http://127.0.0.1:${port}/manifest.webmanifest`)
     expect(manifest.status).toBe(200)
-    const manifestJson = await manifest.json() as { name: string; short_name: string; start_url: string; display: string; icons: Array<{ src: string; sizes: string }> }
+    const manifestJson = await manifest.json() as { name: string; short_name: string; start_url: string; display: string; icons: Array<{ src: string; sizes: string; type: string; purpose: string }> }
     expect(manifestJson).toMatchObject({ name: 'Proma', short_name: 'Proma', start_url: '/app/', display: 'standalone' })
-    expect(manifestJson.icons.map((item) => item.sizes)).toEqual(['192x192', '512x512'])
+    expect(manifestJson.icons.map((item) => item.src)).toEqual(['/icon-192.png', '/icon-512.png', '/icon-512-maskable.png'])
+    expect(manifestJson.icons.every((item) => item.type === 'image/png')).toBe(true)
+    const maskable = manifestJson.icons.find((item) => item.src === '/icon-512-maskable.png')
+    expect(maskable?.purpose).toBe('maskable')
+    expect(manifestJson.icons.filter((item) => item.purpose === 'maskable')).toHaveLength(1)
     for (const iconPath of ['/icon.svg', '/icon-192.svg', '/icon-512.svg']) {
       const icon = await fetch(`http://127.0.0.1:${port}${iconPath}`)
       expect(icon.status).toBe(200)
       expect(icon.headers.get('content-type')).toContain('image/svg+xml')
       expect(await icon.text()).toContain('<svg')
+    }
+  })
+
+  test('手机主屏 PNG 图标路由公开、正确的 Content-Type/缓存头，且字节与注入目录中的文件一致', async () => {
+    const routes: Array<[string, string]> = [
+      ['/apple-touch-icon.png', 'apple-touch-icon.png'],
+      ['/icon-192.png', 'icon-192.png'],
+      ['/icon-512.png', 'icon-512.png'],
+      ['/icon-512-maskable.png', 'icon-512-maskable.png'],
+    ]
+    for (const [route, filename] of routes) {
+      const response = await fetch(`http://127.0.0.1:${port}${route}`)
+      expect(response.status).toBe(200)
+      expect(response.headers.get('content-type')).toBe('image/png')
+      expect(response.headers.get('cache-control')).toBe('public, max-age=86400')
+      expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+      const body = Buffer.from(await response.arrayBuffer())
+      expect(body.equals(iconFixtures[filename]!)).toBe(true)
+    }
+  })
+
+  test('未知或路径穿越式的图标文件名不返回图片（未命中白名单，落回鉴权/404，绝不是图片）', async () => {
+    const unknown = await fetch(`http://127.0.0.1:${port}/icon-999.png`)
+    expect(unknown.status).not.toBe(200)
+    expect(unknown.headers.get('content-type')).not.toContain('image/png')
+    const traversal = await fetch(`http://127.0.0.1:${port}/../x.png`)
+    expect(traversal.status).not.toBe(200)
+    expect(traversal.headers.get('content-type')).not.toContain('image/png')
+  })
+
+  test('iconDir 缺少某个文件时该路由返回 404，不影响其它路由', async () => {
+    const partialIconDir = mkdtempSync(join(tmpdir(), 'proma-web-remote-icons-partial-'))
+    writeFileSync(join(partialIconDir, 'icon-192.png'), iconFixtures['icon-192.png']!)
+    // 故意不写入 apple-touch-icon.png，模拟安装缺失场景。
+    const partialAuth = new WebRemoteAuth({ workspaceScope: 'all' }, mkdtempSync(join(tmpdir(), 'proma-web-remote-icons-partial-auth-')))
+    const partialServer = new WebRemoteServer({ config: { workspaceScope: 'all' }, auth: partialAuth, rendererDir, iconDir: partialIconDir, pushDataDir: mkdtempSync(join(tmpdir(), 'proma-web-remote-icons-partial-push-')) })
+    await partialServer.start(0)
+    const partialPort = (partialServer.httpServer.address() as { port: number }).port
+    try {
+      const missing = await fetch(`http://127.0.0.1:${partialPort}/apple-touch-icon.png`)
+      expect(missing.status).toBe(404)
+      const present = await fetch(`http://127.0.0.1:${partialPort}/icon-192.png`)
+      expect(present.status).toBe(200)
+      expect(Buffer.from(await present.arrayBuffer()).equals(iconFixtures['icon-192.png']!)).toBe(true)
+      const manifestStillWorks = await fetch(`http://127.0.0.1:${partialPort}/manifest.webmanifest`)
+      expect(manifestStillWorks.status).toBe(200)
+    } finally {
+      await partialServer.stop()
     }
   })
 

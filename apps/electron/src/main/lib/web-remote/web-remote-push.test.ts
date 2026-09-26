@@ -7,8 +7,9 @@ import { WEB_REMOTE_PUSH_HTTP_ROUTE_POLICY, WebRemotePushStore, mapPushNotice, s
 
 describe('Web Remote Web Push', () => {
   test('所有新增 HTTP 路由均登记分级并限制为公开静态或当前设备自身范围', () => {
-    expect(Object.keys(WEB_REMOTE_PUSH_HTTP_ROUTE_POLICY).sort()).toEqual(['DELETE /api/push/subscription', 'GET /api/push/key', 'GET /api/push/subscription', 'GET /app/sw.js', 'POST /api/push/presence', 'POST /api/push/subscription'].sort())
+    expect(Object.keys(WEB_REMOTE_PUSH_HTTP_ROUTE_POLICY).sort()).toEqual(['DELETE /api/push/subscription', 'GET /api/push/key', 'GET /api/push/subscription', 'GET /app/sw.js', 'GET /apple-touch-icon.png', 'GET /icon-192.png', 'GET /icon-512-maskable.png', 'GET /icon-512.png', 'POST /api/push/presence', 'POST /api/push/subscription'].sort())
     expect(WEB_REMOTE_PUSH_HTTP_ROUTE_POLICY['GET /app/sw.js'].access).toBe('public-static')
+    expect(WEB_REMOTE_PUSH_HTTP_ROUTE_POLICY['GET /apple-touch-icon.png'].access).toBe('public-static')
     expect(Object.values(WEB_REMOTE_PUSH_HTTP_ROUTE_POLICY).filter((entry) => entry.access.includes('authenticated-device'))).toHaveLength(5)
   })
   test('事件映射使用中文并将摘要截断至 120 字且隐藏明显敏感串', () => {
