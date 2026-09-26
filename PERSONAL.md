@@ -2,7 +2,7 @@
 
 ## 目的
 
-本仓库是 Proma 的个人测试版，用于在不影响官方 Proma 的前提下验证构建、升级和功能变化。个人版与官方版长期并存：官方版继续承担日常工作与生产自动化，个人版只用于个人测试和完善。
+本仓库是 Proma 个人版的源码与维护记录。自 2026-09-26 起，个人版安装在 `/Applications/Proma.app`（包内 `personal-build.json` 标记），接管 `~/.proma`，承担日常工作与生产自动化；官方版不再运行（观察期内保留为 `Proma.previous.app` 仅供回滚）。维护职责见 `CLAUDE.md`。
 
 ## 基线
 
@@ -30,7 +30,7 @@
 
 ## 路径策略
 
-并存期间，项目文件保持原地不动；开发版使用独立的 `~/.proma-dev`，官方版继续使用 `~/.proma`。正式切换前不接管官方数据目录；切换时再按经确认的迁移方案由个人版接管 `~/.proma`。
+已接管 `~/.proma`（2026-09-26）：安装版个人应用直接使用 `~/.proma`，不做路径改写或导入；手机访问配置在 `~/.proma/web-remote/`。开发实例继续使用独立的 `~/.proma-dev`，仅用于预演更新；两者不得同时占用手机访问端口 17888。
 
 ## 与上游的差异清单
 
@@ -421,3 +421,21 @@ python3 scripts/personal/import-proma-backup.py \\
 - 新增 `docs/personal/switch-runbook.md`（定稿）；fallback-runbook 补“先判断阶段”、恢复前检查、Keychain/定时任务/桥/手机访问排错；CLAUDE.md 增加切换手册与职责交接说明。
 - 已知：调度器启动时顺延过期任务，切换期间错过的定时任务不补跑。
 - 交接：此后切换与维护由 Claude Code 负责（见 CLAUDE.md）。
+
+## 2026-09-26: 切换为日常主力
+
+- 执行者：Claude Code 主会话（判断、复核、安装）+ Sonnet 5 子代理（打包、外置硬盘备份），用户在场；依据 `docs/personal/switch-runbook.md`。安装版本 `0.19.58`，包内 marker commit `bf63f7db47c623b5a826b6f5420af6af09850437`，`builtAt=2026-09-26T14:47:16.454Z`，ad-hoc 签名、无 Team ID，`app-update.yml` 不存在。
+- 时间窗口：22:43 开始，不在手册 10:00–12:00 / 14:00–17:00 窗口内；用户明确豁免。依据：Phase A（03:20）与 Phase B（03:51）当天已运行（用户在官方版确认），无运行中任务，下一个任务 02:00。另记：Phase B 实际计划时间为 05:50，手册写的 04:50 与数据不符。
+- 打包：首次 `package-personal.sh` 测试为 6 fail / 2 error，超基线中止；新增项为 `web-remote-bundle.test.ts` 在高负载（load ≈ 6，官方版与开发实例同时运行）下超时 5006 ms 及其派生 unhandled error。单独重跑 3 次均通过（冷启动 4.79 s）。重跑打包 547 pass / 5 fail / 1 error，与基线一致，退出 0。
+- 切换前快照 `~/.proma-switch-backups/pre-switch-snapshot.json`：会话 868、Automation 23（启用 20）、渠道 9、符号链接 50、planning `user_version` 9、格式版本 channels 7 / agent-sessions 2 / automations 4。
+- 外置硬盘备份 `proma-backup-20260926-2250.zip`（1.4G）。手册命令 `verify-backup.py --preset proma-backup` 对该 zip 失败：85 个中文文件名以 UTF-8 字节存储但未设置 zip 的 UTF-8 标志（0x800），Python `zipfile` 按 cp437 解码成乱码，报为 missing/extra。用临时包装脚本（复用原比较逻辑，仅对无该标志的条目做 cp437→UTF-8 还原）复验：20,750 / 20,750，missing/extra/mismatched 均 0，`BACKUP VERIFY PASS`。备份本身完好；安装脚本的目录备份校验不受影响。
+- 手机访问：`~/.proma-dev/web-remote/` 的 `config.json`、`devices.json`、`vapid.json`、`push-subscriptions.json` 复制到 `~/.proma/web-remote/`（700/600，逐字节一致）；未复制 `pairing.json`。Tailscale Serve 未改。
+- 第一次安装失败并自动回滚：`install-update.sh` 默认 `LOGS_DIR=~/Library/Logs/Proma`，但 macOS 下 `app.getPath('logs')` 取自 package.json 的 `name`（`@proma/electron`），个人版实际日志为 `~/Library/Logs/@proma/electron/main.log`。脚本 15 秒内找不到日志即判失败，未执行后续 60 秒观察、快照、端口检查；已结束新版进程并还原官方版，失败包保留为 `/Applications/Proma.failed-20260926-225616-72208.app`。回滚后快照与切换前 `SNAPSHOT MATCH`，数据未受影响。同时更正 2026-09-26「P1–P3 外部复核修复」记录中的默认日志路径。
+- 第二次安装（经用户同意重试一次）：`--logs-dir ~/Library/Logs/@proma/electron --health-seconds 120`，退出 0。安装前备份 `~/.proma-switch-backups/20260926-230027-73361/`（20,818 项校验 PASS）；120 秒观察内进程存活、无 `[FATAL]`、快照一致、17888 由新版进程监听。官方版已改名 `/Applications/Proma.previous.app`（0.19.58，无个人版标记）。
+- 首次启动验收：主会话复跑切换前后快照 `SNAPSHOT MATCH`（`post-switch-snapshot.json`）；用户在个人版中逐项验收通过（会话与大会话、渠道对话、Todo/日程/定时任务、桥接、Skills/MCP、EgoBrowser、关于页、手机访问与通知）。Keychain 首次弹窗用户选择“允许”（非“始终允许”），后续启动可能再次询问。
+- 修复（本分支）：`install-update.sh` 默认日志目录改为 `~/Library/Logs/@proma/electron`；`CLAUDE.md`、`switch-runbook.md`、`fallback-runbook.md` 同步更正。
+- 遗留事项：
+  - 收尾第 7 步待用户逐项确认：官方版 `ditto` 存档到外置硬盘、官方更新缓存移入 `~/.proma-switch-backups/`。
+  - `verify-backup.py` 读取 zip 时需对未设 UTF-8 标志的条目还原文件名（另开分支修复并补测试）。
+  - `/Applications/Proma.failed-20260926-225616-72208.app` 保留，观察期后经用户确认移出。
+  - 观察期（3–7 天）：定时任务成功率、飞书/微信桥、手机访问、`main.log`；fc-bridge 由用户在应用内重新配置；“Google 收录完成度监测（每周）”提示词改为只用 ego-browser（需用户确认）。观察期通过后 `Proma.previous.app` 移到 `~/.proma-switch-backups/`。
