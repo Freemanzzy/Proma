@@ -18,7 +18,8 @@
 | 已安装应用 | `/Applications/Proma.app`（个人版，名称与应用 ID 与官方相同；个人版标记 `Contents/Resources/personal-build.json`） |
 | 上一版应用 | `/Applications/Proma.previous.app`（安装脚本保留，用于回滚） |
 | 用户数据 | `~/.proma`（日常数据，**最高保护级别**） |
-| 预演数据 | `~/.proma-dev`（开发实例，可用于预演更新；手机访问配置在其 `web-remote/`） |
+| 预演数据 | `~/.proma-dev`（开发实例，可用于预演更新；其手机访问配置在 `~/.proma-dev/web-remote/`） |
+| 手机访问配置 | 安装版：`~/.proma/web-remote/`（`config.json`、`devices.json`、`vapid.json`、`push-subscriptions.json`，0600，不入库） |
 | 更新前自动备份 | `~/.proma-switch-backups/<时间戳>/` |
 | 外置硬盘完整备份 | `/Volumes/Lexar ssd 2tb/proma 备份/*.zip`（未挂载时 `diskutil list` + `diskutil mount <设备>`） |
 | 个人版脚本 | `scripts/personal/`（开发实例 `dev.sh`、导入 `import-proma-backup.py`、完整性校验 `verify-backup.py`、只读健康快照 `health-snapshot.py`、打包 `package-personal.sh`、安装更新 `install-update.sh`、手机回归 `mobile-harness.mjs`、`web-remote.sh`） |
@@ -57,9 +58,18 @@
 4. 个人版实际打包使用 `bash scripts/personal/package-personal.sh`；脚本生成 macOS arm64 目录包与 ad-hoc 签名，不启动产物。更新使用 `bash scripts/personal/install-update.sh <Proma.app>`，默认目标为 `/Applications` 与 `~/.proma`，真实执行前需确保用户明确授权；演练必须将 `--test-mode` 与临时 `/tmp` 的 `--apps-dir`、`--data-dir`、`--backup-root` 一起使用。备份快照 `health-snapshot-before/after.json` 存在时间戳备份目录外层，Proma 副本不写入 `.personal-migration` 等元数据。完整性核验：`python3 scripts/personal/verify-backup.py SRC BACKUP --preset proma-backup`。macOS 个人版主进程健康日志位于 `app.getPath('logs')/main.log`（macOS 实际为 `~/Library/Logs/@proma/electron/main.log`，因 `app.name` 取自 package.json 的 `@proma/electron`），只记事件级状态、不写日志详情。
 5. 在开发实例（`PROMA_WEB_REMOTE=1 bash scripts/personal/dev.sh`）预演：日志中 “full-ui 分级覆盖率 100%”；上游新增 IPC 通道已在 `apps/electron/src/main/lib/web-remote/full-ui/channel-policy.ts` 分级；渠道清单（名称/provider/enabled）与更新前一致；真实对话一次；EgoBrowser 调用一次。
 6. 手机回归：`bun scripts/personal/mobile-harness.mjs --url <手机访问地址> --suite smoke --user-agent android`（及 `iphone`、`attachments`）；地址见 `~/.proma-dev/web-remote/config.json` 的 `allowedOrigin`。
-7. 数据格式：比较上游 diff 中的 `CONFIG_VERSION`、`INDEX_VERSION`、`PLANNING_SCHEMA_VERSION`、`user_version` 等变化，写入报告。
-8. `PERSONAL.md`：更新基线、同步记录表，末尾追加 `## YYYY-MM-DD: ...` 记录。
+7. **安装版手机验收（每次安装后必做）**：安装脚本通过后，用户用两台手机在**安装版**上打开 `/app/`，确认进入完整界面（不卡“正在启动”、不显示“手机界面暂不可用”）、发一条消息收到实时回复、测试通知可达。开发实例与安装版的运行条件不同（数据目录、环境变量、源文件是否存在），开发实例通过不代表安装版可用（2026-09-26 两处缺陷均只在安装版出现）。
+8. 数据格式：比较上游 diff 中的 `CONFIG_VERSION`、`INDEX_VERSION`、`PLANNING_SCHEMA_VERSION`、`user_version` 等变化，写入报告。
+9. `PERSONAL.md`：更新基线、同步记录表，末尾追加 `## YYYY-MM-DD: ...` 记录。
 
-## 7. 汇报
+## 7. 文档规则（SSOT）
+
+- 每类事实只有一个权威位置：基线、与上游差异、同步与变更记录 → `PERSONAL.md`；职责与硬性规则 → 本文件；操作步骤 → `docs/personal/*-runbook.md`；手机访问 → `docs/personal/web-remote.md`。其他文档引用，不复制。
+- 变更记录只追加（`## YYYY-MM-DD: ...`），不改写历史；发现旧记录有误，用新记录更正并写明更正了什么。
+- 改动影响权威内容（基线、差异清单、规则、步骤、路径）时，同一提交内同步更新对应文档，并在变更记录中写明改了哪些文档。
+- 验证、审查、故障处理的结果直接写入变更记录，不需要询问：方法、实测证据（不是推断）、通过项、缺陷项、待办。
+- 周检报告、日志、对话都是快照；与 SSOT 冲突时以 SSOT 为准，并修正过时的一方。
+
+## 8. 汇报
 
 每次工作结束给用户中文报告：做了什么、验证结果（附关键数字）、当前版本与数据状态、未完成或有风险的事项。
