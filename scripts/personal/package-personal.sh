@@ -22,7 +22,8 @@ import re, sys
 text = open(sys.argv[1], encoding='utf-8', errors='replace').read()
 rc = int(sys.argv[2])
 def count(label):
-    found = re.findall(rf'(?m)^\s*(\d+)\s+{label}\b', text)
+    suffix = 's?' if label in ('fail', 'error') else ''
+    found = re.findall(rf'(?m)^\s*(\d+)\s+{label}{suffix}\b', text)
     return int(found[-1]) if found else 0
 failed, errors = count('fail'), count('error')
 print(f'Parsed test result: fail={failed}, error={errors}, exit={rc}')
