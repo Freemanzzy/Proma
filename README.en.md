@@ -1,10 +1,9 @@
 <!-- personal-fork:start -->
-> **Personal fork** — Freemanzzy's personal-test fork of [proma-ai/Proma](https://github.com/proma-ai/Proma), kept alongside the official edition under the AGPL-3.0 license.
+> **Personal fork** — Freemanzzy's personal-test fork of [proma-ai/Proma](https://github.com/proma-ai/Proma), kept alongside the official edition under the AGPL-3.0 license. Fork changes live on the `personal` branch; `main` mirrors upstream.
 >
 > **Baseline:** official `v0.19.57`.
 >
-> This fork removes the bundled browser, adds the optional EgoBrowser native tool (first use per session requires approval), simplifies appearance to light/dark/system, and includes isolated personal import/development scripts under `scripts/personal/`. Run `scripts/personal/dev.sh` for `~/.proma-dev`; see [`PERSONAL.md`](./PERSONAL.md) for the complete change log.
-> It also hides unused integrations—DingTalk/Slack bridges, the Copilot channel, and Agent Island—while retaining their source code and legacy-data compatibility paths.
+> Highlights: **phone access (Web Remote)** — run the same desktop UI on a phone over a private Tailscale network (live chat, Skills, attachments, question and plan approvals, Todo, scheduled tasks, file preview, push notifications, installable to the home screen), with an explicit deny-by-default IPC policy; see [`docs/personal/web-remote.md`](./docs/personal/web-remote.md). The fork also removes the bundled browser, adds the optional EgoBrowser native tool, simplifies appearance to light/dark/system, hides unused integrations (DingTalk/Slack bridges, the Copilot channel, Agent Island) while keeping legacy-data compatibility, and includes isolated personal import/development scripts under `scripts/personal/`. Run `scripts/personal/dev.sh` for `~/.proma-dev` (add `PROMA_WEB_REMOTE=1` for phone access); see [`PERSONAL.md`](./PERSONAL.md) for the complete change log.
 <!-- personal-fork:end -->
 
 # Proma
