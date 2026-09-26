@@ -446,3 +446,12 @@ python3 scripts/personal/import-proma-backup.py \\
 - `verify-backup.py`：新增 `restore_filename()`，对未设置 0x800 标志的 zip 条目做 cp437→UTF-8 还原后再参与排除规则与比较；`archive.open()` 仍用原始 ZipInfo。`test-personal-scripts.py` 增加中文文件名 + 符号链接的 macOS `zip -r -y` 用例（校验通过、篡改后失败）；去掉修复时该用例失败，证明能捕获该问题。
 - 验证（主会话复跑）：`test-personal-scripts.py` 退出 0；用修复后的仓库脚本校验真实外置备份 `proma-backup-20260926-2250.zip` 对比安装前冻结目录备份 `20260926-225616-72208/proma`（`--preset proma-backup`，排除之后才迁入的 `web-remote/`）：20,750 / 20,750，missing/extra/mismatched 均 0，`BACKUP VERIFY PASS`。
 - 仍待办：观察期检查；fc-bridge 重配；“Google 收录完成度监测（每周）”提示词第 4、11 行改为只用 ego-browser（用户在应用内修改）；观察期后移出 `Proma.previous.app` 与 `Proma.failed-20260926-225616-72208.app`。
+
+## 2026-09-26: 安装版手机访问两处修复（切换当晚）
+
+- 更正：「切换为日常主力」记录中“用户逐项验收通过（…手机访问与通知）”不准确。切换后手机 `/app/` 在安装版上实际不可用，以下两处缺陷均只在安装包出现（此前手机测试都在有源码的开发实例上，P5 真实预演被跳过，未能提前暴露）。
+- 缺陷 1：`web-remote-server.ts` 的 `ensureWebPreload()` 用 `dist/web-remote/preload.js` 与源文件 `src/preload/index.ts`、`web-electron-shim.ts` 比较 mtime；安装包只含产物、没有源文件，判定恒为过期，随后走开发模式 `spawnSync('bun')` 重建，报 `ENOTDIR`，手机显示“手机界面暂不可用”。修复（`987ad33f`，合并 `22d69abe`）：源文件不存在时视为安装包，产物存在且非空即就绪，缺失则提示重新打包，绝不在安装包内重建；开发实例逻辑不变。新增 2 个用例（撤掉修复时失败）。
+- 缺陷 2：`full-ui/prepare.ts` 的 `prepareWebRemoteFullUi()` 仍要求 `.proma-dev` 数据目录与 `PROMA_WEB_REMOTE=1`，安装包从访达启动两者皆无，IPC 桥未安装，`/api/ipc` 被 `1013 full-ui disabled` 关闭，手机卡在“正在启动 Proma”。P1 只改了服务器启动判定，漏改此处。修复（`06f3d910`，合并 `29e7a81e`）：新增 `runtime.packaged` 参数，`app.isPackaged && isPersonalBuild()` 时只看 `config.enabled && config.fullUi`；开发实例两道门不变。新增 3 个用例（撤掉修复时首个用例得到 null）。已排查 web-remote 其余开发实例限定判断，均已识别个人版安装包。
+- 验证：全量测试 552 pass / 5 fail / 1 error（基线 547/5/1 + 5 个新用例），typecheck 通过；两次打包均退出 0，主会话在 asar 内 `main.cjs` 确认修复代码存在。两次安装（23:32、23:51）均通过安装脚本健康检查，主会话复跑快照与切换前 `SNAPSHOT MATCH`。最终安装版 marker commit `29e7a81e`，安装前备份 `~/.proma-switch-backups/20260926-235153-90861/`。用户用两台手机验收通过（`/app/` 进入完整界面、发消息收到实时回复、通知）。
+- Google 收录完成度监测（每周）：用户经 Proma 定时任务接口（运行中的应用写入）将提示词第 4、11 行改为只用 ego-browser；主会话只读复查确认，任务仍启用，第 18 行不变。
+- 当前 `/Applications`：`Proma.app`（个人版 `29e7a81e`）、`Proma.previous.app`（个人版 `22d69abe`，手机卡启动页）、`Proma.previous.20260926-235153-90861.app`（个人版 `bf63f7db`，手机不可用）、`Proma.previous.20260926-233222-86078.app`（官方版 0.19.58）、`Proma.failed-20260926-225616-72208.app`（首次失败包，同 `bf63f7db`）。整理方式待用户决定。
