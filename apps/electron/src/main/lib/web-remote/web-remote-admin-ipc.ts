@@ -1,4 +1,4 @@
-import { ipcMain, type IpcMainInvokeEvent } from 'electron'
+import { app, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { execFileSync } from 'node:child_process'
 import { chmodSync, mkdirSync, renameSync, writeFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
@@ -9,8 +9,20 @@ import { getWebRemoteServer } from './web-remote-service'
 import { listAgentWorkspaces } from '../agent-workspace-manager'
 
 const CHANNELS = ['web-remote:admin-get', 'web-remote:admin-save', 'web-remote:admin-pair', 'web-remote:admin-revoke'] as const
+/**
+ * Only the real desktop renderer may manage phone access. The web-remote bridge
+ * invokes handlers with a fake event whose senderFrame is null, so it can never
+ * pass; the channels are also `denied` in the remote channel policy.
+ * Packaged builds load the renderer from file://; the unpackaged dev instance
+ * loads it from the local Vite dev server.
+ */
+function isDesktopRendererUrl(url: string | undefined): boolean {
+  if (!url) return false
+  if (url.startsWith('file://')) return true
+  try { return !app.isPackaged && new URL(url).origin === 'http://127.0.0.1:5173' } catch { return false }
+}
 function assertDesktop(event: IpcMainInvokeEvent): void {
-  if (getConfigDirName() !== '.proma-dev' || !event.senderFrame?.url.startsWith('file://')) throw new Error('仅开发实例桌面设置可管理手机访问')
+  if (getConfigDirName() !== '.proma-dev' || !isDesktopRendererUrl(event.senderFrame?.url)) throw new Error('仅开发实例桌面设置可管理手机访问')
 }
 function atomicWriteConfig(config: WebRemoteConfig): void {
   const dir = getWebRemoteDataDir(); mkdirSync(dir, { recursive: true, mode: 0o700 })
