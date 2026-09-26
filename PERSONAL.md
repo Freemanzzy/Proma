@@ -470,3 +470,14 @@ python3 scripts/personal/import-proma-backup.py \\
 - `PERSONAL.md` 差异清单：“远程网页（实验）…不打包进安装版”已过时，改为安装版由 `~/.proma/web-remote/config.json` 控制的当前行为。
 - `docs/personal/web-remote.md` §2：运行实例、启动开关、数据目录改为安装版与开发实例两种情况，新增端口冲突说明。
 - 待用户在 Proma 内修改（定时任务在 `~/.proma`，不入库）：“Proma 个人版 · 官方版本周检（只读）”第 3 步仍按官方版读取 `/Applications/Proma.app` 版本，应改为读取 `personal-build.json` 并与 `personal` HEAD 对比；第 4 行“个人版版本必须不低于官方已安装版本”改为“只看最新官方正式 tag 与个人版基线”。
+
+## 2026-09-27: 周检任务切换后改写（复查）
+
+- 用户经 Proma `update_automation` 修改“Proma 个人版 · 官方版本周检（只读）”（`updatedAt` 09-27 00:50，仍启用，下次 09-28 周一 09:30）。主会话只读复查提示词：
+  - 第 4 行同步原则：改为个人版已接管 `/Applications/Proma.app` 与 `~/.proma`、官方版不再安装、只看最新官方正式 tag 与个人版基线。
+  - 第 5 行 tag 异常规则：按 tag 所指提交的提交时间判断，已删除与官方已安装版本交叉核对的旧说法。
+  - 第 3 步：读取 `personal-build.json`，确认 `personal=true`，记录 version/commit，用 `git log --oneline <commit>..personal` 与 HEAD 对比；落后提交区分“仅文档/脚本（`*.md`、`docs/`、`scripts/personal/`，无需重装）”与“应用代码（需打包安装）”；文件不存在即“⚠️ 需要关注：已安装的不是个人版”，按 fallback-runbook 处理。
+  - 摘要触发条件：新正式版本、已安装的不是个人版、已安装构建落后于应用代码改动、数据格式/运行时变更、未分级 IPC 通道；报告与 `notes.md` 字段改为“已安装个人版构建 version+commit”。
+  - 全文已无“官方已安装”“CFBundleShortVersionString”“交叉核对”“不低于官方”等旧说法。
+- 实测当前差异：已安装 `29e7a81e` → `personal` HEAD 之间只改动 `CLAUDE.md`、`PERSONAL.md`、`docs/personal/fallback-runbook.md`、`docs/personal/web-remote.md`，按新规则应判为“仅文档，无需重装”。
+- 待修正（用户在 Proma 内修改）：`apps/electron/default-skills/**/SKILL.md`（36 个文件）由 `electron-builder.yml` 打进安装包并在启动时同步到 `~/.proma/default-skills/`，改动需要重装；现规则“`*.md` 无需重装”会误判。建议改为：仅文档/脚本 = 仓库根目录 `*.md`、`docs/`、`scripts/personal/`；`apps/`、`packages/` 下任何文件（含 `default-skills` 的 Markdown）都算应用改动。
