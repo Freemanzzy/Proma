@@ -902,6 +902,8 @@ async function main() {
       if (options.width < 768 || options.height < 600) throw new Error('desktop-admin-denied 需要桌面视口，例如 1280×800')
       const channels = ['web-remote:admin-get', 'web-remote:admin-save', 'web-remote:admin-pair', 'web-remote:admin-revoke']
       result.desktopAdminDenied = { mobileViewport: await harness.client.evaluate('window.matchMedia("(max-width: 767px)").matches'), visible: await harness.client.evaluate('document.body.innerText.includes("手机访问")'), denied: [] }
+      result.pwaResources = await harness.client.evaluate(`(async()=>{const paths=['/manifest.webmanifest','/icon-192.svg','/icon-512.svg'];const resources=[];for(const path of paths){const response=await fetch(path,{credentials:'omit'});resources.push({path,status:response.status,contentType:response.headers.get('content-type')})}const manifest=await fetch('/manifest.webmanifest',{credentials:'omit'}).then((response)=>response.json());return {resources,manifest:{name:manifest.name,short_name:manifest.short_name,start_url:manifest.start_url,display:manifest.display,icons:manifest.icons?.map((icon)=>({sizes:icon.sizes,type:icon.type}))}}})()`)
+      if (result.pwaResources.resources.some((item) => item.status !== 200) || result.pwaResources.manifest.name !== 'Proma' || result.pwaResources.manifest.short_name !== 'Proma' || result.pwaResources.manifest.display !== 'standalone' || result.pwaResources.manifest.icons?.map((item) => item.sizes).join(',') !== '192x192,512x512') throw new Error(`PWA 公共资源/manifest 验证失败: ${JSON.stringify(result.pwaResources)}`)
       for (const channel of channels) {
         let denied = false
         try {
