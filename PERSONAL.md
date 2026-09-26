@@ -494,3 +494,14 @@ python3 scripts/personal/import-proma-backup.py \\
 - 本地配置（不入库）：`~/.proma-dev/web-remote/config.json` 的 `port` 改为 17889、`allowedOrigin` 改为带 `:8443` 的地址（`normalizeOrigin` 使用 `URL.origin`，保留端口）；改前备份为同目录 `config.json.bak-20260927-port17888`；安装版 `~/.proma/web-remote/config.json` 未改（port 17888）。
 - 端到端验证（主会话执行）：临时开启 8443 转发；`PROMA_WEB_REMOTE=1 bash scripts/personal/dev.sh` 启动开发实例，日志“full-ui 分级覆盖率 100%（invoke=370, event=8）”“已启动: 127.0.0.1:17889”；此时安装版（PID 90969）仍监听 17888，两者并存。`mobile-harness.mjs --url https://<主机名>:8443 --suite smoke --user-agent android` 退出 0：load、open-session、send-pong、MCP/Skills、Todo、定时任务、文件面板 7 步全部通过，JavaScript exceptions 0（22 条 console error 为既有音效预加载类）；测试设备已撤销、自建会话已删除、既有 5 个会话前后不变、临时 Chrome 与 profile 已清理；安装版设备数 199 不变。结束后停止开发实例（17889、5173 已释放）并关闭 8443 转发，Serve 只剩 443 → 17888。
 - 文档：`CLAUDE.md` §6 第 6 项改为 17889/8443 流程并注明 harness 只对开发实例运行；`docs/personal/web-remote.md` §2 端口说明、转发命令与回归测试说明更新；本文件已知问题中的端口冲突标记为已解决。
+
+## 2026-09-27: 手机主屏图标改用 Proma 真实 PNG
+
+- 素材由用户提供（由 `apps/electron/resources/icon.png` 裁透明边、黑底铺满生成），放入 `apps/electron/resources/web-remote/`：`apple-touch-icon.png`(180)、`icon-192.png`、`icon-512.png`、`icon-512-maskable.png`，与源文件逐字节一致。
+- 打包：`electron-builder.yml` 通用 `extraResources` 新增 `resources/web-remote` → `web-remote`（`*.png`）。运行时目录由纯函数 `resolveWebRemoteIconDir()`（`web-remote-policy.ts`）决定：安装包 `process.resourcesPath/web-remote`，开发实例 `dist/../resources/web-remote`；`web-remote-service.ts` 传入 `iconDir`。
+- 路由：`/apple-touch-icon.png`、`/icon-192.png`、`/icon-512.png`、`/icon-512-maskable.png`，固定文件名白名单、公开、`image/png`、`Cache-Control: public, max-age=86400`，缺文件 404；登记进 `web-remote-push.ts` 路由表（`public-static`）。SVG 路由保留。
+- 静态内容：manifest icons 改为 3 个 PNG（192/512 `any`，512-maskable `maskable`）；根配对页 apple-touch-icon → `/apple-touch-icon.png`；service worker 通知 icon/badge → `/icon-192.png`；favicon 仍为 SVG。主会话复核发现 `/app/`（renderer index.html）原本没有 manifest 与 apple-touch-icon 链接，Android 无法读取 manifest，已在 `getRenderedIndex()` 于 `</head>` 前注入 manifest、favicon、apple-touch-icon、`apple-mobile-web-app-capable`、`apple-mobile-web-app-title`、`theme-color`（各一次）。
+- 验证：全量测试 557 pass / 5 fail / 1 error（基线 552/5/1 + 5 个新用例，撤掉实现时新用例失败）；typecheck 通过。打包 `041c148d` 退出 0，`Contents/Resources/web-remote/` 4 个 PNG 逐字节一致，asar 内 `main.cjs` 含新路由与 head 注入。安装（02:18）通过脚本健康检查；安装后本机回环请求 4 个路由均 200 `image/png` 且逐字节一致，manifest 为 3 个 PNG；用户两台手机重新添加主屏后验证通过。
+- 数据快照：安装脚本自身前后快照一致。与切换前基线相比，会话 868 → 870（正常使用），另有定时任务“Nowledge Mem 每日追补（会话归档 + Working Memory）”于 09-27 01:54:07 由启用改为停用（`updatedAt`），早于安装、非安装所致，02:00 未运行；是否为有意操作待用户确认。
+- 整理：上一版个人版 `Proma.previous.app`（`29e7a81e`）经用户同意移入废纸篓（`~/.Trash/Proma-personal-29e7a81e.app`，由用户清空）；此前三个旧个人版已不在废纸篓。`/Applications` 现只有 `Proma.app`（`041c148d`），官方版仍在 `~/.proma-switch-backups/official-Proma-0.19.58.app` 与外置硬盘 zip。下次安装更新时脚本会重新生成 `Proma.previous.app`。
+- `~/.proma-switch-backups/` 现有 5 份更新前数据备份（约 17G，含官方版与缓存），均保留；清理需用户另行确认。
