@@ -84,7 +84,7 @@ export class WebRemotePushStore {
     catch (error) { const status = (error as { statusCode?: number }).statusCode ?? null; if (status === 404 || status === 410) this.remove(deviceId); return { status, error: status ? `push endpoint returned ${status}` : String((error as Error).message).slice(0, 160) } }
   }
   private async sendWithRetry(subscription: webPush.PushSubscription, payload: string): Promise<{ statusCode: number }> {
-    const options: webPush.RequestOptions = { vapidDetails: { subject: 'mailto:push@proma.local', publicKey: this.keys.publicKey, privateKey: this.keys.privateKey }, TTL: 60, ...(this.proxyUrl ? { proxy: this.proxyUrl } : {}) }
+    const options: webPush.RequestOptions = { vapidDetails: { subject: 'https://proma.cool', publicKey: this.keys.publicKey, privateKey: this.keys.privateKey }, TTL: 60, ...(this.proxyUrl ? { proxy: this.proxyUrl } : {}) }
     for (let attempt = 0; attempt < 2; attempt++) {
       try { return await this.sendImpl(subscription, payload, options) }
       catch (error) { const status = (error as { statusCode?: number }).statusCode; if (attempt === 1 || status === 404 || status === 410) throw error; await new Promise((resolve) => setTimeout(resolve, 200)) }
