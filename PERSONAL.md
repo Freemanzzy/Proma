@@ -386,3 +386,9 @@ python3 scripts/personal/import-proma-backup.py \\
 - 真实 Agent 回归：隔离新建会话分别使用 clipproxyapi 主渠道与 ChatGPT 订阅 Codex 渠道完成“只回复 pong”；Pi 0.87.1 运行正常。另一次 Agent 调用确实观察到 `EgoBrowser` 工具调用，打开 `https://example.com` 并返回标题 `Example Domain`。
 - 手机 harness：Android 与 iPhone UA 的 `--suite smoke` 均通过；两种 UA 的 `--suite attachments` 均通过文本附件首行提取、PNG 识别主色及 Markdown 附件链路。iPhone 首次运行的图片答案为小写 `red`，旧 harness 的大小写敏感检查误报；在临时大小写无关检查下复验通过，随后还原 harness 源文件。全部 harness 设备已撤销、临时 Chrome 已退出且 profile 已删除；每次 harness 创建的专用会话都已删除，既有会话清单前后未变。运行中可见音效预加载 XHR 错误，但 JavaScript exceptions 为 0，未影响验证。
 - 本次仅提交同步分支，不 push、不合并到 `personal`；没有停止/手动重启开发实例、改 Web Remote 配置或用户设备，也未触及官方应用或 Tailscale。
+
+## 2026-09-26: 回退手册与数据完整性修正
+
+- 新增 `docs/personal/fallback-runbook.md`：供 Claude Code 在个人版不可用时诊断、回退应用、恢复数据、从源码重建。
+- 父会话发现 C1 的服务端默认把推送密钥写到 `getWebRemoteDataDir()`，在测试环境会解析为官方 `~/.proma`，留下 `~/.proma/web-remote/vapid.json`（已移至 /tmp，官方版不读取该文件）；已改为复用 auth 数据目录（`001aada3`），全量测试后确认不再生成。
+- `proma-backup` Skill 的 zip 改为 `-y` 保留符号链接（`~/.proma` 内约 50 个 Skill 链接，此前会被展开成副本）。
