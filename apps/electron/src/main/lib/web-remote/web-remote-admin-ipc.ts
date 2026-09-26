@@ -4,6 +4,8 @@ import { chmodSync, mkdirSync, renameSync, writeFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { getConfigDirName } from '../config-paths'
+import { isPersonalBuild } from '../personal-build'
+import { isDesktopAdminAllowed } from './web-remote-policy'
 import { getWebRemoteConfigPath, getWebRemoteDataDir, readWebRemoteConfig, WebRemoteAuth, type WebRemoteConfig } from './web-remote-auth'
 import { getWebRemoteServer } from './web-remote-service'
 import { listAgentWorkspaces } from '../agent-workspace-manager'
@@ -16,13 +18,9 @@ const CHANNELS = ['web-remote:admin-get', 'web-remote:admin-save', 'web-remote:a
  * Packaged builds load the renderer from file://; the unpackaged dev instance
  * loads it from the local Vite dev server.
  */
-function isDesktopRendererUrl(url: string | undefined): boolean {
-  if (!url) return false
-  if (url.startsWith('file://')) return true
-  try { return !app.isPackaged && new URL(url).origin === 'http://127.0.0.1:5173' } catch { return false }
-}
 function assertDesktop(event: IpcMainInvokeEvent): void {
-  if (getConfigDirName() !== '.proma-dev' || !isDesktopRendererUrl(event.senderFrame?.url)) throw new Error('仅开发实例桌面设置可管理手机访问')
+  const personalPackaged = app.isPackaged && isPersonalBuild()
+  if (!isDesktopAdminAllowed({ personalPackaged, configDirName: getConfigDirName(), packaged: app.isPackaged, url: event.senderFrame?.url })) throw new Error('仅个人版或开发实例桌面设置可管理手机访问')
 }
 function atomicWriteConfig(config: WebRemoteConfig): void {
   const dir = getWebRemoteDataDir(); mkdirSync(dir, { recursive: true, mode: 0o700 })

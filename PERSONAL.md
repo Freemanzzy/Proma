@@ -36,8 +36,8 @@
 
 个人版保留上游功能源码与旧数据兼容路径；用户选择保留 Chat 模式；仅对下列入口、初始化和打包项做精简，并维护本地脚本和文档区块：
 
-- `scripts/personal/import-proma-backup.py`：从备份 zip 导入到隔离目录，改写 Proma 自身索引路径，停用 Automation/桥接并提供核验。
-- `scripts/personal/dev.sh`：检查官方版与个人开发版进程隔离后，以 `~/.proma-dev` 启动开发版。
+- `scripts/personal/import-proma-backup.py`：从备份 zip 导入到隔离目录，按字节流式改写 Proma 路径，停用 Automation/桥接并核验内容完整性。
+- `scripts/personal/package-personal.sh`、`install-update.sh`、`verify-backup.py`：个人版打包、备份校验与安装/应用回滚。
 - `README.md` 与 `README.en.md` 顶部的 `<!-- personal-fork:start -->` / `<!-- personal-fork:end -->` 独立区块：标明个人 Fork、基线和主要改动，便于读者识别且便于后续同步。
 - 钉钉、Slack 桥接：设置入口隐藏；桥接源码与 IPC 保留以兼容旧数据，但启动注册明确禁止自动连接。
 - GitHub Copilot 订阅渠道：从新增渠道类型列表隐藏；编辑已有 Copilot 渠道时仍保留选项，不影响旧数据使用。
@@ -57,7 +57,7 @@ python3 scripts/personal/import-proma-backup.py \\
   --target ~/.proma-dev --verify-only
 ```
 
-导入过程先在 target 同级临时目录完成，再原子改名；已有非空 target 会整体改名为带时间戳的 `.bak-*`，不删除。排除项及原因：`cloud-auth.json`、`sync-state.json`（避免个人版复用官方云登录刷新令牌或触发同步）、`logs/`、`fc-bridge/`、`fc-bridge-group/`（由官方版外部进程使用），以及文件名含 `.bak` 的备份文件。UTF-8 文本中的正式 `~/.proma` 路径会改写为 target；`agent-workspaces/*/workspace-files/` 保持原样。超过 50 MB 或非 UTF-8 文件不改写，并记录在 manifest 中；SQLite 的 `planning.db` 通过标准库 sqlite3 只改写导入副本中的文本字段。
+导入过程先在 target 同级临时目录完成，再原子改名；已有非空 target 会整体改名为带时间戳的 `.bak-*`，不删除。排除项及原因：`cloud-auth.json`、`sync-state.json`（避免个人版复用官方云登录刷新令牌或触发同步）、`logs/`、`fc-bridge/`、`fc-bridge-group/`（由官方版外部进程使用），以及文件名含 `.bak` 的备份文件。UTF-8 文本中的正式 `~/.proma` 路径会改写为 target；`agent-workspaces/*/workspace-files/` 保持原样。超过 50 MB 与非 UTF-8 文件均按字节流式改写路径，不因大小或编码跳过；导入 manifest 保存改写后文件的 SHA-256/大小及符号链接目标，导入结束自动做完整性、安全与配置校验。SQLite 的 `planning.db` 通过标准库 sqlite3 只改写导入副本中的文本字段。备份目录或 zip 的比对命令为 `python3 scripts/personal/verify-backup.py SRC BACKUP`。
 
 为避免重复执行，导入会把全部 Automation 设为 `active=false`，把 `feishu.json` 的 `bots[].enabled` 和 `wechat.json` 的 `enabled` 设为 false，并按源码合法值将 `settings.json` 的 `feishuSessionMirror.mode` 设为 `off`。源码依据：`apps/electron/src/main/lib/settings-service.ts` 默认/回退值为 `{ mode: 'off' }`，`apps/electron/src/main/index.ts` 仅在桥接配置 enabled 且凭据存在时自动启动飞书、钉钉、Slack、微信 Bridge；导入备份未发现独立的钉钉或 Slack 配置文件。导入前 active Automation 的 id/name 会保存到 `<target>/.personal-migration/automations-active-before.json`，完整统计与源 zip SHA-256 在 `manifest.json`。
 
@@ -392,3 +392,24 @@ python3 scripts/personal/import-proma-backup.py \\
 - 新增 `docs/personal/fallback-runbook.md`：供 Claude Code 在个人版不可用时诊断、回退应用、恢复数据、从源码重建。
 - 父会话发现 C1 的服务端默认把推送密钥写到 `getWebRemoteDataDir()`，在测试环境会解析为官方 `~/.proma`，留下 `~/.proma/web-remote/vapid.json`（已移至 /tmp，官方版不读取该文件）；已改为复用 auth 数据目录（`001aada3`），全量测试后确认不再生成。
 - `proma-backup` Skill 的 zip 改为 `-y` 保留符号链接（`~/.proma` 内约 50 个 Skill 链接，此前会被展开成副本）。
+
+## 2026-09-26: 切换准备 P1–P3
+
+- P1：新增包内 `personal-build.json`（personal、版本、commit、builtAt）；个人版启动时跳过 electron-updater 初始化、官方检查/下载/安装与空闲安装调度，设置页显示“个人版由维护流程更新”。个人构建 afterPack 清除可能由 electron-builder 生成的 `app-update.yml`；官方构建不写个人标记。`package-personal.sh` 执行依赖安装、typecheck、受基线约束的全测、完整 Electron build、macOS arm64 目录打包与 ad-hoc 签名。
+- P1 Web Remote：个人版打包标记允许正式数据目录仅由 `web-remote/config.json` 的 `enabled` 控制启动，不再要求环境变量；开发实例仍需既有环境开关，官方打包版无论环境 override 均拒绝。桌面管理 IPC 仅允许个人版正式包 `file://` 渲染页或开发实例桌面页。
+- P2：新增 `install-update.sh`，参数化应用目录、数据目录与备份根目录，支持超时等待（不杀进程）、cp -a 备份 + 完整性校验、previous 轮换、启动/健康检查和应用自动回滚；不自动还原用户数据。`--dry-run` 不写入，`--test-mode` 用于隔离假包成功路径，`--simulate-health-failure` 用于回滚演练。
+- P3：新增 `verify-backup.py`，逐文件比较文件数、大小、SHA-256、类型/链接目标与权限，支持目录/zip 和重复 `--exclude`。导入器改为字节流式替换 >50 MB 与非 UTF-8 文件中的 `.proma` 路径，保留 zip 符号链接；SQLite 仍仅修改导入副本。导入完成后生成内容完整性清单并运行完整性及原安全/配置校验。此前 2026-09-24 记录的“大文件/非 UTF-8 跳过”是已修复的旧状态。
+- 验证（提交 `ff39f31d` 后实际运行 `bash scripts/personal/package-personal.sh`）：Bun 1.4.2 `bun install` 成功；typecheck 通过；全量测试 546 pass / 5 fail / 1 error，相对既有基线 541/5/1 增加 5 个通过测试、失败和错误数未增加；全部 Electron build 成功（含 web preload、CLI 与 native helpers；renderer 有既有的大 chunk 警告）。
+- 打包产物：`apps/electron/out/mac-arm64/Proma.app`，版本 `0.19.58`，`appId=com.proma.app`，架构 arm64；包内 marker 为 `personal=true`、`version=0.19.58`、`commit=ff39f31d982c511f046a6ecad5008700cefd7271`、`builtAt=2026-09-26T13:30:36.688Z`。`Contents/Resources/app-update.yml` 不存在。`codesign -dv` 确认为 `Signature=adhoc`、`TeamIdentifier=not set`。本地 ad-hoc 签名不代表 Apple Developer 身份签名，也没有公证；此目录包没有启动。
+- /tmp 集成演练：临时假包成功安装路径退出 0，回滚演练用 `--simulate-health-failure` 退出 4 并还原原假应用，数据保持未自动还原；没有触及默认应用/数据目录。导入实测 52,428,825 字节文件与非 UTF-8 文件路径改写、符号链接保留、SQLite 文本字段改写，3 处路径替换，完整性/安全校验通过。verify-backup 目录与 zip 均 PASS，人工篡改 alpha.txt 时按预期退出 1。
+- `verify-backup.py ~/.proma-dev <临时 cp -a 副本>` 只读自检 PASS：77 MiB，2,997 条目，missing/extra/mismatch 均为 0。未读取或写入 `~/.proma`，未访问 `/Applications/Proma.app`，未启动打包产物、停止开发实例或操作官方进程；未 push。
+
+## 2026-09-26: P1–P3 外部复核修复
+
+- 原子安装：安装脚本在任何 app bundle 改名之前安装 EXIT/ERR/INT/TERM 处理；新包先复制到同卷 `.Proma.installing-<时间戳>.app`，校验 marker 完整一致后才 `mv` 到 `Proma.app`。健康失败时先对本次跟踪的新进程及其子进程发送 SIGTERM，最多等待 20 秒，再保留失败包为 `Proma.failed-*.app` 并恢复 `Proma.previous.app`；不会使用 `pkill`/`killall`。新增 `--simulate-copy-failure`，仅在 `/tmp` 的 `--test-mode` 演练。
+- 健康校验：默认观察 60 秒；安装前检查 17888（以及配置启用时的自定义端口）是否被非应用进程占用；安装后验证端口监听 PID 可执行路径属于本次 app。新增 `health-snapshot.py`，比较配置版本、会话数、Automation `id→active`、渠道 `id→name/provider/enabled`、符号链接数和 `planning.db` user_version。更新前后快照只写入时间戳备份目录外层；`proma/` 副本保持 `cp -a` 原样，不写入 object-counts 或 `.personal-migration`。后者是备份导入器写入其导入目标的迁移清单，不是更新备份的附加文件。
+- 日志复核：源码原先没有 electron-log 或主进程文件 transport，`app.getPath('logs')` 只用于显示路径。个人版现写入 `app.getPath('logs')/main.log`（macOS 默认 `~/Library/Logs/Proma/main.log`），最大 5 MiB、保留 3 份轮转，0600 文件权限；日志仅记录 startup/error/fatal 分类，不写错误对象或消息详情，避免泄露密钥。
+- 完整性预设：`verify-backup.py --preset proma-backup` 对目录和 zip 同步排除 `.DS_Store`、`*.lock` 与 `__MACOSX`，也保留自定义 `--exclude`。
+- 安装脚本的成功、模拟健康失败、模拟 staging 复制失败三种演练均使用 `/tmp` 临时应用与数据目录：成功退出 0 并切换假包；健康失败退出 4、恢复旧假包并保留 `Proma.failed-*.app`；复制失败退出 7、旧假包始终未移动且 partial staging 被清理。各自的 `proma/` 副本都经完整性校验无差异，快照/统计只写在时间戳目录外层。没有接触 `/Applications/Proma.app`、`~/.proma` 或官方进程；未 push。
+- 验证：`bun run typecheck` 通过；新增个人日志单测与 P1/Web Remote 测试共 6 pass / 0 fail；集成脚本中的语法检查、备份预设目录/zip 校验、导入和三种安装演练全部通过。最终运行 `package-personal.sh` 的全量测试为 547 pass / 5 fail / 1 error，相对记录基线 541/5/1 增加 6 个通过测试，失败/错误数相同；全部 Electron build（含 web preload、CLI/native helpers）与实际 arm64 目录打包通过。曾有一次 `pi-ego-browser-tool` 测试超过 5 秒导致 6 fail / 2 errors，立即重跑恢复到基线 5/1；测试脚本现正确解析 Bun 的 `errors` 复数总结，不会漏报。
+- 新产物：`apps/electron/out/mac-arm64/Proma.app`，`0.19.58` / `com.proma.app` / arm64，marker commit `4601e74a74051183fda00c3dab06254a2e41e372`，`builtAt=2026-09-26T14:09:45.267Z`；`app-update.yml` absent，`codesign` 显示 adhoc、无 Team ID。未启动产物。主进程原先无文件日志 transport：`app.getPath('logs')` 仅被用于展示位置，无 electron-log；现已加入限量轮转、事件级脱敏的 `main.log`。macOS 默认路径为 `~/Library/Logs/Proma/main.log`，本批未启动应用实测该绝对位置。

@@ -94,7 +94,7 @@ function UpdateCard(): React.ReactElement | null {
           <StatusText status={status.status} version={status.version} error={status.error} />
 
           {/* 操作按钮 */}
-          {status.status === 'downloaded' ? (
+          {status.status === 'managed' ? null : status.status === 'downloaded' ? (
             status.installScheduled ? (
               <button
                 onClick={handleCancelIdleInstall}
@@ -173,6 +173,8 @@ function StatusText({ status, version, error }: {
   error?: string
 }): React.ReactElement {
   switch (status) {
+    case 'managed':
+      return <span className="text-xs text-muted-foreground">个人版由维护流程更新</span>
     case 'checking':
       return <span className="text-xs text-muted-foreground">正在检查...</span>
     case 'available':

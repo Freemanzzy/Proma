@@ -12,6 +12,7 @@ electronVersion: 43.2.0
 directories:
   output: out
   buildResources: resources
+afterPack: scripts/personal-after-pack.cjs
 
 # 压缩配置
 compression: normal

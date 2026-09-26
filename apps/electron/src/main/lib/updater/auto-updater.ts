@@ -13,6 +13,7 @@ import { UPDATER_IPC_CHANNELS } from './updater-types'
 import { createIdleInstallScheduler } from './idle-install-scheduler'
 import { isNewerVersion } from './version'
 import { createUpdateCacheCleanup, getDefaultUpdaterBaseCacheDirectory, shouldDeferUpdateCacheCleanup } from './update-cache-cleanup'
+import { isPersonalBuild } from '../personal-build'
 
 /** 当前更新状态 */
 let currentStatus: UpdateStatus = { status: 'idle' }
@@ -103,11 +104,12 @@ export function configureUpdater(
 
 /** 获取当前更新状态 */
 export function getUpdateStatus(): UpdateStatus {
-  return currentStatus
+  return isPersonalBuild() ? { status: 'managed' } : currentStatus
 }
 
 /** 手动触发检查更新 */
 export async function checkForUpdates(): Promise<void> {
+  if (isPersonalBuild()) return
   // 下载未完成时不能启动第二次下载；已下载版本仍需检查，以便追赶随后发布的新版。
   if (currentStatus.status === 'downloading') {
     console.log('[更新] 跳过检查：正在下载更新')
@@ -142,6 +144,7 @@ export async function checkForUpdates(): Promise<void> {
  * @returns 是否已接受请求；仅 downloaded 状态可排队。
  */
 export function installWhenIdle(): boolean {
+  if (isPersonalBuild()) return false
   if (currentStatus.status !== 'downloaded') {
     console.warn('[更新] 跳过空闲安装：当前没有已下载的更新')
     return false
@@ -155,6 +158,7 @@ export function installWhenIdle(): boolean {
 
 /** 取消尚未执行的空闲安装请求。 */
 export function cancelIdleInstall(): void {
+  if (isPersonalBuild()) return
   idleInstallScheduler.cancel()
   if (currentStatus.status === 'downloaded' && currentStatus.installScheduled) {
     setStatus({ ...currentStatus, installScheduled: false })
@@ -217,6 +221,11 @@ export function cleanupUpdater(): void {
  * @param mainWindow - 主窗口实例，用于推送更新状态
  */
 export function initAutoUpdater(mainWindow: BrowserWindow): void {
+  if (isPersonalBuild()) {
+    currentStatus = { status: 'managed' }
+    console.log('[更新] 个人版由维护流程更新；已禁用官方更新检查、下载与安装')
+    return
+  }
   configureUpdater(mainWindow)
 
   const updateCacheCleanup = createUpdateCacheCleanup({
