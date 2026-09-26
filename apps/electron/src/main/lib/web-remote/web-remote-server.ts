@@ -12,7 +12,7 @@ import { listAgentWorkspaces } from '../agent-workspace-manager'
 import { permissionService } from '../agent-permission-service'
 import { redactSensitiveLogValue } from '../bridge-log-redaction'
 import type { PermissionRequest } from '@proma/shared'
-import { WebRemoteAuth, expectedWebRemoteOrigin, getWebRemoteDataDir, makeAuthCookie, parseCookieHeader, type WebRemoteConfig } from './web-remote-auth'
+import { WebRemoteAuth, expectedWebRemoteOrigin, makeAuthCookie, parseCookieHeader, type WebRemoteConfig } from './web-remote-auth'
 import { WebRemoteEventHub } from './web-remote-events'
 import { toWebRemoteHistory, toWebRemotePermissionRequest, type WebRemoteEvent } from './web-remote-dto'
 import { getConfigDirName } from '../config-paths'
@@ -114,7 +114,7 @@ export class WebRemoteServer {
   constructor(private readonly options: WebRemoteServerOptions) {
     this.auth = options.auth
     this.eventHub = options.eventHub ?? new WebRemoteEventHub()
-    this.pushStore = new WebRemotePushStore(options.pushDataDir ?? getWebRemoteDataDir(), this.auth, (sessionId) => getAgentSessionMeta(sessionId)?.workspaceId, options.pushProxyUrl)
+    this.pushStore = new WebRemotePushStore(options.pushDataDir ?? this.auth.getDataDir(), this.auth, (sessionId) => getAgentSessionMeta(sessionId)?.workspaceId, options.pushProxyUrl)
     this.unsubscribePush = agentEventBus.on((sessionId, payload) => { void this.handlePushEvent(sessionId, payload) })
     this.httpServer = createServer((req, res) => { void this.handleHttp(req, res) })
     this.wsServer = new WebSocketServer({ noServer: true })
