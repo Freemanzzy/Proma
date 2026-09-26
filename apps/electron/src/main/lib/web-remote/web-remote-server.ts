@@ -486,6 +486,11 @@ export class WebRemoteServer {
       resolve(__dirname, '../src/preload/index.ts'),
       resolve(__dirname, '../src/main/lib/web-remote/full-ui/web-electron-shim.ts'),
     ]
+    if (!sources.every((source) => existsSync(source))) {
+      // 安装包（app.asar）内没有源文件，只有构建产物：不存在“开发模式自动重建”的前提，直接看产物是否可用。
+      if (existsSync(output) && statSync(output).size > 0) return { ready: true }
+      return { ready: false, error: '安装包中缺少 web preload（dist/web-remote/preload.js）；请重新执行 package-personal.sh 打包。' }
+    }
     const isCurrent = (): boolean => {
       try {
         const outputTime = statSync(output).mtimeMs

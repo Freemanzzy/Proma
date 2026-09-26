@@ -187,6 +187,55 @@ describe('WebRemoteServer loopback integration', () => {
     }
   })
 
+  test('安装包内源文件缺失但产物存在时视为就绪，不触发开发模式重建', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'proma-web-remote-packaged-'))
+    const packagedRendererDir = mkdtempSync(join(tmpdir(), 'proma-web-remote-packaged-renderer-'))
+    writeFileSync(join(packagedRendererDir, 'index.html'), '<!doctype html><html><body><div id="root"></div></body></html>')
+    const packagedPreloadDir = mkdtempSync(join(tmpdir(), 'proma-web-remote-packaged-preload-'))
+    const packagedWebPreloadPath = join(packagedPreloadDir, 'preload.js')
+    writeFileSync(packagedWebPreloadPath, 'window.__PRELOAD__=true;')
+    const missingSourcePaths = [join(packagedRendererDir, 'missing-preload-source.ts'), join(packagedRendererDir, 'missing-shim-source.ts')]
+    let buildCalls = 0
+    const config = { allowedOrigin: 'https://proma.example', allowedTailscaleLogins: ['lee@example.com'], trustedTailscaleNodes: ['trusted-phone'] }
+    const packagedAuth = new WebRemoteAuth(config, dir, async () => ({ Node: { ComputedName: 'trusted-phone' }, UserProfile: { LoginName: 'lee@example.com' } }))
+    const packagedServer = new WebRemoteServer({ config, auth: packagedAuth, rendererDir: packagedRendererDir, webPreloadPath: packagedWebPreloadPath, webPreloadSourcePaths: missingSourcePaths, buildWebPreload: () => { buildCalls++; return { success: false, error: '不应被调用' } } })
+    await packagedServer.start(0)
+    const packagedPort = (packagedServer.httpServer.address() as { port: number }).port
+    try {
+      const headers = { Origin: 'https://proma.example', 'Tailscale-User-Login': 'lee@example.com', 'X-Forwarded-For': '100.90.1.2' }
+      const response = await fetch(`http://127.0.0.1:${packagedPort}/app/`, { headers })
+      expect(response.status).toBe(200)
+      expect(buildCalls).toBe(0)
+    } finally {
+      await packagedServer.stop()
+    }
+  })
+
+  test('安装包内源文件与产物均缺失时返回中文错误提示且不触发开发模式重建', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'proma-web-remote-packaged-missing-'))
+    const packagedRendererDir = mkdtempSync(join(tmpdir(), 'proma-web-remote-packaged-missing-renderer-'))
+    writeFileSync(join(packagedRendererDir, 'index.html'), '<!doctype html><html><body><div id="root"></div></body></html>')
+    const packagedPreloadDir = mkdtempSync(join(tmpdir(), 'proma-web-remote-packaged-missing-preload-'))
+    const packagedWebPreloadPath = join(packagedPreloadDir, 'preload.js')
+    const missingSourcePaths = [join(packagedRendererDir, 'missing-preload-source.ts'), join(packagedRendererDir, 'missing-shim-source.ts')]
+    let buildCalls = 0
+    const config = { allowedOrigin: 'https://proma.example', allowedTailscaleLogins: ['lee@example.com'], trustedTailscaleNodes: ['trusted-phone'] }
+    const packagedAuth = new WebRemoteAuth(config, dir, async () => ({ Node: { ComputedName: 'trusted-phone' }, UserProfile: { LoginName: 'lee@example.com' } }))
+    const packagedServer = new WebRemoteServer({ config, auth: packagedAuth, rendererDir: packagedRendererDir, webPreloadPath: packagedWebPreloadPath, webPreloadSourcePaths: missingSourcePaths, buildWebPreload: () => { buildCalls++; return { success: false, error: '不应被调用' } } })
+    await packagedServer.start(0)
+    const packagedPort = (packagedServer.httpServer.address() as { port: number }).port
+    try {
+      const headers = { Origin: 'https://proma.example', 'Tailscale-User-Login': 'lee@example.com', 'X-Forwarded-For': '100.90.1.2' }
+      const response = await fetch(`http://127.0.0.1:${packagedPort}/app/`, { headers })
+      const html = await response.text()
+      expect(response.status).toBe(503)
+      expect(html).toContain('安装包')
+      expect(buildCalls).toBe(0)
+    } finally {
+      await packagedServer.stop()
+    }
+  })
+
   test('开发模式访问 /app/ 时自动重建缺失的独立 preload', async () => {
     const headers = { Cookie: cookie, 'Tailscale-User-Login': 'lee@example.com' }
     const backup = readFileSync(webPreloadPath)
