@@ -3,7 +3,7 @@ export function renderWebRemoteMobilePatch(): string {
 @media (max-width: 767px) {
   html, body, #root { width:100%; min-width:0; max-width:100%; overflow-x:hidden; }
   html, body, #root, .shell-bg.h-screen { height:100dvh!important; min-height:0!important; }
-  [data-web-remote-main="true"] { padding-bottom:env(safe-area-inset-bottom); box-sizing:border-box; }
+  [data-web-remote-main="true"] { padding-bottom:calc(env(safe-area-inset-bottom) + var(--web-remote-keyboard-inset, 0px)); box-sizing:border-box; }
   body { overscroll-behavior-x:none; }
   [data-web-remote-app-content="true"] { position:relative; width:100vw!important; max-width:100vw; padding-top:56px!important; }
   [data-web-remote-sidebar="left"] { position:fixed!important; inset:0 auto 0 0; z-index:10001!important; width:min(86vw,340px)!important; max-width:340px; transform:translateX(-105%); transition:transform .18s ease; box-shadow:none; }
@@ -50,7 +50,21 @@ export function renderWebRemoteMobilePatch(): string {
   function start(){
     if (window.innerWidth >= 768 && (window.screen?.width ?? window.innerWidth) >= 768) return;
   var body=document.body;
+  var viewport=window.visualViewport;
+  function syncKeyboardViewport(){
+    if(!viewport)return;
+    var focused=document.activeElement;
+    var editable=focused instanceof HTMLElement && (focused.matches('input,textarea,[contenteditable="true"]'));
+    var inset=Math.max(0,Math.round(window.innerHeight-viewport.height-viewport.offsetTop));
+    body.style.setProperty('--web-remote-keyboard-inset',editable&&inset>80?inset+'px':'0px');
+    if(editable&&inset>80){try{focused.scrollIntoView({block:'center',inline:'nearest',behavior:'auto'})}catch{};window.setTimeout(function(){window.scrollTo(0,0)},0)}
+  }
+  window.addEventListener('proma-web-remote-open-preview',function(){body.dataset.webRemoteRightOpen='true';var toggle=document.querySelector('[data-web-remote-panel-toggle]');if(toggle){toggle.textContent='×';toggle.setAttribute('aria-label','折叠右侧工作区')}});
+  document.addEventListener('focusin',syncKeyboardViewport,true);
+  document.addEventListener('focusout',function(){window.setTimeout(syncKeyboardViewport,80)},true);
+  if(viewport){viewport.addEventListener('resize',syncKeyboardViewport);viewport.addEventListener('scroll',syncKeyboardViewport)}
   function ensure(){
+    syncKeyboardViewport();
     if (!document.querySelector('[data-web-remote-mobile-menu]')) {
       var menu=document.createElement('button'); menu.type='button'; menu.textContent='☰'; menu.setAttribute('aria-label','打开侧栏'); menu.dataset.webRemoteMobileMenu='true';
       menu.addEventListener('click',function(){body.dataset.webRemoteSidebarOpen='true'}); document.body.appendChild(menu);

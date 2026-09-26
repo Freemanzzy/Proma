@@ -13,8 +13,11 @@ describe('web remote full-ui spike', () => {
     expect((roundTrip.bytes as Uint8Array)[2]).toBe(3)
   })
 
-  test('returns structured denial for sensitive channels', () => {
+  test('returns structured denial for sensitive and desktop-only mobile-admin channels', () => {
     expect(getWebRemoteDeniedError('channel:decrypt-key')).toEqual({ denied: true, channel: 'channel:decrypt-key' })
+    for (const channel of ['web-remote:admin-get', 'web-remote:admin-save', 'web-remote:admin-pair', 'web-remote:admin-revoke']) {
+      expect(getWebRemoteDeniedError(channel)).toEqual({ denied: true, channel })
+    }
     expect(getWebRemoteDeniedError('agent:list-sessions')).toBeNull()
   })
 

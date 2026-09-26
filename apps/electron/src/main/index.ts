@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, scree
 import { join } from 'path'
 import { pathToFileURL } from 'url'
 import { existsSync } from 'fs'
+import { registerWebRemoteAdminIpc } from './lib/web-remote/web-remote-admin-ipc'
 
 // Dev 与正式版使用独立的 userData 目录，避免共享 Chromium SingletonLock 导致 dev 启动被静默退出
 // 必须在任何会读取 userData 路径的模块加载之前执行
@@ -755,6 +756,7 @@ async function bootstrap(): Promise<void> {
     },
   })
   registerIpcHandlers()
+  registerWebRemoteAdminIpc()
   if (fullUiBridge) {
     const counts = fullUiBridge.getRegistrationCounts()
     console.log(`[Web Remote] full-ui 已登记 invoke=${counts.invoke} event=${counts.event}`)
@@ -929,6 +931,7 @@ function handleBootstrapFailure(err: unknown): void {
 
   try {
     registerIpcHandlers()
+    registerWebRemoteAdminIpc()
     createWindow()
   } catch (fallbackErr) {
     console.error('[启动] 降级窗口创建也失败:', fallbackErr)

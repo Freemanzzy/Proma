@@ -501,6 +501,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       unrestricted: true,
       basePaths: bp.length > 0 ? bp : undefined,
     })
+    if ((window as Window & { __PROMA_WEB_REMOTE__?: boolean }).__PROMA_WEB_REMOTE__) window.dispatchEvent(new Event('proma-web-remote-open-preview'))
   }, [sessionId, openPreview])
 
   // Worktree 选择状态（仅用于 diff 文件点击时传递 baseRef，选取逻辑已下沉至 DiffChangesList）

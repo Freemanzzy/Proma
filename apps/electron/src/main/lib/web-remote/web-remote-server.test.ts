@@ -201,10 +201,15 @@ describe('WebRemoteServer loopback integration', () => {
   test('manifest 与图标路由无需登录且不泄露会话数据', async () => {
     const manifest = await fetch(`http://127.0.0.1:${port}/manifest.webmanifest`)
     expect(manifest.status).toBe(200)
-    expect((await manifest.json()).name).toBe('Proma 远程')
-    const icon = await fetch(`http://127.0.0.1:${port}/icon.svg`)
-    expect(icon.status).toBe(200)
-    expect(await icon.text()).toContain('<svg')
+    const manifestJson = await manifest.json() as { name: string; short_name: string; start_url: string; display: string; icons: Array<{ src: string; sizes: string }> }
+    expect(manifestJson).toMatchObject({ name: 'Proma', short_name: 'Proma', start_url: '/app/', display: 'standalone' })
+    expect(manifestJson.icons.map((item) => item.sizes)).toEqual(['192x192', '512x512'])
+    for (const iconPath of ['/icon.svg', '/icon-192.svg', '/icon-512.svg']) {
+      const icon = await fetch(`http://127.0.0.1:${port}${iconPath}`)
+      expect(icon.status).toBe(200)
+      expect(icon.headers.get('content-type')).toContain('image/svg+xml')
+      expect(await icon.text()).toContain('<svg')
+    }
   })
 
   test('无令牌 API 返回 401', async () => {

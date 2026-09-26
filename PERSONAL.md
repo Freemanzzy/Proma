@@ -338,3 +338,13 @@ python3 scripts/personal/import-proma-backup.py \\
 
 - 用户真机验证手机附件（相册/拍照/文件/粘贴）通过；父会话在最终代码上独立复跑 iPhone UA 附件链路通过（文本首行、图片识别）。
 - 清理：经应用 `agent:delete-session` 删除 35 个 harness 测试会话与 2 个空白会话；删除前会话索引备份于 /tmp。
+
+## 2026-09-26: 手机完整客户端 B2
+
+- 桌面“设置 → 远程连接”新增“手机访问”管理分区及独立 renderer 组件：展示开发实例服务状态、`allowedOrigin`、唯一连接设备数、受信 Tailnet 设备、配对设备、配对码与工作区范围；支持启停/full-ui、受信节点增删、设备撤销及范围选择。Tailscale 候选仅通过只读 `tailscale status --json` 获取并按当前账号过滤。配置字段严格校验，使用临时文件 + rename 原子写入并设为 `0600`；enabled/fullUi 明确标注需重启，受信节点/工作区授权借助既有轮询刷新。
+- 新增 `web-remote:admin-get/save/pair/revoke` 管理 IPC；四通道在 full-ui 显式分级表和 denied 清单中均为 `denied`，远程 renderer 隐藏管理分区，主进程处理器只接受开发实例的本地 `file://` renderer。登记覆盖率仍为 100%。
+- 手机文件预览通过 SidePanel 既有 `PreviewPanel` 路径打开，继续使用分级 `file:*` IPC 与 realpath 根目录检查。移动补丁使用 `visualViewport` resize/focus 维护键盘 inset 与输入可见位置，并保留 standalone 安全区。
+- `/app/` PWA manifest 改为 `Proma`，声明 standalone、192/512 SVG 图标；静态路由公开提供图标，文档头加入 iOS standalone 与 touch-icon 元数据，CSP 显式允许 `manifest-src 'self'`。
+- `mobile-harness.mjs` 支持 1280×800 桌面视口检查管理 IPC denied；finally 对运行期间记录的新建专用会话逐一调用 `agent:delete-session` 确认流程，记录删除前后清单并核实已有会话不变；设备撤销、Chrome/profile 清理流程保留。
+- 验证（提交前）：typecheck、Web Remote + 设置分区 SSR + harness 定向测试 62 pass、`node --check`、`build:main`、`build:renderer`、`build:web-preload` 通过；全量测试 534 pass / 5 fail / 1 error，与 B1 既有的 5 fail / 1 error 类别一致，无新增失败/错误。远程 1280×800 harness 确认四个管理 IPC 均 denied，手机访问分区不可见；Chrome/profile 与测试配对设备已清理。开发配置 SHA-256 前后相同，未更改配置值；包版本保持 0.19.57。
+- 当前未完成文件预览的移动端 E2E 截图：harness 能上传本次专用会话内的 Markdown 与图片，但本轮无法在手机 Files 面板中稳定定位附件树行；不将文件预览记为已验证。键盘模拟及双 UA smoke 的最终证据应以最后提交后的 harness 结果为准。

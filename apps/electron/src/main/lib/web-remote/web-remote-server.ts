@@ -112,6 +112,10 @@ export class WebRemoteServer {
     this.wsServer.on('connection', (ws: WebSocket, req: IncomingMessage) => this.handleWebSocket(ws, req))
   }
 
+  getConnectedDeviceCount(): number {
+    return new Set([...this.connections.keys()].map((ws) => (ws as WebSocket & { webRemoteDeviceId?: string }).webRemoteDeviceId).filter((id): id is string => !!id)).size
+  }
+
   getAuth(): WebRemoteAuth {
     return this.auth
   }
@@ -181,6 +185,12 @@ export class WebRemoteServer {
     if (method === 'GET' && path === '/manifest.webmanifest') {
       res.writeHead(200, { 'Content-Type': 'application/manifest+json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' })
       res.end(renderWebRemoteManifest())
+      return
+    }
+
+    if (method === 'GET' && (path === '/icon-192.svg' || path === '/icon-512.svg')) {
+      res.writeHead(200, { 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' })
+      res.end(renderWebRemoteIcon())
       return
     }
 
@@ -381,7 +391,7 @@ export class WebRemoteServer {
       body = rendered.body
       nonce = rendered.nonce
       headers['Content-Type'] = 'text/html; charset=utf-8'
-      headers['Content-Security-Policy'] = `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data: blob:; font-src 'self' data:; base-uri 'none'; frame-ancestors 'none'`
+      headers['Content-Security-Policy'] = `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; manifest-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data: blob:; font-src 'self' data:; base-uri 'none'; frame-ancestors 'none'`
     } else {
       const ext = safePath.split('.').pop()?.toLowerCase()
       headers['Content-Type'] = ({ js: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8', json: 'application/json; charset=utf-8', svg: 'image/svg+xml', png: 'image/png', webp: 'image/webp', ico: 'image/x-icon', woff: 'font/woff', woff2: 'font/woff2' } as Record<string, string>)[ext ?? ''] ?? 'application/octet-stream'

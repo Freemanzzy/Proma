@@ -83,6 +83,12 @@ describe('Web Remote full-ui security policy', () => {
     expect(pending.exitPlans[0].sessionId).toBe('s-1')
   })
 
+  test('手机访问桌面管理 IPC 全部显式分级为 denied', () => {
+    for (const channel of ['web-remote:admin-get', 'web-remote:admin-save', 'web-remote:admin-pair', 'web-remote:admin-revoke']) {
+      expect(getWebRemoteChannelPolicy(channel)).toMatchObject({ level: 'denied', scope: 'none' })
+    }
+  })
+
   test('默认拒绝、denied 通道和 session/workspace 越权均生效', async () => {
     const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
     bridge.registerInvoke('agent:get-sdk-messages', async () => ['ok'])
