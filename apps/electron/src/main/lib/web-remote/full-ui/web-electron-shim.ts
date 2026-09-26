@@ -139,7 +139,74 @@ function safeDeniedValue(channel: string): unknown {
   return /(?:list|get.*(?:status|tools|sounds)|statuses|candidates|search)/i.test(channel) ? [] : null
 }
 
+const MOBILE_FILE_MAX_BYTES = 25 * 1024 * 1024
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize))
+  }
+  return btoa(binary)
+}
+
+function openBrowserFileDialog(): Promise<unknown> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.multiple = true
+    input.accept = 'image/*,video/*,audio/*,.pdf,.txt,.md,.json,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip'
+    input.setAttribute('capture', 'environment')
+    input.style.position = 'fixed'
+    input.style.left = '-10000px'
+    document.body.appendChild(input)
+    let settled = false
+    let cancelTimer: number | undefined
+    const finish = (value: unknown) => {
+      if (settled) return
+      settled = true
+      if (cancelTimer !== undefined) window.clearTimeout(cancelTimer)
+      input.remove()
+      resolve(value)
+    }
+    // Keep the input alive briefly after the browser reports picker cancellation. This also
+    // permits CDP/mobile automation to attach files to the just-created input before cleanup.
+    input.addEventListener('cancel', () => {
+      cancelTimer = window.setTimeout(() => finish({ files: [], directories: [] }), 1_500)
+    }, { once: true })
+    input.addEventListener('change', () => {
+      if (cancelTimer !== undefined) window.clearTimeout(cancelTimer)
+      void (async () => {
+        const files: Array<{ filename: string; mediaType: string; data: string; size: number }> = []
+        const skippedFiles: Array<{ filename: string; size: number; reason: 'unreadable'; message: string }> = []
+        for (const file of Array.from(input.files ?? [])) {
+          if (file.size > MOBILE_FILE_MAX_BYTES) {
+            skippedFiles.push({ filename: file.name, size: file.size, reason: 'unreadable', message: '手机端单个附件不能超过 25MB' })
+            continue
+          }
+          try {
+            files.push({ filename: file.name, mediaType: file.type || 'application/octet-stream', data: bytesToBase64(new Uint8Array(await file.arrayBuffer())), size: file.size })
+          } catch {
+            skippedFiles.push({ filename: file.name, size: file.size, reason: 'unreadable', message: '浏览器无法读取此文件' })
+          }
+        }
+        finish({ files, skippedFiles, directories: [] })
+      })()
+    }, { once: true })
+    input.click()
+  })
+}
+
 async function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
+  if (channel === 'agent:open-file-or-folder-dialog') return openBrowserFileDialog()
+  if (channel === 'agent:save-files-to-session') {
+    try { return await invokeWithToken(channel, args) }
+    catch (error) {
+      const access = error as { denied?: boolean; reason?: string }
+      if (access?.denied) throw new Error(access.reason || '手机附件上传被服务端拒绝')
+      throw error
+    }
+  }
   try {
     return await invokeWithToken(channel, args)
   } catch (error) {

@@ -322,3 +322,35 @@ python3 scripts/personal/import-proma-backup.py \\
 - 用户在 OPPO（Android Chrome）与 iPhone（Safari）真机验收通过：受信 Tailnet 设备免配对、两台同时在线、实时输出、计划审批卡（手机端批准）、中止、iPhone 底部栏与输入栏左侧控件可点。
 - 已知注意：重建 renderer 会清空 `dist/renderer/preload.js`，必须随后运行 `scripts/personal/build-web-preload.ts`，否则手机端空白（阶段 B 改为自动生成并在缺失时显式报错）。
 - 合并到 `personal`。
+
+## 2026-09-26: 手机完整客户端 B1（实现与端到端预检）
+
+- Web preload 产物改为独立 `apps/electron/dist/web-remote/preload.js`，不依赖 `dist/renderer/`；`build:web-preload` 加入 Electron 完整 build 链路。`/app/` 请求前校验产物是否早于 preload 源或浏览器 shim；开发模式自动重建，失败时返回中文说明页和修复命令。
+- full-ui shim 接管 Agent 回形针入口，提供支持多选、相册/拍照类型的浏览器文件选择器；文件由浏览器读取为 base64。附件选择、粘贴与拖放经 `saveFilesToAgentSession` 保存到当前会话目录，并以桌面端附件预览项/引用方式显示。上传时有 toast，失败显示错误；手机端每文件上限 25MB，桌面既有 100MB 限制不变。服务端验证文件名、base64、大小及 session/workspace 授权。
+- Harness 的 `findElement` 现支持可见文字、`aria-label`、`aria-labelledby` 与 button/`role=button` 定位；回形针入口通过无文本 aria-label 点击。文件选择器取消时延迟 1.5 秒清理，给 CDP `DOM.setFileInputFiles` 留出操作窗口；测试 PNG 为有效 32×32 红色图像。Smoke 每次都在本次新建的专用会话运行，不会向既有会话发送消息。
+- Android UA 与 iPhone UA 附件端到端预检均通过：文本文件保存到专用会话目录，输入区出现附件，Agent 只回复第一行 `B1_ATTACHMENT_FIRST_LINE`；有效红色 PNG 保存并显示为附件，Agent 回答 `Red`。两次测试前后，既有会话 ID、标题和权限模式均未变化。
+- preload recovery 预检通过：故意删除 `dist/web-remote/preload.js` 后访问 `/app/`，开发服务自动重建（119,705 bytes），页面正常加载且无错误页。Android 与 iPhone smoke 的页面加载、pong、MCP/Skills、Todo、Automation、文件面板步骤均通过。
+- 回归：typecheck 通过；Web Remote 57 pass / 0 fail；`scripts/personal/mobile-harness.test.mjs` 2 pass / 0 fail；全量 `bun test` 为 531 pass / 5 fail / 1 error，相对基线 527/5/1 未增加失败或错误。既有失败仍为 Electron `dialog`/`shell` 导出、OAuth proxy scope、`redactProxyUrl` 和 planning-manager Electron binary 问题。`build:main`、`build:renderer`、`build:web-preload` 均通过；重建 renderer 后独立 preload 仍在，旧 `dist/renderer/preload.js` 不存在，版本为 0.19.57。
+- 用户此前指出的 3 个失败运行遗留的空 `web-remote-harness-attachments-*` 会话均保留；本轮新建的测试会话也保留，未删除、重命名或改动既有会话。最终验收截图会在最后提交后生成于 `/tmp/web-remote-b1/`。
+- 所有预检 harness 设备均已撤销，Chrome 进程/profile 清理完成，`/tmp/proma-mobile-chrome-*` 数量为 0。未手动停止/重启开发实例；未改版本、Web Remote 配置或用户设备；未操作官方版、`~/.proma` 或 Tailscale。
+
+## 2026-09-26: 手机完整客户端 B1 真机验收通过
+
+- 用户真机验证手机附件（相册/拍照/文件/粘贴）通过；父会话在最终代码上独立复跑 iPhone UA 附件链路通过（文本首行、图片识别）。
+- 清理：经应用 `agent:delete-session` 删除 35 个 harness 测试会话与 2 个空白会话；删除前会话索引备份于 /tmp。
+
+## 2026-09-26: 手机完整客户端 B2
+
+- 桌面“设置 → 远程连接”新增“手机访问”管理分区及独立 renderer 组件：展示开发实例服务状态、`allowedOrigin`、唯一连接设备数、受信 Tailnet 设备、配对设备、配对码与工作区范围；支持启停/full-ui、受信节点增删、设备撤销及范围选择。Tailscale 候选仅通过只读 `tailscale status --json` 获取并按当前账号过滤。配置字段严格校验，使用临时文件 + rename 原子写入并设为 `0600`；enabled/fullUi 明确标注需重启，受信节点/工作区授权借助既有轮询刷新。
+- 新增 `web-remote:admin-get/save/pair/revoke` 管理 IPC；四通道在 full-ui 显式分级表和 denied 清单中均为 `denied`，远程 renderer 隐藏管理分区，主进程处理器只接受开发实例的本地 `file://` renderer。登记覆盖率仍为 100%。
+- 手机文件预览通过 SidePanel 既有 `PreviewPanel` 路径打开，继续使用分级 `file:*` IPC 与 realpath 根目录检查。移动补丁使用 `visualViewport` resize/focus 维护键盘 inset 与输入可见位置，并保留 standalone 安全区。
+- `/app/` PWA manifest 改为 `Proma`，声明 standalone、192/512 SVG 图标；静态路由公开提供图标，文档头加入 iOS standalone 与 touch-icon 元数据，CSP 显式允许 `manifest-src 'self'`。
+- `mobile-harness.mjs` 支持 1280×800 桌面视口检查管理 IPC denied；finally 对运行期间记录的新建专用会话逐一调用 `agent:delete-session` 确认流程，记录删除前后清单并核实已有会话不变；设备撤销、Chrome/profile 清理流程保留。
+- 验证（提交前）：typecheck、Web Remote + 设置分区 SSR + harness 定向测试 62 pass、`node --check`、`build:main`、`build:renderer`、`build:web-preload` 通过；全量测试 534 pass / 5 fail / 1 error，与 B1 既有的 5 fail / 1 error 类别一致，无新增失败/错误。远程 1280×800 harness 确认四个管理 IPC 均 denied，手机访问分区不可见；Chrome/profile 与测试配对设备已清理。开发配置 SHA-256 前后相同，未更改配置值；包版本保持 0.19.57。
+- 当前未完成文件预览的移动端 E2E 截图：harness 能上传本次专用会话内的 Markdown 与图片，但本轮无法在手机 Files 面板中稳定定位附件树行；不将文件预览记为已验证。键盘模拟及双 UA smoke 的最终证据应以最后提交后的 harness 结果为准。
+
+## 2026-09-26: 手机完整客户端阶段 B 真机验收通过
+
+- 用户真机验收通过：文件预览、软键盘不遮挡、添加到主屏幕（standalone）。B1 附件此前已通过。
+- 父会话复核修复：桌面“手机访问”管理 IPC 原仅接受 `file://` 渲染页，开发实例主窗口来自本地 Vite 服务，导致桌面操作全部被拒；已放行开发服务来源（桥接调用 senderFrame 为 null 仍被拒，且通道在远程分级为 denied）。
+- 合并到 `personal`。

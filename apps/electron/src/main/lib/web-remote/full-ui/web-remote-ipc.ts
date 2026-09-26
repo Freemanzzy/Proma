@@ -11,6 +11,8 @@ import { getWebRemoteChannelPolicy, getDeclaredWebRemoteChannels, type WebRemote
 
 const REQUEST_TIMEOUT_MS = 30_000
 const CONFIRM_TTL_MS = 60_000
+const WEB_REMOTE_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024
+const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024
 const SENSITIVE_KEY = /(?:api.?key|token|secret|password|credential|authorization|private.?key|refresh|cookie|encrypted|decrypted)/i
 
 type InvokeHandler = (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
@@ -305,6 +307,35 @@ export class WebRemoteIpcBridge {
     return true
   }
 
+  private validateRemoteAttachment(channel: string, args: unknown[]): WebRemoteAccessError | null {
+    if (channel !== 'agent:save-files-to-session') return null
+    const input = args[0] as { workspaceSlug?: unknown; sessionId?: unknown; files?: unknown } | undefined
+    if (!input || typeof input.workspaceSlug !== 'string' || typeof input.sessionId !== 'string' || !Array.isArray(input.files)) {
+      return this.deny(channel, '附件参数不完整')
+    }
+    const workspace = this.resolvers.listWorkspaces().find((item) => item.slug === input.workspaceSlug)
+    const session = this.resolvers.getSessionMeta(input.sessionId)
+    if (!workspace || !session || session.workspaceId !== workspace.id || !this.workspaceAllowed(workspace.id)) {
+      return this.deny(channel, '会话或工作区不在当前设备授权范围内')
+    }
+    for (const file of input.files) {
+      if (!file || typeof file !== 'object') return this.deny(channel, '附件参数无效')
+      const entry = file as { filename?: unknown; data?: unknown }
+      if (typeof entry.filename !== 'string' || !entry.filename.trim() || entry.filename === '.' || entry.filename === '..' || entry.filename.includes('/') || entry.filename.includes('\\') || /[\x00-\x1f\x7f]/.test(entry.filename)) {
+        return this.deny(channel, '文件名不安全，已拒绝保存')
+      }
+      if (typeof entry.data !== 'string' || entry.data.length % 4 !== 0 || /[^A-Za-z0-9+/=]/.test(entry.data)) {
+        return this.deny(channel, '附件数据格式无效')
+      }
+      const paddingAt = entry.data.indexOf('=')
+      if (paddingAt >= 0 && !/^={1,2}$/.test(entry.data.slice(paddingAt))) return this.deny(channel, '附件数据格式无效')
+      const bytes = Buffer.from(entry.data, 'base64').byteLength
+      if (bytes > MAX_ATTACHMENT_BYTES) return this.deny(channel, '文件超过 100MB 附件上限')
+      if (bytes > WEB_REMOTE_ATTACHMENT_MAX_BYTES) return this.deny(channel, '手机端单个附件不能超过 25MB，请压缩或拆分后重试')
+    }
+    return null
+  }
+
   private async authorize(client: IpcClient, channel: string, policy: WebRemoteChannelPolicyEntry | undefined, args: unknown[], confirmToken?: string): Promise<WebRemoteAccessError | WebRemoteConfirmError | null> {
     if (!policy) {
       if (!this.loggedUnknown.has(channel)) { this.loggedUnknown.add(channel); console.warn(`[Web Remote] 未登记通道默认拒绝: ${channel}`) }
@@ -377,6 +408,8 @@ export class WebRemoteIpcBridge {
     const { type, id, channel } = message
     if (!channel || (type !== 'invoke' && type !== 'send')) { this.send(client, { type: 'error', id, error: 'unsupported message' }); return }
     const args = Array.isArray(message.args) ? message.args.map(decodeWebRemoteValue) : []
+    const attachmentError = this.validateRemoteAttachment(channel, args)
+    if (attachmentError) { this.send(client, { type: 'response', id, ok: false, error: attachmentError }); return }
     const policy = this.policy(channel)
     const authorization = await this.authorize(client, channel, policy, args, message.confirmToken)
     if (authorization) { this.send(client, { type: 'response', id, ok: false, error: authorization }); return }

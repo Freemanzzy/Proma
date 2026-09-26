@@ -206,6 +206,10 @@ import { QUICK_TASK_IPC_CHANNELS, TRAY_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNEL
  * 暴露给渲染进程的 API 接口定义
  */
 export interface ElectronAPI {
+  getWebRemoteAdminStatus: () => Promise<any>
+  saveWebRemoteAdminConfig: (patch: Record<string, unknown>) => Promise<unknown>
+  createWebRemotePairingCode: () => Promise<{ code: string; expiresAt: number }>
+  revokeWebRemoteDevice: (deviceId: string) => Promise<boolean>
   // ===== 运行时相关 =====
 
   /**
@@ -1374,6 +1378,10 @@ export interface ElectronAPI {
  * 实现 ElectronAPI 接口
  */
 const electronAPI = {
+  getWebRemoteAdminStatus: () => ipcRenderer.invoke('web-remote:admin-get'),
+  saveWebRemoteAdminConfig: (patch: Record<string, unknown>) => ipcRenderer.invoke('web-remote:admin-save', patch),
+  createWebRemotePairingCode: () => ipcRenderer.invoke('web-remote:admin-pair'),
+  revokeWebRemoteDevice: (deviceId: string) => ipcRenderer.invoke('web-remote:admin-revoke', deviceId),
   // 运行时
   getRuntimeStatus: () => {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_RUNTIME_STATUS)

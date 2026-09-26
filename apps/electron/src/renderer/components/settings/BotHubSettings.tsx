@@ -15,13 +15,14 @@ import { FeishuSettings } from './FeishuSettings'
 import { WeChatSettings } from './WeChatSettings'
 import { BotDefaultSettings } from './BotDefaultSettings'
 import { PromaLogoSettings } from './PromaLogoSettings'
+import { WebRemoteMobileSettings } from './WebRemoteMobileSettings'
 import feishuLogo from '@/assets/bots/feishu.png'
 import wechatLogo from '@/assets/bots/wechat.png'
 import promaLogo from '@/assets/models/proma.png'
 
 // ===== 类型 =====
 
-type BotPlatformId = 'feishu' | 'wechat' | 'defaults' | 'logos'
+type BotPlatformId = 'feishu' | 'wechat' | 'defaults' | 'logos' | 'mobile-access'
 
 interface BotPlatformDef {
   id: BotPlatformId
@@ -37,6 +38,7 @@ interface BotPlatformDef {
 // ===== 平台定义 =====
 
 const PLATFORMS: readonly BotPlatformDef[] = [
+  { id: 'mobile-access', name: '手机访问', iconChar: '📱', iconBgClass: 'bg-muted', iconTextClass: 'text-muted-foreground' },
   {
     id: 'feishu',
     name: '飞书',
@@ -159,6 +161,8 @@ function renderPlatformPanel(id: BotPlatformId): React.ReactElement {
       return <BotDefaultSettings />
     case 'logos':
       return <PromaLogoSettings />
+    case 'mobile-access':
+      return <WebRemoteMobileSettings />
   }
 }
 

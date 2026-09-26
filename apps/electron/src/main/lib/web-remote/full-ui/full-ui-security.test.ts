@@ -83,6 +83,12 @@ describe('Web Remote full-ui security policy', () => {
     expect(pending.exitPlans[0].sessionId).toBe('s-1')
   })
 
+  test('手机访问桌面管理 IPC 全部显式分级为 denied', () => {
+    for (const channel of ['web-remote:admin-get', 'web-remote:admin-save', 'web-remote:admin-pair', 'web-remote:admin-revoke']) {
+      expect(getWebRemoteChannelPolicy(channel)).toMatchObject({ level: 'denied', scope: 'none' })
+    }
+  })
+
   test('默认拒绝、denied 通道和 session/workspace 越权均生效', async () => {
     const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
     bridge.registerInvoke('agent:get-sdk-messages', async () => ['ok'])
@@ -135,6 +141,31 @@ describe('Web Remote full-ui security policy', () => {
     expect(events.every((item) => item.value.sessionId === 's-1')).toBe(true)
     expect(events.map((item) => item.value.payload.kind === 'proma_event' ? item.value.payload.event.type : item.value.payload.kind)).toEqual(['ask_user_request', 'exit_plan_mode_request', 'sdk_message'])
     expect(events[1].value.payload.event.request.planDocument.filePath).toBe('/session/plan/plan.md')
+  })
+
+  test('手机附件拒绝路径穿越、25MB 超限和未授权会话，合法附件正常写入', async () => {
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
+    let saved: unknown
+    bridge.registerInvoke('agent:save-files-to-session', async (_event, input) => { saved = input; return [{ filename: 'note.txt', targetPath: '/sessions/s-1/attachments/note.txt' }] })
+    const ws = client(bridge)
+    const base = { workspaceSlug: 'one', sessionId: 's-1', files: [{ filename: 'note.txt', data: Buffer.from('hello').toString('base64') }] }
+    const traversal = await invoke(ws, 'agent:save-files-to-session', [{ ...base, files: [{ filename: '../escape.txt', data: 'aGVsbG8=' }] }])
+    expect(traversal.error.denied).toBe(true)
+    expect(traversal.error.reason).toContain('文件名不安全')
+
+    const oversizedData = Buffer.alloc(25 * 1024 * 1024 + 1).toString('base64')
+    const oversized = await invoke(ws, 'agent:save-files-to-session', [{ ...base, files: [{ filename: 'large.bin', data: oversizedData }] }])
+    expect(oversized.error.denied).toBe(true)
+    expect(oversized.error.reason).toContain('25MB')
+
+    const unauthorized = await invoke(ws, 'agent:save-files-to-session', [{ ...base, sessionId: 's-2' }])
+    expect(unauthorized.error.denied).toBe(true)
+    expect(unauthorized.error.reason).toContain('授权范围')
+
+    const normal = await invoke(ws, 'agent:save-files-to-session', [base])
+    expect(normal.ok).toBe(true)
+    expect(normal.value[0].targetPath).toContain('/sessions/s-1/')
+    expect(saved).toEqual(base)
   })
 
   test('confirm 通道首次返回挑战，带一次性 token 才执行', async () => {

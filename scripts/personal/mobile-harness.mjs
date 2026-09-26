@@ -9,7 +9,7 @@
  * no private hostname is embedded in this file.
  */
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
@@ -50,7 +50,8 @@ function parseArgs(argv) {
   if (!result.url) throw new Error('必须通过 --url 或 PROMA_WEB_REMOTE_URL 提供 Web Remote 地址')
   if (!/^https?:\/\//.test(result.url)) throw new Error('--url 必须是 http(s) 地址')
   if (!Number.isInteger(result.width) || !Number.isInteger(result.height) || result.width < 240 || result.height < 400) throw new Error('视口尺寸无效')
-  if (!(result.deviceScaleFactor >= 2 && result.deviceScaleFactor <= 3.5)) throw new Error('deviceScaleFactor 必须在 2 到 3.5 之间')
+  if (!(result.deviceScaleFactor >= 1 && result.deviceScaleFactor <= 3.5)) throw new Error('deviceScaleFactor 必须在 1 到 3.5 之间')
+  if (!['android', 'iphone', 'desktop'].includes(result.userAgent)) throw new Error('--user-agent 仅支持 android|iphone|desktop')
   return result
 }
 
@@ -93,6 +94,11 @@ class CdpClient {
     const listeners = this.listeners.get(method) ?? []
     listeners.push(listener)
     this.listeners.set(method, listeners)
+  }
+
+  off(method, listener) {
+    const listeners = this.listeners.get(method) ?? []
+    this.listeners.set(method, listeners.filter((item) => item !== listener))
   }
 
   command(method, params = {}) {
@@ -189,11 +195,12 @@ async function findElement(client, text, selector = 'body *') {
     const wanted=${quoteJs(text)};
     const nodes=[...document.querySelectorAll(${quoteJs(selector)})];
     const visible=(node)=>{const r=node.getBoundingClientRect();const s=getComputedStyle(node);return r.width>0&&r.height>0&&r.right>0&&r.left<innerWidth&&r.bottom>0&&r.top<innerHeight&&s.visibility!=='hidden'&&s.display!=='none';};
-    const matches=nodes.filter((item)=>visible(item)&&((item.innerText||item.textContent||'').includes(wanted))).sort((a,b)=>{const rank=(item)=>item.matches('button,[role="button"]')?0:((item.innerText||item.textContent||'').trim()===wanted?1:2);const ar=a.getBoundingClientRect();const br=b.getBoundingClientRect();return rank(a)-rank(b)||(ar.width*ar.height)-(br.width*br.height)});
+    const accessibleName=(node)=>{const aria=node.getAttribute('aria-label');if(aria)return aria.trim();const ids=(node.getAttribute('aria-labelledby')||'').split(/\\s+/).filter(Boolean);if(ids.length)return ids.map((id)=>document.getElementById(id)?.innerText||'').join(' ').trim();return(node.innerText||node.textContent||node.getAttribute('title')||'').trim();};
+    const matches=nodes.filter((item)=>visible(item)&&((item.innerText||item.textContent||'').includes(wanted)||accessibleName(item).includes(wanted))).sort((a,b)=>{const rank=(item)=>{const name=accessibleName(item);if(name===wanted&&item.matches('button,[role="button"]'))return 0;if(name===wanted)return 1;if(item.matches('button,[role="button"]'))return 2;return 3};const ar=a.getBoundingClientRect();const br=b.getBoundingClientRect();return rank(a)-rank(b)||(ar.width*ar.height)-(br.width*br.height)});
     const node=matches[0];
-    if(!node)return null; const r=node.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2,tag:node.tagName,text:(node.innerText||node.textContent||'').trim().slice(0,160)};
+    if(!node)return null; const r=node.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2,tag:node.tagName,role:node.getAttribute('role'),ariaLabel:node.getAttribute('aria-label'),text:(node.innerText||node.textContent||'').trim().slice(0,160)};
   })()`)
-  if (!result) throw new Error(`找不到可见文本: ${text}`)
+  if (!result) throw new Error(`找不到可访问名称或可见文本: ${text}`)
   return result
 }
 
@@ -262,12 +269,15 @@ async function createHarness(options) {
     activeNavigation.finishedIds.add(event.requestId)
     activeNavigation.transferBytes += Number(event.encodedDataLength ?? 0)
   })
-  await client.command('Emulation.setDeviceMetricsOverride', { width: options.width, height: options.height, deviceScaleFactor: options.deviceScaleFactor, mobile: true, screenWidth: options.width, screenHeight: options.height })
-  await client.command('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 })
-  const userAgent = options.userAgent === 'iphone'
-    ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1'
-    : ANDROID_UA
-  await client.command('Network.setUserAgentOverride', { userAgent, platform: options.userAgent === 'iphone' ? 'iPhone' : 'Android' })
+  const mobile = options.userAgent !== 'desktop' && options.width < 768
+  await client.command('Emulation.setDeviceMetricsOverride', { width: options.width, height: options.height, deviceScaleFactor: options.deviceScaleFactor, mobile, screenWidth: options.width, screenHeight: options.height })
+  if (mobile) await client.command('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 })
+  if (options.userAgent !== 'desktop') {
+    const userAgent = options.userAgent === 'iphone'
+      ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1'
+      : ANDROID_UA
+    await client.command('Network.setUserAgentOverride', { userAgent, platform: options.userAgent === 'iphone' ? 'iPhone' : 'Android' })
+  }
   let activeSessionId = null
   const createdSessionIds = new Set()
   let sessionManifestBefore = null
@@ -479,7 +489,11 @@ async function createHarness(options) {
   }
   const waitText = (text, timeoutMs = 60_000) => waitUntil(client, `document.body.innerText.includes(${quoteJs(text)})`, timeoutMs)
   const invokeApi = (method, args = []) => client.evaluate(`window.electronAPI[${quoteJs(method)}](...${quoteJs(args)})`)
-  const invokeRaw = (channel, args = []) => client.evaluate(`window.__PROMA_WEB_REMOTE_INVOKE(${quoteJs(channel)}, ...${quoteJs(args)})`)
+  const invokeRaw = async (channel, args = []) => {
+    const result = await client.evaluate(`window.__PROMA_WEB_REMOTE_INVOKE(${quoteJs(channel)}, ...${quoteJs(args)}).then((value)=>({ok:true,value}),(error)=>({ok:false,error:{denied:error?.denied===true,channel:error?.channel,reason:error?.reason,message:error?.message||String(error)}}))`)
+    if (!result?.ok) throw new Error(JSON.stringify(result?.error ?? { message: 'IPC failed' }))
+    return result.value
+  }
   const clickText = (text, selector = 'body *') => touchText(client, text, selector)
   const resolveVisibleAskUserA = async () => {
     if (!await client.evaluate('Boolean(document.querySelector(".ask-user-banner"))')) return false
@@ -722,10 +736,92 @@ async function runExtra(harness, options, result) {
   if (!skillChanged) throw new Error('只读 Skill 未出现新的最终回复文本')
 }
 
+async function runPreloadRecovery(harness, options, result) {
+  const preloadPath = join(REPO_ROOT, 'apps/electron/dist/web-remote/preload.js')
+  if (!existsSync(preloadPath)) throw new Error(`测试前 web preload 产物不存在：${preloadPath}`)
+  rmSync(preloadPath, { force: true })
+  result.preloadRecovery = { intentionallyDeleted: true, path: preloadPath }
+  await harness.navigate('/app/')
+  const page = await harness.client.evaluate('({title:document.title,text:document.body.innerText.slice(0,1200),root:Boolean(document.querySelector("#root")),errorPage:document.body.innerText.includes("手机界面暂不可用")})')
+  const screenshotPath = await harness.screenshot('preload-recovery')
+  result.screenshots.push(screenshotPath)
+  result.preloadRecovery = { ...result.preloadRecovery, restored: existsSync(preloadPath), bytes: existsSync(preloadPath) ? readFileSync(preloadPath).byteLength : 0, page, screenshot: screenshotPath }
+  if (!result.preloadRecovery.restored || page.errorPage || !page.text.includes('Agent')) throw new Error(`preload 删除后未自动恢复为可用页面：${JSON.stringify(result.preloadRecovery)}`)
+}
+
+async function runAttachments(harness, options, result) {
+  const title = `web-remote-harness-attachments-${Date.now()}`
+  const session = await harness.createHarnessSession(title)
+  const textPath = join(options.outputDir, 'b1-attachment.txt')
+  const imagePath = join(options.outputDir, 'b1-attachment.png')
+  writeFileSync(textPath, 'B1_ATTACHMENT_FIRST_LINE\n第二行仅用于确认首行提取。\n')
+  writeFileSync(imagePath, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAANklEQVRIie3WuQkAQAwDwem/aV0VhgsWnAuMnjVOTwJ6kVy0gqaqWG2qwVmTKaoQeAkdfU3XDzLD/C7nwdQVAAAAAElFTkSuQmCC', 'base64'))
+
+  const attachmentApiAvailable = await harness.client.evaluate(`Boolean(window.electronAPI && typeof window.electronAPI.openFileOrFolderDialog==='function' && typeof window.electronAPI.getAgentSessionPath==='function')`)
+  if (!attachmentApiAvailable) throw new Error('手机 renderer 未暴露文件选择或会话目录 API')
+
+  const sessionDirectory = await harness.invokeApi('getAgentSessionPath', [session.workspaceId, session.id])
+  if (typeof sessionDirectory !== 'string' || !sessionDirectory) throw new Error('无法取得本次专用会话的工作目录')
+  const selectFiles = async (paths, kind, visibleExpression) => {
+    const paperclip = await findElement(harness.client, '附加文件或文件夹', 'button,[role="button"]')
+    result.attachmentButton = paperclip
+    const clicked = await harness.client.evaluate(`(() => {const button=[...document.querySelectorAll('button,[role="button"]')].find((node)=>node.getAttribute('aria-label')==='附加文件或文件夹');if(!button)return false;button.click();return true})()`)
+    if (!clicked) throw new Error('未能通过 aria-label 点击附件按钮')
+    const inputFound = await waitUntil(harness.client, `Boolean(document.querySelector('input[type="file"][accept^="image/*"]'))`, 3_000).catch(() => false)
+    if (!inputFound) {
+      const diagnostic = await harness.client.evaluate(`({webRemote:window.__PROMA_WEB_REMOTE__,inputs:[...document.querySelectorAll('input[type="file"]')].map((n)=>({accept:n.accept,connected:n.isConnected})),buttons:[...document.querySelectorAll('button,[role="button"]')].filter((n)=>n.getAttribute('aria-label')?.includes('附加文件')).map((n)=>({aria:n.getAttribute('aria-label'),pointerEvents:getComputedStyle(n).pointerEvents,opacity:getComputedStyle(n).opacity}))})`)
+      throw new Error(`点击附件入口后未生成手机文件选择器：${JSON.stringify(diagnostic)}`)
+    }
+    const document = await harness.client.command('DOM.getDocument', { depth: -1 })
+    const query = await harness.client.command('DOM.querySelector', { nodeId: document.root.nodeId, selector: 'input[type="file"][accept^="image/*"]' })
+    if (!query.nodeId) throw new Error('手机文件选择器 input 未创建')
+    await harness.client.command('DOM.setFileInputFiles', { nodeId: query.nodeId, files: paths })
+    try { await waitUntil(harness.client, visibleExpression, 20_000) }
+    catch (error) {
+      const diagnostic = await harness.client.evaluate(`({body:document.body.innerText.slice(-1600),rendered:[...document.querySelectorAll('[data-input-mode="agent"] img[alt],[data-input-mode="agent"] span')].map((n)=>n.getAttribute('alt')||n.textContent||'').slice(-10)})`)
+      throw new Error(`${error instanceof Error ? error.message : String(error)}; ${kind} 附件显示诊断=${JSON.stringify(diagnostic)}`)
+    }
+    const screenshotPath = await harness.screenshot(`attachment-${kind}-selected`)
+    result.screenshots.push(screenshotPath)
+    return screenshotPath
+  }
+  const textScreenshot = await selectFiles([textPath], 'text', `(() => [...document.querySelectorAll('[data-input-mode="agent"] span')].some((n)=>n.textContent?.includes('b1-at')&&n.parentElement?.classList.contains('group/attachment')))()`)
+  const textFilePath = join(sessionDirectory, 'attachments', 'b1-attachment.txt')
+  const textFileEvidence = { filename: 'b1-attachment.txt', targetPath: textFilePath, exists: existsSync(textFilePath), size: existsSync(textFilePath) ? readFileSync(textFilePath).byteLength : null, firstLine: existsSync(textFilePath) ? readFileSync(textFilePath, 'utf8').split(/\r?\n/, 1)[0] : null }
+  if (!textFileEvidence.exists) throw new Error(`文本附件未写入专用会话目录: ${JSON.stringify(textFileEvidence)}`)
+
+  const textPrompt = '读取我附加的文本文件，只回复其中的第一行。'
+  await harness.inputAndSend(textPrompt)
+  const textReply = await harness.waitForAssistantReply(textPrompt, 'B1_ATTACHMENT_FIRST_LINE', 90_000)
+  const textUser = textReply.history.findLast((message) => sdkMessageRole(message) === 'user' && sdkMessageText(message).includes(textPrompt))
+  if (!textUser || !sdkMessageText(textUser).includes('b1-attachment.txt')) throw new Error('文本附件未出现在用户消息引用中')
+
+  const imageScreenshot = await selectFiles([imagePath], 'image', `(() => [...document.querySelectorAll('[data-input-mode="agent"] img[alt]')].some((n)=>n.alt.includes('b1-attachment.png')))()`)
+  const imageFilePath = join(sessionDirectory, 'attachments', 'b1-attachment.png')
+  const imageFileEvidence = { filename: 'b1-attachment.png', targetPath: imageFilePath, exists: existsSync(imageFilePath), size: existsSync(imageFilePath) ? readFileSync(imageFilePath).byteLength : null }
+  if (!imageFileEvidence.exists) throw new Error(`图片附件未写入专用会话目录: ${JSON.stringify(imageFileEvidence)}`)
+  const imagePrompt = '请查看我附加的 PNG 图片，说出画面中占主导的颜色，只回复一个英文单词。'
+  await harness.inputAndSend(imagePrompt)
+  const imageReply = await harness.waitForAssistantReply(imagePrompt, 'Red', 90_000)
+  const imageAnswer = sdkMessageText(imageReply.assistant)
+  if (!/\bred\b/i.test(imageAnswer)) throw new Error(`Agent 未根据已附加 PNG 正确指出红色：${imageAnswer}`)
+
+  const markdownPath = join(options.outputDir, 'b2-preview.md')
+  writeFileSync(markdownPath, '# B2 Markdown preview marker\\n\\nFile preview should render this text.')
+  const markdownSelectedScreenshot = await selectFiles([markdownPath], 'markdown', `document.body.innerText.includes('attachments/b2-pr')`)
+  const markdownFilePath = join(sessionDirectory, 'attachments', 'b2-preview.md')
+  if (!existsSync(markdownFilePath)) throw new Error('Markdown 附件未写入本次 harness 专用会话目录')
+  const finalScreenshot = await harness.screenshot('attachments-sent')
+  result.screenshots.push(finalScreenshot)
+  result.attachments = { session: { id: session.id, title: session.title, workspaceId: session.workspaceId }, files: [textFileEvidence, imageFileEvidence, { filename: 'b2-preview.md', exists: existsSync(markdownFilePath) }], textUserMessageContainsAttachment: true, textAssistantReplyContainsFirstLine: Boolean(textReply.assistant), imageShownInComposer: true, imageAssistantIdentifiedRed: true, textSelectedScreenshot: textScreenshot, imageSelectedScreenshot: imageScreenshot, markdownSelectedScreenshot, finalScreenshot }
+}
+
 async function runSmoke(harness, options, result) {
   result.steps.push({ name: 'load', ok: true, url: new URL('/app/', options.url).toString() })
-  await harness.openSession(options.session)
-  result.steps.push({ name: 'open-session', ok: true, session: options.session })
+  const title = `web-remote-harness-smoke-${Date.now()}`
+  const session = await harness.createHarnessSession(title)
+  result.harnessSession = { id: session.id, title: session.title, workspaceId: session.workspaceId }
+  result.steps.push({ name: 'open-session', ok: true, session: title })
   const smokeMessage = '只回复 pong'
   await harness.inputAndSend(smokeMessage)
   await harness.waitForAssistantReply(smokeMessage, 'pong', 90_000)
@@ -782,6 +878,44 @@ async function main() {
     else if (options.suite === 'interactions') await runInteractions(harness, options, result)
     else if (options.suite === 'abort') await runAbort(harness, options, result)
     else if (options.suite === 'extra') await runExtra(harness, options, result)
+    else if (options.suite === 'attachments') await runAttachments(harness, options, result)
+    else if (options.suite === 'preload-recovery') await runPreloadRecovery(harness, options, result)
+    else if (options.suite === 'keyboard') {
+      if (options.userAgent === 'desktop') throw new Error('keyboard 套件要求 android 或 iphone UA')
+      await harness.openSession(options.session)
+      const beforeHeight = await harness.client.evaluate('window.visualViewport?.height ?? window.innerHeight')
+      await harness.client.command('Emulation.setDeviceMetricsOverride', { width: options.width, height: Math.max(400, options.height - 300), deviceScaleFactor: options.deviceScaleFactor, mobile: true, screenWidth: options.width, screenHeight: options.height })
+      await harness.client.evaluate('window.visualViewport?.dispatchEvent(new Event("resize")); window.dispatchEvent(new Event("resize"))')
+      const input = await harness.client.evaluate(`(() => {const n=document.querySelector('textarea:not([disabled]),[contenteditable="true"]');if(!n)return null;n.focus();n.scrollIntoView({block:'center'});const r=n.getBoundingClientRect();return {tag:n.tagName,top:r.top,bottom:r.bottom,height:r.height}})()`)
+      if (!input) throw new Error('未找到可聚焦的会话输入框')
+      await delay(500)
+      await harness.client.evaluate('window.visualViewport?.dispatchEvent(new Event("resize"))')
+      const after = await harness.client.evaluate(`(() => {const n=document.querySelector('textarea:not([disabled]),[contenteditable="true"]');const r=n?.getBoundingClientRect();return {viewportHeight:window.visualViewport?.height??innerHeight,input:r?{top:r.top,bottom:r.bottom,height:r.height}:null,keyboardInset:getComputedStyle(document.body).getPropertyValue('--web-remote-keyboard-inset').trim()}})()`)
+      const screenshotPath = await harness.screenshot(`keyboard-${options.userAgent}`)
+      result.keyboard = { beforeHeight, simulatedViewportHeight: after.viewportHeight, input: after.input, keyboardInset: after.keyboardInset, visible: !!after.input && after.input.top >= 0 && after.input.bottom <= after.viewportHeight, screenshot: screenshotPath }
+      result.screenshots.push(screenshotPath)
+      await harness.client.command('Emulation.setDeviceMetricsOverride', { width: options.width, height: options.height, deviceScaleFactor: options.deviceScaleFactor, mobile: true, screenWidth: options.width, screenHeight: options.height })
+      await harness.client.evaluate('window.visualViewport?.dispatchEvent(new Event("resize"));document.activeElement?.blur()')
+      if (!result.keyboard.visible) throw new Error(`模拟键盘时输入框被遮挡: ${JSON.stringify(result.keyboard)}`)
+    }
+    else if (options.suite === 'desktop-admin-denied') {
+      if (options.width < 768 || options.height < 600) throw new Error('desktop-admin-denied 需要桌面视口，例如 1280×800')
+      const channels = ['web-remote:admin-get', 'web-remote:admin-save', 'web-remote:admin-pair', 'web-remote:admin-revoke']
+      result.desktopAdminDenied = { mobileViewport: await harness.client.evaluate('window.matchMedia("(max-width: 767px)").matches'), visible: await harness.client.evaluate('document.body.innerText.includes("手机访问")'), denied: [] }
+      result.pwaResources = await harness.client.evaluate(`(async()=>{const paths=['/manifest.webmanifest','/icon-192.svg','/icon-512.svg'];const resources=[];for(const path of paths){const response=await fetch(path,{credentials:'omit'});resources.push({path,status:response.status,contentType:response.headers.get('content-type')})}const manifest=await fetch('/manifest.webmanifest',{credentials:'omit'}).then((response)=>response.json());return {resources,manifest:{name:manifest.name,short_name:manifest.short_name,start_url:manifest.start_url,display:manifest.display,icons:manifest.icons?.map((icon)=>({sizes:icon.sizes,type:icon.type}))}}})()`)
+      if (result.pwaResources.resources.some((item) => item.status !== 200) || result.pwaResources.manifest.name !== 'Proma' || result.pwaResources.manifest.short_name !== 'Proma' || result.pwaResources.manifest.display !== 'standalone' || result.pwaResources.manifest.icons?.map((item) => item.sizes).join(',') !== '192x192,512x512') throw new Error(`PWA 公共资源/manifest 验证失败: ${JSON.stringify(result.pwaResources)}`)
+      for (const channel of channels) {
+        let denied = false
+        try {
+          const response = await harness.invokeRaw(channel, channel.endsWith('save') ? [{}] : channel.endsWith('revoke') ? ['harness'] : [])
+          denied = response?.denied === true && response?.channel === channel
+        } catch (error) { denied = (error && typeof error === 'object' && error.denied === true && error.channel === channel) || /denied|禁止|拒绝/i.test(String(error)) }
+        result.desktopAdminDenied.denied.push({ channel, denied })
+        if (!denied) throw new Error(`远程桌面视口未拒绝管理 IPC: ${channel}`)
+      }
+      result.screenshots.push(await harness.screenshot('desktop-admin-denied'))
+      if (result.desktopAdminDenied.mobileViewport || result.desktopAdminDenied.visible) throw new Error('手机访问管理分区在远程桌面视口意外可见或被识别为移动视口')
+    }
     else if (options.suite === 'all') { await runSmoke(harness, options, result); await runRecovery(harness, options, result); await runInteractions(harness, options, result); await runAbort(harness, options, result); await runExtra(harness, options, result) }
     else throw new Error(`未知套件: ${options.suite}`)
   } catch (error) {
@@ -789,6 +923,40 @@ async function main() {
   } finally {
     result.consoleErrors = harness.consoleErrors
     result.exceptions = harness.exceptions
+    const harnessSessionCleanup = { beforeIds: [], deletedIds: [], afterIds: [], errors: [] }
+    try {
+      const beforeDelete = await harness.readSessionManifest()
+      harnessSessionCleanup.beforeIds = beforeDelete.map((session) => session.id)
+      const createdIds = harness.getCreatedSessionIds()
+      const createdBeforeDelete = beforeDelete.filter((session) => createdIds.has(session.id)).map((session) => session.id)
+      const acceptDeleteConfirm = (event) => {
+        if (event.type === 'confirm') void harness.client.command('Page.handleJavaScriptDialog', { accept: true }).catch((error) => harnessSessionCleanup.errors.push(String(error)))
+      }
+      harness.client.on('Page.javascriptDialogOpening', acceptDeleteConfirm)
+      for (const sessionId of createdBeforeDelete) {
+        try {
+          await harness.invokeApi('deleteAgentSession', [sessionId])
+          const end = Date.now() + 15000
+          let remains = true
+          while (Date.now() < end) {
+            const sessions = await harness.readSessionManifest()
+            remains = sessions.some((session) => session.id === sessionId)
+            if (!remains) break
+            await delay(250)
+          }
+          if (remains) throw new Error(`会话删除后仍存在: ${sessionId}`)
+          harnessSessionCleanup.deletedIds.push(sessionId)
+        } catch (error) { harnessSessionCleanup.errors.push(`${sessionId}: ${String(error)}`) }
+      }
+      harness.client.off('Page.javascriptDialogOpening', acceptDeleteConfirm)
+      harnessSessionCleanup.afterIds = (await harness.readSessionManifest()).map((session) => session.id)
+      result.harnessSessionCleanup = harnessSessionCleanup
+      if (harnessSessionCleanup.errors.length && !result.error) result.error = `Harness 专用会话清理失败: ${harnessSessionCleanup.errors.join('; ')}`
+    } catch (error) {
+      harnessSessionCleanup.errors.push(String(error))
+      result.harnessSessionCleanup = harnessSessionCleanup
+      if (!result.error) result.error = `无法执行 harness 专用会话清理: ${String(error)}`
+    }
     try {
       result.sessionManifestAfter = await harness.readSessionManifest()
       const beforeById = new Map((result.sessionManifestBefore ?? []).map((item) => [item.id, item]))
