@@ -585,3 +585,9 @@ python3 scripts/personal/import-proma-backup.py \\
 - 截图：`/tmp/web-remote-layout/layout-iphone-verified/`、`layout-android-verified/`、`panel-probe-verified/`、`smoke-android-final/`、`smoke-iphone-final/`、`attachments-final/`、`mobile-polish-android-final2/`、`mobile-polish-iphone-final/`；iPhone 17 Pro 模拟器 WebKit 刷新后截图 `/tmp/web-remote-layout/sim-refresh-verified.png`。所有最终 harness 运行均撤销配对设备、删除 harness 自建会话、退出 Chrome 并移除 profile；开发实例与临时 8443 保持运行供用户体验。
 - 基线修复保留：逐段核对 `git diff cdaefafd -- apps/electron/src/main/lib/web-remote/full-ui/mobile-patch.ts`，本次只叠加新的 CSS/数据驱动下拉逻辑；原 `handleWorkspaceTabChange`/终端同步效果、刷新按钮循环防护、触屏 hover 拦截、左右面板动效与同步、隐藏拖拽条、顶栏图标、侧栏时间标签规则均保持不变。
 - 文档：同步更新 `docs/personal/web-remote.md`。仅应用代码与验证工具，无版本、数据格式或运行时依赖变化；尚未合并、打包、推送或安装，留待用户在模拟器体验后决定。
+
+## 2026-09-27: 手机端布局适配——父会话复核与补修
+
+- 复核 Luna `67a7a219`：cdaefafd 已完成修复全部保留（刷新防循环、触屏 hover 拦截、面板重开清除 pointer-events、隐藏拖拽条、顶栏图标、右侧 Tab/终端同步）；observer 回调链内 DOM 写入均以状态标记判定（开关 `dataset.iconState`、标题 `dataset.label`、下拉 `dataset.signature`）。此前 Luna 版本曾因比较 SVG innerHTML 造成死循环、页面冻结（父会话定位后回退给 Luna 修复），harness 现有整体超时（默认 300s）与 3 秒 CDP 探活。
+- iOS 模拟器自检发现并补修（`0cb12d32`）：页面下拉在右侧面板关闭时选择不会打开面板；侧栏“项目记忆/日程”不打开右侧面板（未在转发名单）；定时任务列表标题仍截断（加 `data-web-remote-automation-title` 标记，手机端两行显示）。
+- 回归（去代理）：iphone panel-probe 文件/改动命中、smoke 7 步、mobile-polish 3 项、layout iphone/android 11 页均通过，JS exceptions 0，无残留 Chrome。等待用户在 iOS 模拟器体验确认后再合并打包。
