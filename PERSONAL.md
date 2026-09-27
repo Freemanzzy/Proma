@@ -2,7 +2,7 @@
 
 ## 目的
 
-本仓库是 Proma 个人版的源码与维护记录。自 2026-09-26 起，个人版安装在 `/Applications/Proma.app`（包内 `personal-build.json` 标记），接管 `~/.proma`，承担日常工作与生产自动化；官方版不再运行（观察期内保留为 `Proma.previous.app` 仅供回滚）。维护职责见 `CLAUDE.md`。
+本仓库是 Proma 个人版的源码与维护记录。自 2026-09-26 起，个人版安装在 `/Applications/Proma.app`（包内 `personal-build.json` 标记），接管 `~/.proma`，承担日常工作与生产自动化；官方版不再运行（存档于 `~/.proma-switch-backups/official-Proma-0.19.58.app` 与外置硬盘 zip）。维护分工见 `docs/personal/maintenance.md`。
 
 ## 基线
 
@@ -521,3 +521,11 @@ python3 scripts/personal/import-proma-backup.py \\
 ## 2026-09-27: README 个人版区块更新为日常主力
 
 - `README.md` / `README.en.md` 个人版区块：由“个人测试、与官方并存、导入备份到 ~/.proma-dev”更新为“已作为日常主力（安装为 /Applications/Proma.app，使用 ~/.proma）”；新增个人版打包与更新（关闭官方自动更新、personal-build.json、安装脚本备份与回滚）、手机主屏 Proma 图标、每周检查官方 tag；使用说明改为打包/安装/开发实例，并链接 `maintenance.md`、`switch-runbook.md`、`fallback-runbook.md`。移除已不适用的 `import-proma-backup.py` 使用说明（脚本保留）。仅文档，无需重装。
+
+## 2026-09-27: 切换后状态盘点
+
+- 更正文首说明：官方版不在 `/Applications`（已存档于 `~/.proma-switch-backups/official-Proma-0.19.58.app` 与外置硬盘 zip），维护分工改指向 `docs/personal/maintenance.md`。
+- 2026-09-26“仍待办”核对：“Google 收录完成度监测（每周）”已改为只用 ego-browser（09-26 23:15，经 `update_automation`）；`Proma.previous.app` 与 `Proma.failed-*.app` 均已不在 `/Applications`（`/Applications` 只有 `Proma.app`，`041c148d`）。
+- 切换后首晚定时任务：Phase A（03:21）、Phase B（05:50）、超14天预警、Codex 守护、Product Analysis、AI 情报日报、Nowledge Mem 追补均成功。09-28 周一为首个周任务批次（周度回顾、Weekly、热点周报、周报、Google 收录、官方版本周检）。
+- 本机电源：接电源时系统不睡眠（`pmset` AC `sleep 0`，显示器 60 分钟关闭），手机访问与定时任务不再依赖 Power Nap 唤醒；合盖仍会睡眠。
+- 仍待办：观察期至约 09-30～10-03；fc-bridge 重配（`~/.proma/fc-bridge` 自 09-20 起未运行，早于切换）；`~/.proma-switch-backups/` 5 份更新前备份与官方版存档（约 17G）观察期后由用户决定是否清理；是否停用 3 个 Proma Cloud Skill 未决定。
