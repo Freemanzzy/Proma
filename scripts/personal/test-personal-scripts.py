@@ -105,18 +105,30 @@ def main():
         dry_apps=root/'dry-run-apps'; dry_args=common.copy(); dry_args[dry_args.index('--apps-dir')+1]=str(dry_apps); dry_args.append('--dry-run'); assert_run(dry_args); assert not dry_apps.exists()
         assert_run(common)
         assert (apps/'Proma.app/Contents/Resources/personal-build.json').is_file()
-        assert (apps/'Proma.previous.app/Contents/Resources/old.txt').read_text()=='old'
+        previous_dir=backups/'previous'
+        assert (previous_dir/'Proma.app/Contents/Resources/old.txt').read_text()=='old'
+        assert not (apps/'Proma.previous.app').exists()
+        assert not (previous_dir/'.trash').exists()  # 首次安装：新位置此前不存在，无需移入废纸篓
         assert not list(apps.glob('.Proma.installing-*.app'))
         backup_dirs=sorted(p for p in backups.iterdir() if p.is_dir() and p.name[0].isdigit())
         assert len(backup_dirs)==1
         assert_run(['python3',str(SCRIPTS/'verify-backup.py'),str(data),str(backup_dirs[0]/'proma')])
         assert not (backup_dirs[0]/'proma'/'.personal-migration').exists()
         assert (backup_dirs[0]/'health-snapshot-before.json').is_file() and (backup_dirs[0]/'health-snapshot-after.json').is_file()
+        print('INSTALL PREVIOUS-LOCATION PASS: previous app kept under backup-root/previous, not /Applications')
 
         # 未指定归档目录时演练模式不归档：第二次安装后本机保留 2 份。
         assert_run(common)
         backup_dirs=sorted(p for p in backups.iterdir() if p.is_dir() and p.name[0].isdigit())
         assert len(backup_dirs)==2
+        # 已有 previous（上一步刚生成，内容仍是最早的 "old" 占位应用）不会被覆盖或删除：移入演练用
+        # previous/.trash/；新 previous 是这次安装前的 apps/Proma.app（即第一次安装装入的 incoming 包）。
+        prev_marker=json.loads((previous_dir/'Proma.app/Contents/Resources/personal-build.json').read_text())
+        assert prev_marker['commit']==marker['commit']
+        trash_items=sorted((previous_dir/'.trash').iterdir())
+        assert len(trash_items)==1, trash_items
+        assert (trash_items[0]/'Contents/Resources/old.txt').read_text()=='old'
+        print('INSTALL PREVIOUS-TRASH PASS: pre-existing previous moved to previous/.trash/; new previous is the just-replaced package')
         # 指定归档目录：第三次安装后本机只留最新 1 份，其余 2 份归档且校验一致。
         archive=root/'archive'
         assert_run(common+['--archive-dir',str(archive)])
@@ -131,20 +143,41 @@ def main():
         assert_run(common+['--archive-dir','/Volumes/not-allowed'],expected=2)
         print('INSTALL BACKUP ARCHIVE PASS: newest kept locally; older backups archived and verified')
 
+        # 兼容旧布局：$APPS_DIR/Proma.previous.app（旧版脚本的位置）在安装开始前会被迁移到新的
+        # previous 位置；随后本次安装把当前 app 顶替进 previous 位置时，迁移进来的旧内容按常规规则
+        # 被移入 .trash/（因为新位置已被占用）。
+        legacy_apps=root/'Applications-legacy'; make_apps(legacy_apps)
+        legacy_previous=legacy_apps/'Proma.previous.app'/'Contents'/'Resources'; legacy_previous.mkdir(parents=True)
+        (legacy_previous/'legacy.txt').write_text('legacy')
+        legacy_backups=root/'backups-legacy'
+        legacy_args=common.copy(); legacy_args[legacy_args.index('--apps-dir')+1]=str(legacy_apps); legacy_args[legacy_args.index('--backup-root')+1]=str(legacy_backups)
+        assert_run(legacy_args)
+        assert not (legacy_apps/'Proma.previous.app').exists()
+        legacy_previous_dir=legacy_backups/'previous'
+        assert (legacy_previous_dir/'Proma.app/Contents/Resources/old.txt').read_text()=='old'
+        legacy_trash_items=list((legacy_previous_dir/'.trash').iterdir())
+        assert len(legacy_trash_items)==1, legacy_trash_items
+        assert (legacy_trash_items[0]/'Contents/Resources/legacy.txt').read_text()=='legacy'
+        print('INSTALL LEGACY-PREVIOUS MIGRATION PASS: old /Applications/Proma.previous.app migrated to backup-root/previous, then trashed on replacement')
+
         rollback_apps=root/'Applications-rollback'; make_apps(rollback_apps)
-        failure_args=common.copy(); failure_args[failure_args.index('--apps-dir')+1]=str(rollback_apps); failure_args[failure_args.index('--backup-root')+1]=str(root/'backups-rollback'); failure_args.append('--simulate-health-failure')
+        rollback_backups=root/'backups-rollback'
+        failure_args=common.copy(); failure_args[failure_args.index('--apps-dir')+1]=str(rollback_apps); failure_args[failure_args.index('--backup-root')+1]=str(rollback_backups); failure_args.append('--simulate-health-failure')
         assert_run(failure_args,expected=4)
         assert (rollback_apps/'Proma.app/Contents/Resources/old.txt').read_text()=='old'
         assert not (rollback_apps/'Proma.previous.app').exists()
+        assert not (rollback_backups/'previous'/'Proma.app').exists()
         assert len(list(rollback_apps.glob('Proma.failed-*.app')))==1
         assert not list(rollback_apps.glob('.Proma.installing-*.app'))
-        print('INSTALL HEALTH-FAILURE ROLLBACK PASS: previous fake app restored; failed bundle retained')
+        print('INSTALL HEALTH-FAILURE ROLLBACK PASS: previous fake app restored from backup-root/previous; failed bundle retained')
 
         copy_apps=root/'Applications-copy-fail'; make_apps(copy_apps)
-        copy_args=common.copy(); copy_args[copy_args.index('--apps-dir')+1]=str(copy_apps); copy_args[copy_args.index('--backup-root')+1]=str(root/'backups-copy-fail'); copy_args.append('--simulate-copy-failure')
+        copy_backups=root/'backups-copy-fail'
+        copy_args=common.copy(); copy_args[copy_args.index('--apps-dir')+1]=str(copy_apps); copy_args[copy_args.index('--backup-root')+1]=str(copy_backups); copy_args.append('--simulate-copy-failure')
         assert_run(copy_args,expected=7)
         assert (copy_apps/'Proma.app/Contents/Resources/old.txt').read_text()=='old'
         assert not (copy_apps/'Proma.previous.app').exists() and not list(copy_apps.glob('.Proma.installing-*.app'))
+        assert not (copy_backups/'previous'/'Proma.app').exists()
         assert not list(copy_apps.glob('Proma.failed-*.app'))
         print('INSTALL COPY-FAILURE RECOVERY PASS: original app never moved; partial staging removed')
 

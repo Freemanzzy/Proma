@@ -18,7 +18,7 @@
 |---|---|
 | 源码仓库 | `~/Documents/proma-personal`，主线 `personal`；remote `origin`=Freemanzzy/Proma（默认分支 personal），`upstream`=proma-ai/Proma（`main` 为官方镜像，不要改） |
 | 已安装应用 | `/Applications/Proma.app`（个人版，名称与应用 ID 与官方相同；个人版标记 `Contents/Resources/personal-build.json`） |
-| 上一版应用 | `/Applications/Proma.previous.app`（安装脚本保留，用于回滚） |
+| 上一版应用 | `~/.proma-switch-backups/previous/Proma.app`（2026-09-27 起；安装脚本保留，用于回滚；不放进 `/Applications`，避免与当前版本共享同一 bundle ID 导致 TCC/LaunchServices/Spotlight 误指向旧包；替换已存在的上一版时先移入 `~/.Trash`） |
 | 用户数据 | `~/.proma`（日常数据，**最高保护级别**） |
 | 预演数据 | `~/.proma-dev`（开发实例，可用于预演更新；其手机访问配置在 `~/.proma-dev/web-remote/`） |
 | 手机访问配置 | 安装版：`~/.proma/web-remote/`（`config.json`、`devices.json`、`vapid.json`、`push-subscriptions.json`，0600，不入库） |

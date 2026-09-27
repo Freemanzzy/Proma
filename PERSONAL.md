@@ -619,3 +619,19 @@ python3 scripts/personal/import-proma-backup.py \\
 - `scripts/personal/package-personal.sh`：签名身份默认 `Proma Personal Code Signing`，可用 `PROMA_PERSONAL_SIGN_IDENTITY` 覆盖；构建前用 `security find-identity -p codesigning`（不加 `-v`，自签名证书显示为未受信任但可用于签名）检查，找不到即报错退出，不退回 ad-hoc；沿用 `codesign --force --deep`，签名后 `--verify --deep --strict`，并校验非 adhoc、designated requirement 含 `certificate leaf`；输出 designated requirement。
 - 文档：`docs/personal/maintenance.md` §3 复核项、`CLAUDE.md` §6 第 4 项、`fallback-runbook.md`（Keychain 说明与打包注释）、`switch-runbook.md` 复核项同步。首次以新身份安装后 TCC/Keychain 会再询问一次，之后跨版本保留。
 - 待办 2（验证后关闭 8443）已记入 Proma 工作说明。
+
+## 2026-09-27: 上一版应用移出 /Applications
+
+- 原因：安装脚本一直把上一版留在 `/Applications/Proma.previous.app`，与当前 `/Applications/Proma.app` 共享同一 bundle ID（`com.proma.app`）。同一 bundle ID 在 `/Applications` 存在两份会导致 macOS 隐私授权（TCC）与 LaunchServices 指向错误副本（弹窗显示“Proma previous”），Spotlight 也可能误启动旧版。用户已手动把当前旧版移到 `~/.proma-switch-backups/previous/Proma.app`。
+- `scripts/personal/install-update.sh`：
+  - 上一版位置改为 `$BACKUP_ROOT/previous/Proma.app`（默认即 `~/.proma-switch-backups/previous/Proma.app`；`--backup-root` 演练时随之落在 `/tmp`）；新增可选 `--previous-dir DIR` 单独覆盖，`--test-mode` 下同样必须在 `/tmp` 内（沿用现有 `/tmp` 校验逻辑）。
+  - 安装时若该位置已有上一版，不删除，而是移入 `$HOME/.Trash/Proma-previous-<commit 前 8 位或时间戳>.app`（可自行清空）；`--test-mode` 下改移到 `--previous-dir` 下的 `.trash/`，不碰真实废纸篓。目标重名时加时间戳+PID 后缀，绝不覆盖。然后把当前应用移到该位置成为新的上一版。
+  - 兼容旧布局：若 `$APPS_DIR/Proma.previous.app`（旧版脚本的位置）仍存在，安装开始前按同样规则先迁移/移入废纸篓，并打印说明。
+  - 回滚（健康失败/中断的 EXIT/ERR/INT/TERM 处理）从新位置恢复到 `$APP_PATH`；失败包仍按原逻辑保留在 `$APPS_DIR/Proma.failed-*.app`（未改动）。`/Applications` 与 `~/.proma-switch-backups` 同卷时改名仍是原子 `mv`；配置到不同卷时 `mv` 仍可工作但不再原子，已在脚本注释中说明。
+  - 过程中发现并修复两处引入的 bug：新增的两条 `echo` 消息把 `$PREVIOUS_PATH` 直接接在全角标点前（无 ASCII 分隔），在 `LC_CTYPE=C.UTF-8`（Python 子进程会自动做 locale 强制转换）下会触发 macOS 自带 bash 3.2 的变量名扫描缺陷，把变量名连同标点首字节一起当成不存在的变量名，`set -u` 报“unbound variable”提前退出；改用 `${PREVIOUS_PATH}` 花括号形式后消失。仓库中另有 3 处同类隐患（第 342、524、526 行，`$pid）`/`$vol）`/`$ARCHIVE_DIR；`）在少见的错误分支里，本次未触发、按“外科手术式改动”原则未修，仅记录，供之后需要时处理。
+  - 输出信息与 `usage()` 同步更新为新位置说明。
+- 测试（`scripts/personal/test-personal-scripts.py`）：更新现有成功/健康失败/复制失败演练的断言到新位置；新增三组：①已有上一版时被移到演练 `.trash/`，新上一版是刚被替换下来的旧包；②旧布局 `Proma.previous.app` 存在时被迁移到新位置；③健康失败时从新位置恢复原应用。临时撤掉实现（`git stash` 还原 `install-update.sh`）复跑，新断言按预期以 `FileNotFoundError`（新位置的 `Proma.app/Contents/Resources/old.txt` 不存在）失败；恢复实现后复跑全部通过（`38` 处 `PASS`，退出码 0）。
+- 文档同步（SSOT）：`docs/personal/fallback-runbook.md` §1（上一版应用位置行）与 §3（回退命令改用新路径）、§6（`install-update.sh` 行为摘要）；`CLAUDE.md` §2（上一版应用行）；`docs/personal/switch-runbook.md`（安装步骤摘要一句话，属于对脚本现行机制的描述，同步；观察期收尾等一次性切换历史步骤保持原样不改）。
+- 验证：`bash -n scripts/personal/install-update.sh` 通过；`python3 scripts/personal/test-personal-scripts.py` 退出 0；仓库根 `bun test`：557 pass / 5 fail / 1 error，与基线一致（无新增失败）。
+- 范围：只改 `scripts/personal/install-update.sh`、`scripts/personal/test-personal-scripts.py` 与上述文档；未打包、未安装、未合并、未推送，分支 `fix/previous-outside-applications`。
+- 主会话复核补充：同类隐患（`$pid）`、`$vol）`、`$ARCHIVE_DIR；` 三处，分别在端口冲突、外置硬盘未挂载、归档目录创建失败分支）已一并改为 `${...}` 写法；归档分支在安装成功之后运行，若触发会以非零退出误导安装结果。`bash -n` 与 `test-personal-scripts.py`（38 PASS）通过。
