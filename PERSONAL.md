@@ -505,3 +505,10 @@ python3 scripts/personal/import-proma-backup.py \\
 - 数据快照：安装脚本自身前后快照一致。与切换前基线相比，会话 868 → 870（正常使用），另有定时任务“Nowledge Mem 每日追补（会话归档 + Working Memory）”于 09-27 01:54:07 由启用改为停用（`updatedAt`），早于安装、非安装所致，02:00 未运行；是否为有意操作待用户确认。
 - 整理：上一版个人版 `Proma.previous.app`（`29e7a81e`）经用户同意移入废纸篓（`~/.Trash/Proma-personal-29e7a81e.app`，由用户清空）；此前三个旧个人版已不在废纸篓。`/Applications` 现只有 `Proma.app`（`041c148d`），官方版仍在 `~/.proma-switch-backups/official-Proma-0.19.58.app` 与外置硬盘 zip。下次安装更新时脚本会重新生成 `Proma.previous.app`。
 - `~/.proma-switch-backups/` 现有 5 份更新前数据备份（约 17G，含官方版与缓存），均保留；清理需用户另行确认。
+
+## 2026-09-27: 改为与 Proma 共同维护
+
+- 用户决定：日常维护（周检评估、同步、测试、打包、文档、推送）由 Proma 完成；Claude Code 只在 Proma 必须退出（安装、替换应用）或无法工作（回滚、恢复）时接手，以节省 Claude Code token。
+- 新增 `docs/personal/maintenance.md`：分工表、单写者规则（安装申请写出后 Proma 停止改仓库，直到安装结果写回；Proma 无法启动时 Claude Code 直接接手）、交接单目录与模板（`install-request-*.md` / `install-result-*.md`，位于 `~/.proma/.../.context/proma-personal/handoff/`，不入库）、Claude Code 接手安装时的复核项、双方共用的硬性规则（由 `CLAUDE.md` §4 迁入，新增“Proma 不得运行 install-update.sh”）与 SSOT 规则（由 `CLAUDE.md` §7 迁入）。
+- `CLAUDE.md`：§1 必读新增 `maintenance.md` 与交接单目录；§3 职责改为安装、故障回滚、突发问题、用户直接要求；§4、§7 改为指向 `maintenance.md` 对应章节（规则只保留一份）；§5 新增“Proma 的安装申请按子代理报告对待、复核后才安装”。原“Proma 中控不再修改本仓库”的说法作废。
+- 待 Proma 侧完成（不在仓库）：Proma 的工作说明引用 `docs/personal/maintenance.md`，打包后按模板写安装申请。仓库根 `AGENTS.md` 为上游文件，未修改，以免同步冲突。
