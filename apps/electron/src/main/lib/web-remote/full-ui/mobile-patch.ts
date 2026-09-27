@@ -134,7 +134,7 @@ export function renderWebRemoteMobilePatch(): string {
       if (menu.parentElement !== topbar) topbar.insertBefore(menu, topbar.firstChild);
       if (panelToggle.parentElement !== topbar) topbar.appendChild(panelToggle);
       if (title && title.parentElement !== topbar) topbar.insertBefore(title, panelToggle);
-      var refresh=topbar.querySelector('[data-web-remote-refresh]'); if(refresh)topbar.insertBefore(refresh,panelToggle);
+      var refresh=topbar.querySelector('[data-web-remote-refresh]'); if(refresh&&refresh.nextSibling!==panelToggle)topbar.insertBefore(refresh,panelToggle);
     }
     if (!window.__PROMA_PUSH_PRESENCE_INSTALLED) {
       window.__PROMA_PUSH_PRESENCE_INSTALLED=true;
