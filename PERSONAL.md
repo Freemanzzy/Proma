@@ -552,3 +552,20 @@ python3 scripts/personal/import-proma-backup.py \\
 - 根因：`650e4953`（移除内置浏览器）误删两段非浏览器代码：① `SidePanel.tsx` `handleWorkspaceTabChange` 末尾的 `if (split) updateSplit(...)` 与 `onTabChange(tab)`，导致点击 Tab 不切换；② `RightSidePanel.tsx` 中同步 Agent 可见终端（`onAgentTerminalOpen/Close`）到右侧工作区的 effect（与浏览器 effect 相邻被一并删除），导致 TerminalExecute 打开的终端不出现 Tab。其余被删代码逐项核对，均为浏览器专用。
 - 修复：两处恢复为 v0.19.58 原文（仅去掉浏览器行），`4e556323`。typecheck 通过；全量测试 557 pass / 5 fail / 1 error（基线内）。
 - 属应用代码；用户选择与“手机端刷新按钮”等一起打包，由 Claude Code 统一安装。
+
+## 2026-09-27: 手机端打磨（刷新按钮、单击、动效）
+
+- `apps/electron/src/main/lib/web-remote/full-ui/mobile-patch.ts`：手机顶栏增加 42px“刷新”按钮并调用 `location.reload()`；左抽屉与遮罩淡入淡出；右工作区采用 display 按需挂载、双 requestAnimationFrame 触发 transform/opacity 过渡、关闭后延迟隐藏并禁用点击；补充触控按下反馈、无 hover 设备操作可见、减少动效偏好，以及捕获阶段过滤触摸后合成的 hover/mouse 事件。未改上游 renderer 组件。
+- 根因代码证据：`LeftSidebar.tsx` 会话行由 `onMouseEnter` 同步更新 `rowHovered` 并触发 preview hover，DOM 行也含 `group` / `group-hover`；这与触摸后兼容 hover 改变 DOM、影响首击派发的假设吻合。实测单次 tap 前后成功率尚未取得：本机访问临时 Tailscale Serve `:8443` 的 TLS 连接失败（`SSL_ERROR_SYSCALL`），新加 harness 专项超时；它创建的临时配对设备已通过 `web-remote.sh revoke` 撤销，因此不能报告复现前后数值或声称该修复已实测通过。
+- `scripts/personal/mobile-harness.mjs` 新增 `mobile-polish` 专项，计划统计刷新、单次切换工作区与会话成功率；此次因上述连接问题未运行成功。android/iphone smoke 与 attachments 未完成；截图目录 `/tmp/web-remote-polish/` 目前仅含开发日志与 PID 文件。
+- 验证：typecheck 通过；`build:main`、`build:renderer`、`build:web-preload` 通过；全量 `bun test` 为 557 pass / 5 fail / 1 error，与记录基线一致。真机 Android/iPhone standalone、触控前后单次点击比例以及附件回归待后续验证。
+- 影响文档：同步更新 `docs/personal/web-remote.md`。
+
+## 2026-09-27: 手机端打磨复核与 iOS 模拟器实测（父会话）
+
+- 复核 Luna `9d67860e` 时发现并修复两处缺陷：① `ensure()` 每次调用都把刷新按钮 `insertBefore` 到文件按钮前，自身又触发 subtree MutationObserver，形成无限循环，`/app/` 加载即冻结（`147c2ba1`，只在位置不对时移动）；② `@media (hover:none)` 强制显示侧栏行悬停操作按钮，但未隐藏被替换的时间标签，归档图标与时间重叠（`2026-09-27` 同分支提交，移除该规则，恢复原样式）。
+- Luna 报告的 8443“TLS 错误”实为本机系统代理（Clash 7897）拦截 tailnet 地址：bun/harness 需去掉代理环境变量运行；用户已在 Clash Verge 系统代理绕过中加入 `*.ts.net`、`100.64.0.0/10`，此后本机工具与 iOS 模拟器 Safari 可直连 tailnet。
+- Level 2 模拟器工具：Homebrew 的 `idb-companion`、`axe` 公式要求 Xcode 27（本机 Xcode 26.5），未升级 Xcode；改为下载 AXe v1.8.0 官方发行包（Developer ID 签名）到 `~/.local/share/axe`，`~/.local/bin/axe` 链接；Proma 工作区新增 MCP `mobilebuildmcp`（`npx -y mobilebuildmcp@latest mcp`，握手通过）。
+- iOS 真实 WebKit 实测（iPhone 17 Pro 模拟器 · iOS 26.5 · Safari，开发实例 17889 经临时 8443）：配对成功；`/app/` 正常加载；侧栏单击切换会话 4/4 成功（含跨工作区），切换后侧栏自动关闭；刷新按钮单击重新加载；右侧面板滑入淡入、左侧抽屉与遮罩过渡正常（录屏 `~/Downloads/proma-mobile-animations.mp4`）；侧栏时间标签无重叠。未做修复前版本的对照测试。
+- Chrome 模拟回归（去代理运行）：android/iphone smoke 各 7 步全过、android attachments 通过、刷新按钮单击 android/iphone 通过，JS exceptions 0；harness `mobile-polish` 套件的“工作区切换”判定条件有误（侧栏工作区为展开/折叠分组，不会改 `agentWorkspaceId`），以模拟器实测为准，待修正 harness。清理：harness 设备均撤销、自建会话删除、残留 headless Chrome 已按 PID 结束。
+- 验证：typecheck 通过；全量 557 pass / 5 fail / 1 error（基线内）；build:main / renderer / web-preload 通过。本批（含右侧 Tab 修复 `4e556323`）为应用代码，需打包安装。
