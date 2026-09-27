@@ -339,7 +339,7 @@ assert_port_available_or_installed_app() {
   owners="$(port_listeners "$port")"
   for pid in $owners; do
     if [[ ! -d "$APP_PATH" ]] || ! process_command_matches "$pid" "$expected"; then
-      echo "ERROR: TCP 端口 $port 已被非当前 Proma 应用进程占用（PID $pid）；请先退出开发实例/其他服务后重试。" >&2
+      echo "ERROR: TCP 端口 $port 已被非当前 Proma 应用进程占用（PID ${pid}）；请先退出开发实例/其他服务后重试。" >&2
       return 1
     fi
   done
@@ -521,9 +521,9 @@ archive_old_backups() {
   local vol
   vol="$(python3 -c 'import sys;p=sys.argv[1].split("/");print("/".join(p[:3]) if len(p)>2 and p[1]=="Volumes" else "")' "$ARCHIVE_DIR")"
   if [[ -n "$vol" && ! -d "$vol" ]]; then
-    echo "旧备份归档：外置硬盘未挂载（$vol）；本机保留 $(printf '%s\n' "$old" | wc -l | tr -d ' ') 份旧备份，下次安装或手动再归档。"; return 0
+    echo "旧备份归档：外置硬盘未挂载（${vol}）；本机保留 $(printf '%s\n' "$old" | wc -l | tr -d ' ') 份旧备份，下次安装或手动再归档。"; return 0
   fi
-  mkdir -p "$ARCHIVE_DIR" || { echo "旧备份归档：无法创建 $ARCHIVE_DIR；本机保留旧备份。" >&2; return 0; }
+  mkdir -p "$ARCHIVE_DIR" || { echo "旧备份归档：无法创建 ${ARCHIVE_DIR}；本机保留旧备份。" >&2; return 0; }
   while IFS= read -r item; do
     [[ -n "$item" ]] || continue
     target="$ARCHIVE_DIR/$(basename "$item")"
