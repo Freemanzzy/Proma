@@ -25,7 +25,7 @@
 | 上一版应用（安装脚本保留） | `/Applications/Proma.previous.app` |
 | 用户数据 | `~/.proma`（个人版切换后直接使用） |
 | 开发/预演数据 | `~/.proma-dev`（与正式数据隔离） |
-| 更新前自动备份 | `~/.proma-switch-backups/<时间戳>/`（安装脚本在替换应用前生成） |
+| 更新前自动备份 | 最新一份在 `~/.proma-switch-backups/<时间戳>/`（安装脚本在替换应用前生成）；更早的由安装成功后自动归档到外置硬盘 `/Volumes/Lexar ssd 2tb/proma 备份/switch-backups/<时间戳>/`（校验通过才删本机副本；硬盘未挂载时留在本机） |
 | 切换期早期备份与官方版存档 | 外置硬盘 `/Volumes/Lexar ssd 2tb/proma 备份/switch-backups-20260926/`（4 份 09-26 更新前备份、`official-Proma-0.19.58.app`、官方更新缓存）；本机只保留最新一份更新前备份 |
 | 外置硬盘完整备份 | `/Volumes/Lexar ssd 2tb/proma 备份/*.zip`（`proma-backup` Skill 生成；未挂载时用 `diskutil list` 找到卷后 `diskutil mount <设备>`） |
 | 源码仓库 | `~/Documents/proma-personal`（`personal` 分支；SSOT：`PERSONAL.md`） |
