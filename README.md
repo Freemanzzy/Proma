@@ -1,21 +1,22 @@
 <!-- personal-fork:start -->
 > **个人版说明**
 >
-> 这是 Freemanzzy 基于 [proma-ai/Proma](https://github.com/proma-ai/Proma) 维护的个人 Fork，用于个人测试，与官方版本并存；许可证沿用 [AGPL-3.0](./LICENSE)。个人版代码在 `personal` 分支；`main` 分支保持为官方代码的镜像。
+> 这是 Freemanzzy 基于 [proma-ai/Proma](https://github.com/proma-ai/Proma) 维护的个人 Fork，已作为日常主力使用（打包安装为 `/Applications/Proma.app`，直接使用 `~/.proma` 数据），许可证沿用 [AGPL-3.0](./LICENSE)。个人版代码在 `personal` 分支；`main` 分支保持为官方代码的镜像。
 >
-> **基线**：官方 `v0.19.58`。
+> **基线**：官方 `v0.19.58`。只跟随官方正式版本（tag），每周自动检查一次。
 >
 > **本 Fork 的改动**
-> - **手机访问（Web Remote）**：经 Tailscale 私有网络，用手机运行与桌面同一套界面，操作 Mac 上的 Proma：实时对话、Skill、附件、提问与计划审批、Todo、定时任务、文件预览、推送通知，可添加到主屏幕。IPC 通道显式分级、默认拒绝。说明见 [`docs/personal/web-remote.md`](./docs/personal/web-remote.md)。
+> - **手机访问（Web Remote）**：经 Tailscale 私有网络，用手机运行与桌面同一套界面，操作 Mac 上的 Proma：实时对话、Skill、附件、提问与计划审批、Todo、定时任务、文件预览、推送通知，可添加到主屏幕（使用 Proma 图标）。IPC 通道显式分级、默认拒绝。说明见 [`docs/personal/web-remote.md`](./docs/personal/web-remote.md)。
 > - **移除内置浏览器**：入口、Agent 工具、提示词、IPC 均已移除，源码保留但不打包；原因是常驻内存且与 ego 重复。
 > - **新增 EgoBrowser 原生工具**：通过 `ego-browser` CLI 操作 ego lite 浏览器，未安装时自动隐藏。
 > - **简化外观**：仅保留浅色、深色、跟随系统；旧的特殊风格自动迁移为跟随系统。
 > - **精简未使用的集成**：隐藏钉钉/Slack 桥接、Copilot 渠道和 Agent Island；保留对应源码与兼容旧数据的运行路径。
-> - **个人数据导入与开发脚本**：位于 `scripts/personal/`。
+> - **个人版打包与更新**：关闭官方自动更新；包内写入 `personal-build.json` 标记；安装脚本先备份数据、校验，健康检查失败自动回滚应用。脚本位于 `scripts/personal/`。
 >
-> **使用方式**
-> - `scripts/personal/dev.sh` 启动开发版，数据目录为 `~/.proma-dev`，与官方 `~/.proma` 隔离；加 `PROMA_WEB_REMOTE=1` 启用手机访问。
-> - `scripts/personal/import-proma-backup.py` 用于将备份 zip 导入 `~/.proma-dev` 并执行隔离核验。
+> **使用与维护**
+> - 打包：`scripts/personal/package-personal.sh`；安装：`scripts/personal/install-update.sh`（自动备份与回滚）。
+> - 开发与验证：`scripts/personal/dev.sh` 启动开发实例，数据目录 `~/.proma-dev`，与日常数据隔离；加 `PROMA_WEB_REMOTE=1` 启用手机访问（端口与安装版分开）。
+> - 维护分工与规则：[`docs/personal/maintenance.md`](./docs/personal/maintenance.md)；切换与故障回退：[`switch-runbook.md`](./docs/personal/switch-runbook.md)、[`fallback-runbook.md`](./docs/personal/fallback-runbook.md)。
 >
 > 完整差异与变更记录请见 [`PERSONAL.md`](./PERSONAL.md)。
 <!-- personal-fork:end -->

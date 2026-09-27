@@ -517,3 +517,7 @@ python3 scripts/personal/import-proma-backup.py \\
 
 - 经用户同意，用 `git branch -d`（只删已合并分支）删除 31 个已合并进 `personal` 的本地分支；本地只保留 `main`（官方镜像）与 `personal`。这些分支从未推送，GitHub 不受影响；提交均在 `personal` 历史中（同步记录表中的 `sync/2026-09-26` 现仅作名称引用）。
 - 更正上一条“待确认”：定时任务“Nowledge Mem 每日追补（会话归档 + Working Memory）”09-27 01:54 的停用是用户本人操作，现已由用户重新启用，不影响个人版。
+
+## 2026-09-27: README 个人版区块更新为日常主力
+
+- `README.md` / `README.en.md` 个人版区块：由“个人测试、与官方并存、导入备份到 ~/.proma-dev”更新为“已作为日常主力（安装为 /Applications/Proma.app，使用 ~/.proma）”；新增个人版打包与更新（关闭官方自动更新、personal-build.json、安装脚本备份与回滚）、手机主屏 Proma 图标、每周检查官方 tag；使用说明改为打包/安装/开发实例，并链接 `maintenance.md`、`switch-runbook.md`、`fallback-runbook.md`。移除已不适用的 `import-proma-backup.py` 使用说明（脚本保留）。仅文档，无需重装。
