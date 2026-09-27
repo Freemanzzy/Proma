@@ -498,9 +498,10 @@ export function WorkspaceMemoryTab({ workspaceSlug, sessionId, search, embedded 
         </div>
       </SettingsCard>}
 
-      <div className={cn('grid min-h-[520px] gap-4 lg:grid-cols-[280px_minmax(0,1fr)]', embedded && 'min-h-0 flex-1 grid-cols-[180px_minmax(0,1fr)] gap-3')}>
+      <div className={cn('grid min-h-[520px] gap-4 lg:grid-cols-[280px_minmax(0,1fr)]', embedded && 'min-h-0 flex-1 grid-cols-[180px_minmax(0,1fr)] gap-3')} data-web-remote-split="memory">
+
         <SettingsCard divided={false} className="min-h-0 overflow-hidden">
-          <div className="flex h-full min-h-0 flex-col">
+          <div data-web-remote-memory-list="true" data-selected={String(!selected)} className="flex h-full min-h-0 flex-col">
             <div className="flex items-center justify-between border-b border-border/50 px-3 py-2">
               <div className="text-[13px] font-medium text-foreground/75">记忆文件</div>
               <button
@@ -565,13 +566,14 @@ export function WorkspaceMemoryTab({ workspaceSlug, sessionId, search, embedded 
         </SettingsCard>
 
         <SettingsCard divided={false} className="min-h-0 overflow-hidden">
-          <div className="flex h-full min-h-0 flex-col">
+          <div data-web-remote-memory-detail="true" data-selected={String(Boolean(selected))} className="flex h-full min-h-0 flex-col">
+            {embedded && selected && <button type="button" data-web-remote-mobile-back="true" className="hidden items-center gap-1 border-b border-border/50 px-3 py-2 text-sm" onClick={() => { void flushPendingSave().then(() => setSelected(null)) }}>‹ 返回记忆文件</button>}
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/50 px-4 py-3">
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium text-foreground">
                   {selected?.title ?? '未选择文件'}
                 </div>
-                <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
+                <div data-web-remote-memory-path="true" className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
                   {selected?.absolutePath ?? '从左侧选择一个记忆文件'}
                 </div>
               </div>

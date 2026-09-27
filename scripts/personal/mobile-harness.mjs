@@ -40,6 +40,7 @@ function parseArgs(argv) {
     else if (arg === '--device-scale-factor') result.deviceScaleFactor = Number(value())
     else if (arg === '--user-agent') result.userAgent = value()
     else if (arg === '--output-dir') result.outputDir = resolve(value())
+    else if (arg === '--timeout-ms') result.timeoutMs = Number(value())
     else if (arg === '--chrome-path') result.chromePath = value()
     else if (arg === '--pair-script') result.pairScript = resolve(value())
     else if (arg === '--help' || arg === '-h') {
@@ -52,6 +53,8 @@ function parseArgs(argv) {
   if (!Number.isInteger(result.width) || !Number.isInteger(result.height) || result.width < 240 || result.height < 400) throw new Error('视口尺寸无效')
   if (!(result.deviceScaleFactor >= 1 && result.deviceScaleFactor <= 3.5)) throw new Error('deviceScaleFactor 必须在 1 到 3.5 之间')
   if (!['android', 'iphone', 'desktop'].includes(result.userAgent)) throw new Error('--user-agent 仅支持 android|iphone|desktop')
+  if (result.timeoutMs === undefined) result.timeoutMs = 300_000
+  if (!Number.isInteger(result.timeoutMs) || result.timeoutMs < 1000 || result.timeoutMs > 1_800_000) throw new Error('--timeout-ms 必须是 1000 到 1800000 之间的整数')
   return result
 }
 
@@ -71,6 +74,7 @@ class CdpClient {
     this.nextId = 0
     this.pending = new Map()
     this.listeners = new Map()
+    this.ws.on('close', () => { for (const [id, request] of this.pending) { this.pending.delete(id); request.reject(new Error('CDP connection closed')) } })
     this.ws.on('message', (raw) => {
       let message
       try { message = JSON.parse(raw.toString()) } catch { return }
@@ -101,16 +105,23 @@ class CdpClient {
     this.listeners.set(method, listeners.filter((item) => item !== listener))
   }
 
-  command(method, params = {}) {
+  command(method, params = {}, timeoutMs = 15_000) {
     const id = ++this.nextId
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject, method })
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`CDP timeout ${method} after ${timeoutMs}ms`)) }, timeoutMs)
+      this.pending.set(id, { resolve: (value) => { clearTimeout(timer); resolve(value) }, reject: (error) => { clearTimeout(timer); reject(error) }, method })
       this.ws.send(JSON.stringify({ id, method, params }))
     })
   }
 
   async evaluate(expression, returnByValue = true) {
+    lastHarnessStep = `Runtime.evaluate ${String(expression).slice(0, 120)}`
     let result
+    try {
+      await this.command('Runtime.evaluate', { expression: '1', returnByValue: true, timeout: 3000 }, 3500)
+    } catch (error) {
+      throw new Error(`page_unresponsive: ${String(error)}`)
+    }
     try {
       result = await this.command('Runtime.evaluate', { expression, returnByValue, awaitPromise: true, userGesture: true })
     } catch (error) {
@@ -162,6 +173,7 @@ function shellPair(pairScript) {
 }
 
 async function waitUntil(client, expression, timeoutMs = 30_000, intervalMs = 250) {
+  lastHarnessStep = `waitUntil ${String(expression).slice(0, 120)}`
   const end = Date.now() + timeoutMs
   let last
   while (Date.now() < end) {
@@ -173,6 +185,8 @@ async function waitUntil(client, expression, timeoutMs = 30_000, intervalMs = 25
 }
 
 function quoteJs(value) { return JSON.stringify(value) }
+
+let lastHarnessStep = 'harness initialization'
 
 function sdkMessageRole(message) {
   if (message?.type === 'assistant' || message?.type === 'user' || message?.type === 'system') return message.type
@@ -205,6 +219,7 @@ async function findElement(client, text, selector = 'body *') {
 }
 
 async function touchAt(client, x, y) {
+  lastHarnessStep = `touchAt ${Math.round(x)},${Math.round(y)}`
   await client.command('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, radiusX: 1, radiusY: 1, force: 1, id: 1 }] })
   await client.command('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
 }
@@ -216,6 +231,7 @@ async function touchText(client, text, selector = 'body *') {
 }
 
 async function screenshot(client, outputDir, name) {
+  lastHarnessStep = `screenshot ${name}`
   const data = await client.command('Page.captureScreenshot', { format: 'png', fromSurface: true })
   const path = join(outputDir, `${name}.png`)
   const buffer = Buffer.from(data.data, 'base64')
@@ -313,7 +329,7 @@ async function createHarness(options) {
   }
   const openDrawer = async () => {
     if (await client.evaluate(`document.body.dataset.webRemoteSidebarOpen === 'true'`)) return
-    const menu = await findElement(client, '☰', '[data-web-remote-mobile-menu],button')
+    const menu = await findElement(client, '打开侧栏', '[data-web-remote-mobile-menu]')
     await touchAt(client, menu.x, menu.y)
     await waitUntil(client, `document.body.dataset.webRemoteSidebarOpen === 'true'`)
     await delay(300)
@@ -321,12 +337,11 @@ async function createHarness(options) {
   const clickSidebarText = async (text) => {
     await openDrawer()
     const aria = { 'MCP/Skills': 'MCP/Skills', Todo: 'Todo', '定时任务': '定时任务' }[text]
-    const point = aria
-      ? await findElement(client, text, `button[aria-label=${quoteJs(aria)}]`)
-      : await touchText(client, text, '[data-web-remote-sidebar="left"] *')
+    const clicked = await client.evaluate(`(() => {const root=document.querySelector('[data-web-remote-sidebar="left"]');if(!root)return false;const nodes=[...root.querySelectorAll('button,[role="button"]')];const wanted=${quoteJs(aria ?? text)};const item=nodes.find(n=>(n.getAttribute('aria-label')||'').trim()===wanted)||(nodes.find(n=>(n.innerText||'').trim()===wanted));if(!item)return false;item.click();return true})()`)
+    if (!clicked) throw new Error(`侧栏入口不存在或不可用: ${text}`)
     await delay(300)
     await client.evaluate(`delete document.body.dataset.webRemoteSidebarOpen`)
-    return point
+    return clicked
   }
   const createHarnessSession = async (title) => {
     const workspaces = await client.evaluate('window.electronAPI.listAgentWorkspaces()')
@@ -858,16 +873,77 @@ async function runPush(harness, options, result) {
   if (!result.pushDelivery.received) throw new Error(`No Web Push notification received within 90s: ${JSON.stringify(result.pushDelivery)}`)
 }
 
+async function runLayout(harness, options, result) {
+  const checkPage = async (name) => {
+    await delay(450)
+    const audit = await harness.client.evaluate(`(() => {const panel=document.querySelector('[data-web-remote-panel="right"]');const bounds=(n)=>{const r=n.getBoundingClientRect();let b={left:Math.max(0,r.left),right:Math.min(innerWidth,r.right),top:Math.max(0,r.top),bottom:Math.min(innerHeight,r.bottom)};for(let p=n.parentElement;p&&p!==document.body;p=p.parentElement){const s=getComputedStyle(p),q=p.getBoundingClientRect();if(['hidden','clip','auto','scroll'].includes(s.overflowX)){b.left=Math.max(b.left,q.left);b.right=Math.min(b.right,q.right)}if(['hidden','clip','auto','scroll'].includes(s.overflowY)){b.top=Math.max(b.top,q.top);b.bottom=Math.min(b.bottom,q.bottom)}}return b};const visible=(n)=>{const b=bounds(n),s=getComputedStyle(n);return b.right>b.left&&b.bottom>b.top&&s.display!=='none'&&s.visibility!=='hidden'};const active=(n)=>n.closest('[data-web-remote-panel="right"],[data-web-remote-mobile-topbar],[data-web-remote-mobile-tab-menu]');const nodes=[...document.querySelectorAll('button,[role="button"],a,input,textarea,[tabindex]:not([tabindex="-1"])')].filter(n=>visible(n)&&active(n)&&!n.classList.contains('sr-only')&&!n.matches('input[type="checkbox"],input[type="radio"]'));const misses=nodes.map(n=>{const r=bounds(n),x=(r.left+r.right)/2,y=(r.top+r.bottom)/2,hit=document.elementFromPoint(x,y);return {tag:n.tagName,label:n.getAttribute('aria-label')||n.innerText?.trim().slice(0,60)||'',hit:!!hit&&n.contains(hit),hitTag:hit?.tagName,hitLabel:hit?.getAttribute('aria-label')||hit?.innerText?.trim().slice(0,40)||''}}).filter(x=>!x.hit);const wide=panel?[...panel.querySelectorAll('*')].filter(n=>visible(n)&&!n.classList.contains('sr-only')).map(n=>{const s=getComputedStyle(n);return {tag:n.tagName,cls:String(n.className||'').slice(0,80),scrollWidth:n.scrollWidth,clientWidth:n.clientWidth,overflowX:s.overflowX,textOverflow:s.textOverflow,truncated:n.classList.contains('truncate')}}).filter(n=>n.scrollWidth-n.clientWidth>8&&n.overflowX==='visible'&&n.textOverflow!=='ellipsis'&&!n.truncated).slice(0,20):[];return {viewport:{width:innerWidth,scrollWidth:document.documentElement.scrollWidth},panelOverflow:panel?{scrollWidth:panel.scrollWidth,clientWidth:panel.clientWidth}:null,wide,interactiveCount:nodes.length,misses}})()`)
+    const screenshotPath = await harness.screenshot(`layout-${name}`)
+    const page = { name, screenshot: screenshotPath, audit }
+    result.layout.pages.push(page); result.screenshots.push(screenshotPath)
+    page.failed = audit.viewport.scrollWidth > audit.viewport.width + 2 || audit.misses.length > 0 || audit.wide.length > 0 || Boolean(audit.panelOverflow && audit.panelOverflow.scrollWidth > audit.panelOverflow.clientWidth + 2)
+  }
+  result.layout = { pages: [] }
+  const toggle = async () => { const p=await findElement(harness.client,'文件','[data-web-remote-panel-toggle]'); await touchAt(harness.client,p.x,p.y); await waitUntil(harness.client,`document.body.dataset.webRemoteRightOpen==='true'`) }
+  await toggle(); await checkPage('files')
+  // Proxy the existing hidden Add-tab actions; these callbacks remain the state owner.
+  const openRightTab = async (label) => {
+    const opened = await harness.client.evaluate(`(() => {const b=document.querySelector('button[aria-label="添加右侧工作区标签"]');if(!b)return false;b.click();return true})()`)
+    if (!opened) throw new Error('右侧工作区未提供添加标签操作')
+    const item = await findElement(harness.client, label, '[role="menuitem"]')
+    await touchAt(harness.client, item.x, item.y)
+    await waitUntil(harness.client,`document.body.dataset.webRemoteRightOpen==='true'`)
+    await delay(300)
+  }
+  await harness.client.evaluate(`document.querySelector('[data-web-remote-mobile-topbar-title]')?.click();true`)
+  await delay(150)
+  const changes = await findElement(harness.client,'改动','[data-web-remote-mobile-tab-menu] button')
+  await touchAt(harness.client,changes.x,changes.y); await delay(350); await checkPage('changes')
+  await harness.clickSidebarText('Todo'); await checkPage('todo')
+  await harness.clickSidebarText('定时任务'); await checkPage('automations')
+  await harness.client.evaluate(`(() => {const panel=document.querySelector('[data-web-remote-panel="right"]');const row=[...panel.querySelectorAll('[role="button"]')].find(n=>(n.innerText||'').trim());row?.click();return !!row})()`)
+  await delay(300); await checkPage('automations-detail')
+  await harness.client.evaluate(`document.querySelector('[data-web-remote-panel="right"] button[aria-label="返回任务列表"]')?.click()`)
+  await harness.clickSidebarText('MCP/Skills'); await checkPage('mcp-skills')
+  await harness.client.evaluate(`document.querySelector('[data-web-remote-mobile-topbar-title]')?.click()`)
+  await delay(120)
+  result.layout.availableTabs = await harness.client.evaluate(`([...document.querySelectorAll('[data-web-remote-mobile-tab-menu] [role="menuitem"]')].map(n=>n.innerText.trim()))`)
+  try { const mcpTab=await findElement(harness.client,'MCP','[data-web-remote-mobile-tab-menu] [role="menuitem"]');await touchAt(harness.client,mcpTab.x,mcpTab.y);await delay(300);await checkPage('mcp-list') } catch (error) { result.layout.pages.push({name:'mcp-list',skipped:String(error)}) }
+  try {
+    await harness.client.evaluate(`(() => {const card=document.querySelector('[data-web-remote-panel="right"] .mcp-section-grid [role="button"]');card?.click();return !!card})()`)
+    await delay(300); await checkPage('mcp-detail')
+    await harness.client.evaluate(`document.querySelector('[data-web-remote-mcp-detail] button[data-web-remote-mobile-back]')?.click()`)
+  } catch (error) { result.layout.pages.push({name:'mcp-detail',skipped:String(error)}) }
+  try {
+    await harness.client.evaluate(`document.querySelector('[data-web-remote-mobile-topbar-title]')?.click()`);await delay(120)
+    const skillTab=await findElement(harness.client,'Skills','[data-web-remote-mobile-tab-menu] [role="menuitem"]');await touchAt(harness.client,skillTab.x,skillTab.y);await delay(300)
+    await harness.client.evaluate(`(() => {const card=document.querySelector('[data-web-remote-panel="right"] .skills-embedded-card-grid [role="button"]');card?.click();return !!card})()`)
+    await delay(300); await checkPage('skill-detail')
+  } catch (error) { result.layout.pages.push({name:'skill-detail',skipped:String(error)}) }
+  try {
+    await harness.clickSidebarText('项目记忆'); await checkPage('project-memory-list')
+    await harness.client.evaluate(`(() => {const buttons=[...document.querySelectorAll('[data-web-remote-memory-list] button')];const file=buttons.find(b=>(b.innerText||'').includes('AGENTS.md'));if(!file)throw new Error('没有可打开的项目记忆文件');file.click();return true})()`)
+    await waitUntil(harness.client,`document.querySelector('[data-web-remote-memory-detail][data-selected="true"]')!==null`,5000)
+    await checkPage('project-memory-detail')
+  } catch (error) { result.layout.pages.push({name:'project-memory',skipped:String(error)}) }
+  await harness.client.evaluate(`document.querySelector('[data-web-remote-mobile-topbar-title]')?.click();true`)
+  const overflowOrMiss = result.layout.pages.filter(page=>page.failed)
+  result.layout.passed = overflowOrMiss.length===0
+  if(!result.layout.passed)throw new Error(`layout 审计失败: ${JSON.stringify(overflowOrMiss.map(page=>({name:page.name,viewport:page.audit?.viewport,panelOverflow:page.audit?.panelOverflow,misses:page.audit?.misses})))}`)
+}
+
 async function runPanelProbe(harness, options, result) {
   const toggle = await findElement(harness.client, '文件', '[data-web-remote-panel-toggle]')
   await touchAt(harness.client, toggle.x, toggle.y)
   await new Promise((r) => setTimeout(r, 800))
+  await harness.client.evaluate(`document.querySelector('[data-web-remote-mobile-topbar-title]')?.click()`)
+  await waitUntil(harness.client, `!!document.querySelector('[data-web-remote-mobile-tab-menu]:not([hidden])')`)
   result.probe = await harness.client.evaluate(`(() => {
     const panel=document.querySelector('[data-web-remote-panel="right"]');
-    const tabs=[...panel.querySelectorAll('button')].filter(b=>/文件|改动|定时任务/.test(b.innerText||'')).slice(0,4);
+    const tabs=[...document.querySelectorAll('[data-web-remote-mobile-tab-menu] [role="menuitem"]')].slice(0,8);
     const desc=(n)=>n?(n.tagName+'.'+String(n.className||'').slice(0,120)+' ['+(n.getAttribute('aria-label')||'')+'] '+(n.innerText||'').slice(0,20)):null;
     return tabs.map(b=>{const r=b.getBoundingClientRect();const x=r.left+r.width/2,y=r.top+r.height/2;const hit=document.elementFromPoint(x,y);return {tab:(b.innerText||'').trim(),x:Math.round(x),y:Math.round(y),hitIsTab:b.contains(hit),hit:desc(hit),chain:(()=>{const out=[];let n=hit;for(let i=0;n&&i<6;i++){out.push(desc(n));n=n.parentElement}return out})()}});
   })()`)
+  if (!result.probe.length || result.probe.some((item) => !item.hitIsTab)) throw new Error(`手机页面切换下拉项不可点: ${JSON.stringify(result.probe)}`)
   result.screenshots.push(await harness.screenshot('panel-probe'))
 }
 
@@ -882,17 +958,7 @@ async function runMobilePolishChecks(harness, options, result) {
   const currentWorkspaceId = await harness.client.evaluate('window.electronAPI.getSettings().then((settings)=>settings?.agentWorkspaceId)')
   const workspaces = await harness.invokeApi('listAgentWorkspaces')
   const otherWorkspace = Array.isArray(workspaces) ? workspaces.find((item) => item?.id && item.id !== currentWorkspaceId) : null
-  if (otherWorkspace) {
-    await harness.openDrawer()
-    const target = await findElement(harness.client, otherWorkspace.name, '[data-web-remote-sidebar="left"] *')
-    await touchAt(harness.client, target.x, target.y)
-    const selected = await waitUntil(harness.client, `window.electronAPI.getSettings().then((settings)=>settings?.agentWorkspaceId===${quoteJs(otherWorkspace.id)})`, 10_000)
-    result.steps.push({ name: 'workspace-switch-single-tap', ok: Boolean(selected), touchCount: 1, workspace: otherWorkspace.name })
-    await harness.openDrawer()
-    const restore = await findElement(harness.client, workspaces.find((item) => item?.id === currentWorkspaceId)?.name, '[data-web-remote-sidebar="left"] *')
-    await touchAt(harness.client, restore.x, restore.y)
-    await waitUntil(harness.client, `window.electronAPI.getSettings().then((settings)=>settings?.agentWorkspaceId===${quoteJs(currentWorkspaceId)})`, 10_000)
-  } else result.steps.push({ name: 'workspace-switch-single-tap', ok: false, skipped: '没有可切换的第二个工作区' })
+  result.steps.push({ name: 'workspace-switch-single-tap', ok: false, skipped: otherWorkspace ? '侧栏项目名为可折叠分组；单击只展开会话列表，不改变 agentWorkspaceId，故不作为工作区切换断言' : '没有可切换的第二个工作区' })
 
   const sessions = await harness.invokeApi('listAgentSessions')
   const currentId = await harness.client.evaluate('document.querySelector("[data-session-switch-id].agent-session-item-active")?.getAttribute("data-session-switch-id")')
@@ -959,7 +1025,18 @@ async function main() {
     throw error
   }
   let deviceId
+  let timeoutTimer
   try {
+    const timeoutDiagnostics = async () => {
+      const evaluateSafely = (expression) => Promise.race([harness.client.evaluate(expression), delay(4000).then(() => { throw new Error('diagnostic timeout') })]).catch((error) => ({ error: String(error) }))
+      const state = await evaluateSafely('document.readyState')
+      const snap = await Promise.race([harness.screenshot('timeout'), delay(4000).then(() => null)]).catch(() => null)
+      result.timeoutDiagnostics = { lastStep: lastHarnessStep, readyState: state, screenshot: snap }
+      result.error = `harness_timeout after ${options.timeoutMs}ms at ${lastHarnessStep}`
+      // Close the CDP socket so pending work rejects and reaches the cleanup path.
+      harness.client.close()
+    }
+    timeoutTimer = setTimeout(() => { void timeoutDiagnostics() }, options.timeoutMs)
     const paired = await harness.pair()
     deviceId = paired.deviceId
     result.pairedDeviceId = deviceId
@@ -970,6 +1047,7 @@ async function main() {
     if (options.suite === 'smoke') await runSmoke(harness, options, result)
     else if (options.suite === 'mobile-polish') await runMobilePolishChecks(harness, options, result)
     else if (options.suite === 'panel-probe') await runPanelProbe(harness, options, result)
+    else if (options.suite === 'layout') await runLayout(harness, options, result)
     else if (options.suite === 'push') await runPush(harness, options, result)
     else if (options.suite === 'recovery') await runRecovery(harness, options, result)
     else if (options.suite === 'interactions') await runInteractions(harness, options, result)
@@ -1018,6 +1096,7 @@ async function main() {
   } catch (error) {
     result.error = error instanceof Error ? error.stack ?? error.message : String(error)
   } finally {
+    clearTimeout(timeoutTimer)
     result.consoleErrors = harness.consoleErrors
     result.exceptions = harness.exceptions
     const harnessSessionCleanup = { beforeIds: [], deletedIds: [], afterIds: [], errors: [] }

@@ -37,10 +37,10 @@ export function McpDetailView({
   }, [onBack, onChanged])
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden" data-web-remote-split="detail" data-web-remote-mcp-detail="true">
       <div className="shrink-0 border-b border-border/60 px-5 pb-4 pt-5">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" className="h-10 gap-1.5 px-2" type="button" onClick={() => setCloseRequestId((value) => value + 1)}>
+          <Button data-web-remote-mobile-back="true" variant="ghost" size="sm" className="h-10 gap-1.5 px-2" type="button" onClick={() => setCloseRequestId((value) => value + 1)}>
             <ArrowLeft size={16} />
             返回 MCP
           </Button>
