@@ -107,6 +107,11 @@ export function renderWebRemoteMobilePatch(): string {
   var body=document.body;
   var rightPanelTimer=0;
   var viewport=window.visualViewport;
+  function syncMenuButton(){
+    var menuButton=document.querySelector('[data-web-remote-mobile-menu]'); if(!menuButton)return;
+    var open=body.dataset.webRemoteSidebarOpen==='true'; var state=open?'close':'menu';
+    if(menuButton.dataset.iconState!==state){menuButton.dataset.iconState=state;menuButton.innerHTML=open?ICONS.menuClose:ICONS.menu;menuButton.setAttribute('aria-label',open?'收起侧栏':'打开侧栏');menuButton.setAttribute('aria-expanded',String(open))}
+  }
   function syncRightPanel(){
     var panelToggle=document.querySelector('[data-web-remote-panel-toggle]');var isOpen=body.dataset.webRemoteRightOpen==='true';
     if(panelToggle){var iconState=isOpen?'close':'files';var label=isOpen?'折叠右侧工作区（文件）':'打开文件面板';if(panelToggle.dataset.iconState!==iconState){panelToggle.dataset.iconState=iconState;panelToggle.innerHTML=isOpen?ICONS.close:ICONS.files}if(panelToggle.getAttribute('aria-label')!==label)panelToggle.setAttribute('aria-label',label)}
@@ -133,7 +138,7 @@ export function renderWebRemoteMobilePatch(): string {
     body.style.setProperty('--web-remote-keyboard-inset',editable&&inset>80?inset+'px':'0px');
     if(editable&&inset>80){try{focused.scrollIntoView({block:'center',inline:'nearest',behavior:'auto'})}catch{};window.setTimeout(function(){window.scrollTo(0,0)},0)}
   }
-  var ICONS={chevron:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>',menu:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>',refresh:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg>',files:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>',close:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>',bell:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>'};
+  var ICONS={menuClose:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>',chevron:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>',menu:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>',refresh:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg>',files:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>',close:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>',bell:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>'};
   window.addEventListener('proma-web-remote-open-preview',function(){body.dataset.webRemoteRightOpen='true';var toggle=document.querySelector('[data-web-remote-panel-toggle]');if(toggle){toggle.innerHTML=ICONS.close;toggle.setAttribute('aria-label','折叠右侧工作区（文件）')}});
   document.addEventListener('focusin',syncKeyboardViewport,true);
   document.addEventListener('focusout',function(){window.setTimeout(syncKeyboardViewport,80)},true);
@@ -142,7 +147,7 @@ export function renderWebRemoteMobilePatch(): string {
     syncKeyboardViewport();
     if (!document.querySelector('[data-web-remote-mobile-menu]')) {
       var menu=document.createElement('button'); menu.type='button'; menu.innerHTML=ICONS.menu; menu.setAttribute('aria-label','打开侧栏'); menu.dataset.webRemoteMobileMenu='true';
-      menu.addEventListener('click',function(){body.dataset.webRemoteSidebarOpen='true'}); document.body.appendChild(menu);
+      menu.addEventListener('click',function(){if(body.dataset.webRemoteSidebarOpen==='true')delete body.dataset.webRemoteSidebarOpen;else body.dataset.webRemoteSidebarOpen='true'}); document.body.appendChild(menu);
     }
     if (!document.querySelector('[data-web-remote-mobile-overlay]')) {
       var overlay=document.createElement('div'); overlay.dataset.webRemoteMobileOverlay='true'; overlay.addEventListener('click',function(){delete body.dataset.webRemoteSidebarOpen; delete body.dataset.webRemoteRightOpen}); document.body.appendChild(overlay);
@@ -261,7 +266,7 @@ export function renderWebRemoteMobilePatch(): string {
     }
     forwardMobileControl(target);
   }, true);
-  try { ensure(); new MutationObserver(ensure).observe(document.documentElement,{childList:true,subtree:true}); new MutationObserver(syncRightPanel).observe(body,{attributes:true,attributeFilter:['data-web-remote-right-open']}); } catch(error) { window.__PROMA_WEB_REMOTE_PATCH_ERROR=String(error); console.error('[Web Remote mobile patch] 初始化失败',error); }
+  try { ensure(); new MutationObserver(ensure).observe(document.documentElement,{childList:true,subtree:true}); new MutationObserver(syncRightPanel).observe(body,{attributes:true,attributeFilter:['data-web-remote-right-open']}); new MutationObserver(syncMenuButton).observe(body,{attributes:true,attributeFilter:['data-web-remote-sidebar-open']}); syncMenuButton(); } catch(error) { window.__PROMA_WEB_REMOTE_PATCH_ERROR=String(error); console.error('[Web Remote mobile patch] 初始化失败',error); }
   var hiddenAt=0; var lifecycleReady=false; var recovering=false;
   window.setTimeout(function(){lifecycleReady=true},3000);
   function recover(){
