@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import { X, ExternalLink, ChevronRight, MoreHorizontal, FolderSearch, Pencil, FolderInput, GitBranch, GitMerge, MessageSquarePlus, FileDiff, FileText, FolderOpen, MessageCircle, Brain, Split, Blocks, CalendarDays, ListTodo, Clock, ServerCog, SquareTerminal, Terminal } from 'lucide-react'
+import { X, ExternalLink, ChevronRight, MoreHorizontal, FolderSearch, Pencil, FolderInput, GitBranch, GitMerge, MessageSquarePlus, FileDiff, FileText, FolderOpen, MessageCircle, Brain, Split, Blocks, CalendarDays, ListTodo, Clock, ServerCog, SquareTerminal, Terminal, Smartphone } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -110,6 +110,7 @@ import { getDelegatedChildSessionStatus, getDelegationStatusIconClass } from '@/
 import { markSessionCompletionViewed } from '@/lib/agent-completion-presence'
 import { rememberStopGenerationTarget } from '@/lib/stop-generation-target'
 import { TerminalTabContent } from '@/components/tabs/TerminalTabContent'
+import { SimulatorPanel } from '@/components/agent/SimulatorPanel'
 import { shouldShowBothFileSources } from './file-panel-layout'
 import {
   clampRightWorkspaceSplitRatio,
@@ -444,6 +445,7 @@ interface SidePanelProps {
 }
 
 export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, width = 460 }: SidePanelProps): React.ReactElement {
+  const simulatorAvailable = /Mac/.test(navigator.platform) && !(window as Window & { __PROMA_WEB_REMOTE__?: boolean }).__PROMA_WEB_REMOTE__
   // 按会话保存最近访问顺序。该历史仅存在于当前 renderer 进程，避免恢复失效的临时 Tab。
   const rightPanelTabHistoryRef = React.useRef(new Map<string, AgentSidePanelTab[]>())
   const workspaceTabsRef = React.useRef<WorkspacePanelTab[]>([])
@@ -865,12 +867,14 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   const productivityTools = useAtomValue(productivityToolsAtom)
   const automationFormOpen = useAtomValue(automationFormAtom).open
   const isWorkspaceComponentEnabled = React.useCallback((component: WorkspaceComponentTab): boolean => (
+    component !== 'simulator' || simulatorAvailable
+  ) && (
     component !== 'todos' || productivityTools.todosEnabled
   ) && (
     component !== 'calendar' || productivityTools.calendarEnabled
   ) && (
     component !== 'vault' || productivityTools.obsidianEnabled
-  ), [productivityTools.calendarEnabled, productivityTools.obsidianEnabled, productivityTools.todosEnabled])
+  ), [productivityTools.calendarEnabled, productivityTools.obsidianEnabled, productivityTools.todosEnabled, simulatorAvailable])
 
   React.useEffect(() => {
     const validTabs = sanitizeWorkspaceComponentTabs(workspaceComponentTabs)
@@ -1121,6 +1125,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
         mcp: { label: 'MCP', icon: <ServerCog className="size-3.5" /> },
         memory: { label: '项目记忆', icon: <Brain className="size-3.5" /> },
         vault: { label: OBSIDIAN_NAME, icon: <ObsidianIcon className="size-3.5" /> },
+        simulator: { label: 'iOS 模拟器', icon: <Smartphone className="size-3.5" /> },
       }
       return { id: component, ...meta[component], closable: true }
     }),
@@ -1435,6 +1440,8 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       ) : (
         <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">等待项目初始化...</div>
       )
+    ) : paneTab === 'simulator' ? (
+      <SimulatorPanel sessionId={sessionId} workspaceSlug={workspaceSlug ?? ''} />
     ) : paneTab === 'vault' ? (
       <div className="min-h-0 flex-1 overflow-hidden"><VaultView embedded sessionId={sessionId} /></div>
     ) : paneTab === 'changes' ? (
@@ -1597,6 +1604,11 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
               setWorkspaceComponentTabs((previous) => previous.includes(component) ? previous : [...previous, component])
               handleWorkspaceTabChange(component)
             }}
+            onOpenSimulator={simulatorAvailable ? () => {
+              setWorkspaceComponentTabs((previous) => previous.includes('simulator') ? previous : [...previous, 'simulator'])
+              setIsOpen(true)
+              handleWorkspaceTabChange('simulator')
+            } : undefined}
             onOpenVault={productivityTools.obsidianEnabled ? () => {
               setWorkspaceComponentTabs((previous) => previous.includes('vault') ? previous : [...previous, 'vault'])
               setIsOpen(true)

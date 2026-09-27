@@ -6,7 +6,7 @@
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { Blocks, Brain, CalendarDays, Clock, Columns2, FolderOpen, ListTodo, MessageCircle, PanelRight, Plus, Repeat2, ServerCog, SquareTerminal, X } from 'lucide-react'
+import { Blocks, Brain, CalendarDays, Clock, Columns2, FolderOpen, ListTodo, MessageCircle, PanelRight, Plus, Repeat2, ServerCog, SquareTerminal, Smartphone, X } from 'lucide-react'
 import { OBSIDIAN_NAME, ObsidianIcon } from '@/components/obsidian/obsidian-brand'
 import { cn } from '@/lib/utils'
 import { getScrollLeftToRevealTab } from '@/lib/tab-visibility'
@@ -53,6 +53,7 @@ interface DiffPanelTabBarProps {
   onOpenFile: () => void
   onOpenTerminal?: () => void
   onOpenWorkspaceComponent?: (component: WorkspaceComponentTab) => void
+  onOpenSimulator?: () => void
   onOpenVault?: () => void
   productivityTools?: ProductivityToolsSettings
   onOpenChat?: () => void
@@ -75,6 +76,7 @@ export function DiffPanelTabBar({
   onOpenFile,
   onOpenTerminal,
   onOpenWorkspaceComponent,
+  onOpenSimulator,
   onOpenVault,
   productivityTools = { todosEnabled: true, calendarEnabled: true, obsidianEnabled: true },
   onOpenChat,
@@ -352,6 +354,7 @@ export function DiffPanelTabBar({
                 <button
                   type="button"
                   role="tab"
+                  data-web-remote-simulator-tab={tab.id === 'simulator' ? 'true' : undefined}
                   aria-selected={selected}
                   aria-description={visiblePane ? `显示在${visiblePane === 'left' ? '左侧' : '右侧'} Pane` : undefined}
                   onClick={() => selectTab(tab.id)}
@@ -505,6 +508,7 @@ export function DiffPanelTabBar({
                   <Brain className="size-3.5" />
                   打开项目记忆
                 </DropdownMenuItem>
+                {onOpenSimulator && <DropdownMenuItem data-web-remote-simulator-entry="true" onSelect={onOpenSimulator}><Smartphone className="size-3.5" />打开 iOS 模拟器</DropdownMenuItem>}
               </>
             )}
             {onOpenChat && (

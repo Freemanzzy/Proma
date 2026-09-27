@@ -10,7 +10,7 @@ import { existsSync, realpathSync, readFileSync, writeFileSync, mkdirSync, statS
 import { realpath, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, SLACK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, VAULT_IPC_CHANNELS, PLANNING_CONFLICT_ERROR, MAX_ATTACHMENT_SIZE, isPromaPermissionMode, normalizePathForCompare, removeMcpServerFromConfig, TERMINAL_IPC_CHANNELS } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, SLACK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, VAULT_IPC_CHANNELS, PLANNING_CONFLICT_ERROR, MAX_ATTACHMENT_SIZE, isPromaPermissionMode, normalizePathForCompare, removeMcpServerFromConfig, TERMINAL_IPC_CHANNELS, SIMULATOR_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS, WINDOWS_AGENT_ISLAND_IPC_CHANNELS, TRAY_IPC_CHANNELS } from '../types'
 import type {
   QuickTaskSubmitInput,
@@ -215,6 +215,7 @@ import {
 import { extractTextFromAttachment } from './lib/document-parser'
 import { getUserProfile, updateUserProfile } from './lib/user-profile-service'
 import { getSettings, updateSettings } from './lib/settings-service'
+import { listSimulatorDevices, startSimulatorPreview, stopSimulatorPreview, getSimulatorPreviewStatus, pressSimulatorHome, captureSimulatorScreenshot } from './lib/simulator-preview-service'
 import { refreshAgentIslandConfiguration, markAgentIslandSessionViewed } from './lib/agent-island-service'
 import { getAgentStatusHoverWindow } from './agent-status-hover-window'
 import { setDockBadgeCount } from './lib/dock-badge-service'
@@ -1390,6 +1391,18 @@ async function withOAuthDeviceCodeQr<T extends CodexOAuthDeviceCode | GithubCopi
 }
 
 export function registerIpcHandlers(): void {
+  // ===== iOS Simulator preview（仅桌面主 renderer） =====
+  const assertMainSimulatorRenderer = (senderId: number): void => {
+    const mainWindow = getMainWindow()
+    if (process.platform !== 'darwin' || !mainWindow || mainWindow.webContents.id !== senderId) throw new Error('iOS 模拟器预览仅支持 macOS 桌面主窗口。')
+  }
+  ipcMain.handle(SIMULATOR_IPC_CHANNELS.LIST, (event) => { assertMainSimulatorRenderer(event.sender.id); return listSimulatorDevices() })
+  ipcMain.handle(SIMULATOR_IPC_CHANNELS.START, (event, udid: string) => { assertMainSimulatorRenderer(event.sender.id); return startSimulatorPreview(udid) })
+  ipcMain.handle(SIMULATOR_IPC_CHANNELS.STOP, (event, udid?: string) => { assertMainSimulatorRenderer(event.sender.id); return stopSimulatorPreview(udid) })
+  ipcMain.handle(SIMULATOR_IPC_CHANNELS.STATUS, (event) => { assertMainSimulatorRenderer(event.sender.id); return getSimulatorPreviewStatus() })
+  ipcMain.handle(SIMULATOR_IPC_CHANNELS.HOME, (event, udid: string) => { assertMainSimulatorRenderer(event.sender.id); return pressSimulatorHome(udid) })
+  ipcMain.handle(SIMULATOR_IPC_CHANNELS.SCREENSHOT, (event, input: { udid: string; sessionId: string; workspaceSlug: string }) => { assertMainSimulatorRenderer(event.sender.id); return captureSimulatorScreenshot(input.udid, input.sessionId, input.workspaceSlug) })
+
   // ===== 本地终端（仅主 renderer 可操作，不能指定可执行文件） =====
   const assertMainTerminalRenderer = (senderId: number): void => {
     const mainWindow = getMainWindow()

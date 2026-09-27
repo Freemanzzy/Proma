@@ -6,7 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, SLACK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, VAULT_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS, TERMINAL_IPC_CHANNELS } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, SLACK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, VAULT_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS, TERMINAL_IPC_CHANNELS, SIMULATOR_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS } from '../types'
 import type {
   RuntimeStatus,
@@ -231,6 +231,12 @@ export interface ElectronAPI {
   writeTerminal: (input: TerminalInput) => Promise<void>
   resizeTerminal: (input: TerminalResizeInput) => Promise<void>
   killTerminal: (terminalId: string) => Promise<void>
+  listSimulators: () => Promise<import('@proma/shared').SimulatorDevice[]>
+  startSimulatorPreview: (udid: string) => Promise<import('@proma/shared').SimulatorPreviewStatus>
+  stopSimulatorPreview: (udid?: string) => Promise<void>
+  getSimulatorPreviewStatus: () => Promise<import('@proma/shared').SimulatorPreviewStatus>
+  pressSimulatorHome: (udid: string) => Promise<void>
+  captureSimulatorScreenshot: (udid: string, sessionId: string, workspaceSlug: string) => Promise<string>
   getTerminalSnapshot: (terminalId: string) => Promise<TerminalSnapshot>
   acknowledgeTerminalOutput: (input: TerminalOutputAck) => void
   onAgentTerminalOpen: (callback: (event: AgentTerminalOpenEvent) => void) => () => void
@@ -1399,6 +1405,12 @@ const electronAPI = {
   writeTerminal: (input: TerminalInput) => ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.INPUT, input),
   resizeTerminal: (input: TerminalResizeInput) => ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.RESIZE, input),
   killTerminal: (terminalId: string) => ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.KILL, terminalId),
+  listSimulators: () => ipcRenderer.invoke(SIMULATOR_IPC_CHANNELS.LIST),
+  startSimulatorPreview: (udid: string) => ipcRenderer.invoke(SIMULATOR_IPC_CHANNELS.START, udid),
+  stopSimulatorPreview: (udid?: string) => ipcRenderer.invoke(SIMULATOR_IPC_CHANNELS.STOP, udid),
+  getSimulatorPreviewStatus: () => ipcRenderer.invoke(SIMULATOR_IPC_CHANNELS.STATUS),
+  pressSimulatorHome: (udid: string) => ipcRenderer.invoke(SIMULATOR_IPC_CHANNELS.HOME, udid),
+  captureSimulatorScreenshot: (udid: string, sessionId: string, workspaceSlug: string) => ipcRenderer.invoke(SIMULATOR_IPC_CHANNELS.SCREENSHOT, { udid, sessionId, workspaceSlug }),
   getTerminalSnapshot: (terminalId: string) => ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.SNAPSHOT, terminalId),
   acknowledgeTerminalOutput: (input: TerminalOutputAck) => ipcRenderer.send(TERMINAL_IPC_CHANNELS.ACK_OUTPUT, input),
   onAgentTerminalOpen: (callback: (event: AgentTerminalOpenEvent) => void) => {
