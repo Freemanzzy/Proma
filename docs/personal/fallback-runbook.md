@@ -26,6 +26,7 @@
 | 用户数据 | `~/.proma`（个人版切换后直接使用） |
 | 开发/预演数据 | `~/.proma-dev`（与正式数据隔离） |
 | 更新前自动备份 | `~/.proma-switch-backups/<时间戳>/`（安装脚本在替换应用前生成） |
+| 切换期早期备份与官方版存档 | 外置硬盘 `/Volumes/Lexar ssd 2tb/proma 备份/switch-backups-20260926/`（4 份 09-26 更新前备份、`official-Proma-0.19.58.app`、官方更新缓存）；本机只保留最新一份更新前备份 |
 | 外置硬盘完整备份 | `/Volumes/Lexar ssd 2tb/proma 备份/*.zip`（`proma-backup` Skill 生成；未挂载时用 `diskutil list` 找到卷后 `diskutil mount <设备>`） |
 | 源码仓库 | `~/Documents/proma-personal`（`personal` 分支；SSOT：`PERSONAL.md`） |
 | 官方上游 | remote `upstream` = proma-ai/Proma；个人版 remote `origin` = Freemanzzy/Proma |
@@ -102,7 +103,7 @@ open "/Applications/Proma.app"
 ```
 
 3. 如果上一版启动后报数据版本过高（新版已迁移数据），转 §4 恢复更新前备份。
-4. 如果 `previous.app` 不存在：个人版上一版从仓库构建（§6）；需要退回官方版时，官方 0.19.58 存放在 `~/.proma-switch-backups/official-Proma-0.19.58.app`（`mv` 回 `/Applications/Proma.app` 前先把当前应用改名保留），外置硬盘另有 `official-Proma-0.19.58-20260926.app.zip`。官方版会自动更新，放回后只在确需回退时打开。
+4. 如果 `previous.app` 不存在：个人版上一版从仓库构建（§6）；需要退回官方版时，官方 0.19.58 存放在外置硬盘 `/Volumes/Lexar ssd 2tb/proma 备份/switch-backups-20260926/official-Proma-0.19.58.app`（用 `ditto` 复制回 `/Applications/Proma.app` 前先把当前应用改名保留），外置硬盘另有 `official-Proma-0.19.58-20260926.app.zip`。官方版会自动更新，放回后只在确需回退时打开。
 
 ---
 
