@@ -569,3 +569,9 @@ python3 scripts/personal/import-proma-backup.py \\
 - iOS 真实 WebKit 实测（iPhone 17 Pro 模拟器 · iOS 26.5 · Safari，开发实例 17889 经临时 8443）：配对成功；`/app/` 正常加载；侧栏单击切换会话 4/4 成功（含跨工作区），切换后侧栏自动关闭；刷新按钮单击重新加载；右侧面板滑入淡入、左侧抽屉与遮罩过渡正常（录屏 `~/Downloads/proma-mobile-animations.mp4`）；侧栏时间标签无重叠。未做修复前版本的对照测试。
 - Chrome 模拟回归（去代理运行）：android/iphone smoke 各 7 步全过、android attachments 通过、刷新按钮单击 android/iphone 通过，JS exceptions 0；harness `mobile-polish` 套件的“工作区切换”判定条件有误（侧栏工作区为展开/折叠分组，不会改 `agentWorkspaceId`），以模拟器实测为准，待修正 harness。清理：harness 设备均撤销、自建会话删除、残留 headless Chrome 已按 PID 结束。
 - 验证：typecheck 通过；全量 557 pass / 5 fail / 1 error（基线内）；build:main / renderer / web-preload 通过。本批（含右侧 Tab 修复 `4e556323`）为应用代码，需打包安装。
+
+## 2026-09-27: 手机顶栏图标化与右侧面板 Tab 点击修复（模拟器验证）
+
+- 顶栏菜单/通知/刷新/文件按钮改为内联图标（40px，保留可访问名称）`b0f04a81`。
+- 右侧面板 Tab 左半部分点不动的根因：桌面右侧面板左边缘的列宽拖拽条是面板直接子元素，手机注入层 `[data-web-remote-panel="right"] > * { width:100% }` 把它拉满全宽成为透明遮罩（阶段 A 起即存在）；手机端隐藏 col/row-resize 拖拽条。另修复 Luna 动效改动的缺陷：面板关闭时写入的内联 `pointer-events:none` 在重新打开时未清除。新增 harness `panel-probe` 套件（报告每个 Tab 中心点实际命中的元素）。`ebd502a8`。
+- 验证：panel-probe 4/4 命中目标；iOS 模拟器 Safari 点“改动”“文件”Tab 均切换。用户决定（选项 B）：与下一批“手机端布局适配”一起打包安装，本批先合入 personal 保留。
