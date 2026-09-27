@@ -644,3 +644,8 @@ python3 scripts/personal/import-proma-backup.py \\
 - 修复（用户同意）：证书重签 `previous/Proma.app`；外置硬盘官方版改名 `official-Proma-0.19.58.app.disabled`（zip 存档仍在）；`lsregister -u` 注销旧路径；用户清空废纸篓并运行 `tccutil reset SystemPolicyDocumentsFolder com.proma.app`（清除 3 条记录）后重新允许一次。现登记 3 份，签名同为证书，桌面不再反复弹窗。
 - 规则：Proma 副本（含备份）必须与当前版本同一签名身份；外置硬盘存放旧 `.app` 一律改为 `.app.disabled` 或只存 zip（待 Proma 写入 `maintenance.md`）。
 - 手机：两台设备推送订阅登记成功；通知按钮成功后显示为空白块且无反馈（`mobile-patch.ts` 用文字覆盖图标），已交 Proma 修复。
+
+## 2026-09-28: 手机通知按钮状态修复与旧副本规则
+
+- 处理 install-result-2026-09-27-3 待办。①通知按钮：订阅成功后原代码 `notify.textContent='通知已开启'` 覆盖图标（方形图标按钮显示为空白）并 `disabled`。改为状态标记 `data-notify-state`（off/on，只在状态变化时写 DOM）：已开启显示绿色 bell-check 图标、aria-label“通知已开启”、不禁用；成功时与再次点击时显示轻提示（toast）；页面加载时若通知权限已授予且服务端 `GET /api/push/subscription` 返回已订阅，直接显示已开启。harness `push` 套件改为断言 `notifyState==='on'`、按钮保留 SVG 无文字，并在推送送达后刷新页面验证状态保留与点按 toast。②`docs/personal/maintenance.md` §4 新增“同 bundle ID 的旧副本”规则（外置硬盘/备份中的旧 `.app` 改为 `.app.disabled` 或只存 zip）。③开发实例为本次验证重新启动，用户模拟器确认后关闭并关闭 8443。
+- 验证：harness（去代理）android push（订阅、FCM 送达“运行已完成”、刷新后仍为已开启、点按 toast）、iphone smoke / mobile-polish / layout 通过，JS exceptions 0；typecheck 通过；全量 557 pass / 5 fail / 1 error（基线内）。

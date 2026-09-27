@@ -54,6 +54,7 @@ Claude Code 接手安装时只做必要复核：包内 marker commit 等于 `per
   - 唯一例外（用户 2026-09-27 同意）：`install-update.sh` 在安装成功后，可将本机较早的更新前备份（`~/.proma-switch-backups/20*`，保留最新 `--keep-local` 份）用 `ditto` 转存到外置硬盘 `proma 备份/switch-backups/`，经 `verify-backup.py --preset proma-backup` 逐文件校验通过后删除本机副本；未挂载、目标已存在、复制或校验失败时一律保留本机副本。其他任何删除备份的操作仍须用户逐次同意。
 - **版本**：`apps/electron/package.json` 的 `version` 必须等于所跟随的官方 tag，不得自行递增。只同步官方正式 tag，不追 `upstream/main` 零散提交。
 - **官方安装包**：不要下载或安装官方 Proma（同名同 ID，会覆盖个人版）。个人版必须保持官方自动更新关闭。
+- **同 bundle ID 的旧副本**：任何位置（外置硬盘、备份目录）存放的旧 Proma `.app`（官方版或旧个人版）一律改名为 `.app.disabled` 或只保留 zip；`/Applications/Proma.app` 与 `~/.proma-switch-backups/previous/Proma.app` 之外不留可被 LaunchServices 登记的 `.app` 目录。原因：同一 `com.proma.app` 登记多个不同签名副本时，macOS TCC 解析到不同副本并反复改写授权记录，导致“想访问文稿文件夹”反复弹窗（2026-09-27 实测）。
 - **Git**：不 `push --force`，不 `reset --hard` 已推送分支；一件事一个分支，`--no-ff` 合并；每个提交信息末尾唯一一行 `Made-with: Proma`，不加 Co-Authored-By；提交邮箱用仓库已配置的 noreply。
 - **公开仓库**：不提交密钥、令牌、`/Users/<用户名>` 绝对路径、IP、Tailscale 主机名与设备名、邮箱；推送前扫描 diff。
 - **进程**：禁止 `pkill` / `killall`；只按 PID 结束进程，且先征得用户同意。

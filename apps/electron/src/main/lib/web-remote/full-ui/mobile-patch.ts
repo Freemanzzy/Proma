@@ -97,6 +97,9 @@ export function renderWebRemoteMobilePatch(): string {
 @media (max-width: 767px) { [data-web-remote-automation-title="true"] { flex-direction:column!important; align-items:flex-start!important; gap:2px!important; } [data-web-remote-automation-title="true"] > :first-child { white-space:normal!important; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; } [data-web-remote-automation-title="true"] > :last-child { max-width:100%; } }
 @media (max-width: 767px) { [data-shortcut-keycaps], .session-quick-switch-keycap, kbd { display:none!important; } }
 @media (max-width: 767px) { [data-web-remote-panel="right"] [data-web-remote-memory-path] { direction:rtl; text-align:left; } [data-web-remote-panel="right"] [data-web-remote-memory-path]::before { content:"\\200E"; } }
+[data-web-remote-toast] { position:fixed; left:50%; bottom:calc(env(safe-area-inset-bottom) + 96px); z-index:10010; max-width:calc(100vw - 32px); padding:10px 14px; border-radius:12px; background:hsl(var(--foreground)/.9); color:hsl(var(--background)); font-size:14px; line-height:1.4; opacity:0; pointer-events:none; transform:translate(-50%,8px); transition:opacity .18s ease,transform .18s ease; }
+[data-web-remote-toast][data-visible="true"] { opacity:1; transform:translate(-50%,0); }
+[data-web-remote-notification-entry][data-notify-state="on"] { color:hsl(142 71% 36%); }
 @media (prefers-reduced-motion: reduce) { [data-web-remote-sidebar="left"], [data-web-remote-mobile-overlay], [data-web-remote-panel="right"], [data-web-remote-mobile-topbar] button, [data-web-remote-sidebar="left"] button, [data-web-remote-panel="right"] button { transition:none!important; } }
 @media (min-width: 768px) { [data-web-remote-mobile-menu], [data-web-remote-mobile-overlay], [data-web-remote-panel-toggle], [data-web-remote-refresh] { display:none!important; } }
 </style>
@@ -107,6 +110,15 @@ export function renderWebRemoteMobilePatch(): string {
   var body=document.body;
   var rightPanelTimer=0;
   var viewport=window.visualViewport;
+  function webRemoteToast(message){
+    var toast=document.querySelector('[data-web-remote-toast]');
+    if(!toast){toast=document.createElement('div');toast.dataset.webRemoteToast='true';toast.setAttribute('role','status');document.body.appendChild(toast)}
+    toast.textContent=message;toast.dataset.visible='true';window.clearTimeout(toast.__timer);toast.__timer=window.setTimeout(function(){delete toast.dataset.visible},2200);
+  }
+  function setNotifyState(button,on){
+    var state=on?'on':'off'; if(button.dataset.notifyState===state)return;
+    button.dataset.notifyState=state; button.innerHTML=on?ICONS.bellCheck:ICONS.bell; button.setAttribute('aria-label',on?'通知已开启':'开启通知'); button.setAttribute('aria-pressed',String(on));
+  }
   function syncMenuButton(){
     var menuButton=document.querySelector('[data-web-remote-mobile-menu]'); if(!menuButton)return;
     var open=body.dataset.webRemoteSidebarOpen==='true'; var state=open?'close':'menu';
@@ -138,7 +150,7 @@ export function renderWebRemoteMobilePatch(): string {
     body.style.setProperty('--web-remote-keyboard-inset',editable&&inset>80?inset+'px':'0px');
     if(editable&&inset>80){try{focused.scrollIntoView({block:'center',inline:'nearest',behavior:'auto'})}catch{};window.setTimeout(function(){window.scrollTo(0,0)},0)}
   }
-  var ICONS={menuClose:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>',chevron:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>',menu:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>',refresh:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg>',files:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>',close:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>',bell:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>'};
+  var ICONS={bellCheck:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="m15 5 2 2 4-4"/></svg>',menuClose:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>',chevron:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>',menu:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>',refresh:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg>',files:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>',close:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>',bell:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>'};
   window.addEventListener('proma-web-remote-open-preview',function(){body.dataset.webRemoteRightOpen='true';var toggle=document.querySelector('[data-web-remote-panel-toggle]');if(toggle){toggle.innerHTML=ICONS.close;toggle.setAttribute('aria-label','折叠右侧工作区（文件）')}});
   document.addEventListener('focusin',syncKeyboardViewport,true);
   document.addEventListener('focusout',function(){window.setTimeout(syncKeyboardViewport,80)},true);
@@ -172,8 +184,9 @@ export function renderWebRemoteMobilePatch(): string {
     syncRightPanel();
     var topbar=document.querySelector('[data-web-remote-mobile-topbar]');
     if (topbar && !topbar.querySelector('[data-web-remote-notification-entry]')) {
-      var notify=document.createElement('button'); notify.type='button'; notify.dataset.webRemoteNotificationEntry='true'; notify.innerHTML=ICONS.bell; notify.setAttribute('aria-label','开启通知');
+      var notify=document.createElement('button'); notify.type='button'; notify.dataset.webRemoteNotificationEntry='true'; setNotifyState(notify,false); if('Notification' in window&&Notification.permission==='granted'){fetch('/api/push/subscription',{credentials:'include'}).then(function(r){return r.ok?r.json():null}).then(function(d){if(d&&d.subscribed)setNotifyState(notify,true)}).catch(function(){});}
       notify.addEventListener('click',async function(){
+        if(notify.dataset.notifyState==='on'){webRemoteToast('通知已开启：会话完成、出错或需要你确认时会推送');return;}
         try {
           if (/iPhone|iPad|iPod/i.test(navigator.userAgent) && !navigator.standalone && !window.matchMedia('(display-mode: standalone)').matches) { alert('请先将 /app/ 添加到主屏幕，再开启通知。'); return; }
           if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) { alert('此浏览器暂不支持 Web Push 通知。'); return; }
@@ -182,8 +195,8 @@ export function renderWebRemoteMobilePatch(): string {
           var keyResponse=await fetch('/api/push/key',{credentials:'include'}); if(!keyResponse.ok)throw new Error('无法读取推送公钥'); var key=(await keyResponse.json()).publicKey;
           var applicationServerKey=Uint8Array.from(atob(key.replace(/-/g,'+').replace(/_/g,'/')),function(c){return c.charCodeAt(0)});
           var subscription=await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:applicationServerKey});
-          var saved=await fetch('/api/push/subscription',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({subscription:subscription.toJSON(),label:/Android/i.test(navigator.userAgent)?'Android 手机':'iPhone'})}); if(!saved.ok)throw new Error('订阅登记失败'); notify.textContent='通知已开启'; notify.disabled=true;
-        } catch(error) { alert('开启通知失败：'+(error&&error.message||String(error))); }
+          var saved=await fetch('/api/push/subscription',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({subscription:subscription.toJSON(),label:/Android/i.test(navigator.userAgent)?'Android 手机':'iPhone'})}); if(!saved.ok)throw new Error('订阅登记失败'); setNotifyState(notify,true); webRemoteToast('通知已开启');
+        } catch(error) { var msg=(error&&error.message)||String(error); if((error&&error.name==='NotAllowedError')||/denied|not allowed/i.test(msg)){alert('系统拒绝了推送订阅。请在「设置 → 通知 → Proma」开启通知后再试；iOS 模拟器不支持网页推送，请在真机上开启。');} else {alert('开启通知失败：'+msg);} }
       }); topbar.appendChild(notify);
     }
     var topbar=document.querySelector('[data-web-remote-mobile-topbar]');

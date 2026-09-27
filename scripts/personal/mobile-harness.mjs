@@ -847,7 +847,10 @@ async function runPush(harness, options, result) {
   await harness.client.command('Browser.grantPermissions', { origin, permissions: ['notifications'] })
   const entry = await findElement(harness.client, '开启通知', 'button')
   await harness.client.evaluate("document.querySelector('[data-web-remote-notification-entry]')?.click()")
-  await waitUntil(harness.client, `document.querySelector('[data-web-remote-notification-entry]')?.disabled === true`, 30_000)
+  await waitUntil(harness.client, `document.querySelector('[data-web-remote-notification-entry]')?.dataset.notifyState === 'on'`, 30_000)
+  result.notifyEntryAfterSubscribe = await harness.client.evaluate(`(() => { const b=document.querySelector('[data-web-remote-notification-entry]'); const t=document.querySelector('[data-web-remote-toast]'); return { state:b?.dataset.notifyState, aria:b?.getAttribute('aria-label'), disabled:b?.disabled, hasSvg:!!b?.querySelector('svg'), text:(b?.innerText||'').trim(), toast:t?.textContent||null } })()`)
+  if (result.notifyEntryAfterSubscribe.disabled || !result.notifyEntryAfterSubscribe.hasSvg || result.notifyEntryAfterSubscribe.text) throw new Error(`notification entry rendering regressed: ${JSON.stringify(result.notifyEntryAfterSubscribe)}`)
+  result.screenshots.push(await harness.screenshot('notify-on'))
   const subscribed = await harness.client.evaluate(`fetch('/api/push/subscription',{credentials:'include'}).then(r=>r.json())`)
   const browserSubscription = await harness.client.evaluate(`navigator.serviceWorker.ready.then(r=>r.pushManager.getSubscription().then(s=>({registered:!!s,endpointHost:s?new URL(s.endpoint).host:null})))`)
   result.pushSubscription = { serverRegistered: subscribed.subscribed === true, browser: browserSubscription, permission: await harness.client.evaluate('Notification.permission'), entry }
@@ -871,6 +874,12 @@ async function runPush(harness, options, result) {
   result.pushDelivery = { assistantReplied: reply, notifications, received: notifications.some((item) => item.sessionId === session.id) }
   result.screenshots.push(await harness.screenshot('web-push-result'))
   if (!result.pushDelivery.received) throw new Error(`No Web Push notification received within 90s: ${JSON.stringify(result.pushDelivery)}`)
+  await harness.client.evaluate('location.reload()')
+  await waitUntil(harness.client, `document.querySelector('[data-web-remote-notification-entry]')?.dataset.notifyState === 'on'`, 30_000)
+  await harness.client.evaluate("document.querySelector('[data-web-remote-notification-entry]')?.click()")
+  await waitUntil(harness.client, `(document.querySelector('[data-web-remote-toast]')?.textContent||'').includes('通知已开启')`, 5_000)
+  result.notifyEntryAfterReload = { state: 'on', toastOnTap: true }
+  result.screenshots.push(await harness.screenshot('notify-on-after-reload'))
 }
 
 async function runLayout(harness, options, result) {
