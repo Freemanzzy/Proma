@@ -858,6 +858,19 @@ async function runPush(harness, options, result) {
   if (!result.pushDelivery.received) throw new Error(`No Web Push notification received within 90s: ${JSON.stringify(result.pushDelivery)}`)
 }
 
+async function runPanelProbe(harness, options, result) {
+  const toggle = await findElement(harness.client, '文件', '[data-web-remote-panel-toggle]')
+  await touchAt(harness.client, toggle.x, toggle.y)
+  await new Promise((r) => setTimeout(r, 800))
+  result.probe = await harness.client.evaluate(`(() => {
+    const panel=document.querySelector('[data-web-remote-panel="right"]');
+    const tabs=[...panel.querySelectorAll('button')].filter(b=>/文件|改动|定时任务/.test(b.innerText||'')).slice(0,4);
+    const desc=(n)=>n?(n.tagName+'.'+String(n.className||'').slice(0,120)+' ['+(n.getAttribute('aria-label')||'')+'] '+(n.innerText||'').slice(0,20)):null;
+    return tabs.map(b=>{const r=b.getBoundingClientRect();const x=r.left+r.width/2,y=r.top+r.height/2;const hit=document.elementFromPoint(x,y);return {tab:(b.innerText||'').trim(),x:Math.round(x),y:Math.round(y),hitIsTab:b.contains(hit),hit:desc(hit),chain:(()=>{const out=[];let n=hit;for(let i=0;n&&i<6;i++){out.push(desc(n));n=n.parentElement}return out})()}});
+  })()`)
+  result.screenshots.push(await harness.screenshot('panel-probe'))
+}
+
 async function runMobilePolishChecks(harness, options, result) {
   const refresh = await findElement(harness.client, '刷新页面', '[data-web-remote-refresh]')
   const beforeReload = await harness.client.evaluate('performance.timeOrigin')
@@ -956,6 +969,7 @@ async function main() {
     result.sessionManifestBefore = await harness.readSessionManifest()
     if (options.suite === 'smoke') await runSmoke(harness, options, result)
     else if (options.suite === 'mobile-polish') await runMobilePolishChecks(harness, options, result)
+    else if (options.suite === 'panel-probe') await runPanelProbe(harness, options, result)
     else if (options.suite === 'push') await runPush(harness, options, result)
     else if (options.suite === 'recovery') await runRecovery(harness, options, result)
     else if (options.suite === 'interactions') await runInteractions(harness, options, result)

@@ -18,6 +18,7 @@ export function renderWebRemoteMobilePatch(): string {
   [data-web-remote-panel="right"][data-web-remote-panel-open="true"] { opacity:1; transform:translateX(0); pointer-events:auto; visibility:visible; }
   [data-web-remote-panel="right"] > * { width:100%!important; max-width:none!important; min-width:0!important; }
   [data-web-remote-panel="right"] > [aria-hidden="true"] { display:none!important; }
+  [data-web-remote-panel="right"] [class*="cursor-col-resize"], [data-web-remote-panel="right"] [class*="cursor-row-resize"] { display:none!important; pointer-events:none!important; }
   body[data-web-remote-right-open="true"] [data-web-remote-panel="right"] [class*="opacity-0"] { opacity:1!important; pointer-events:auto!important; }
   [data-web-remote-panel="right"] [role="tablist"], [data-web-remote-panel="right"] [class*="overflow-x-auto"] { overflow-x:auto!important; white-space:nowrap; scrollbar-width:none; }
   [data-web-remote-panel="right"] button, [data-web-remote-panel="right"] [role="button"] { min-height:42px; }
@@ -49,6 +50,7 @@ export function renderWebRemoteMobilePatch(): string {
   [data-web-remote-main="true"] kbd, [data-web-remote-main="true"] [data-shortcut], [data-web-remote-main="true"] [class*="shortcut"] { display:none!important; }
   img[alt="用户头像"] { display:none!important; }
 }
+@media (max-width: 767px) { [data-web-remote-mobile-menu], [data-web-remote-panel-toggle], [data-web-remote-refresh], [data-web-remote-notification-entry] { display:inline-flex!important; align-items:center; justify-content:center; width:40px!important; min-width:40px!important; height:40px!important; min-height:40px!important; padding:0!important; border-radius:12px!important; font-size:0!important; line-height:0!important; } [data-web-remote-mobile-topbar] svg { display:block; flex:none; } }
 @media (prefers-reduced-motion: reduce) { [data-web-remote-sidebar="left"], [data-web-remote-mobile-overlay], [data-web-remote-panel="right"], [data-web-remote-mobile-topbar] button, [data-web-remote-sidebar="left"] button, [data-web-remote-panel="right"] button { transition:none!important; } }
 @media (min-width: 768px) { [data-web-remote-mobile-menu], [data-web-remote-mobile-overlay], [data-web-remote-panel-toggle], [data-web-remote-refresh] { display:none!important; } }
 </style>
@@ -64,7 +66,7 @@ export function renderWebRemoteMobilePatch(): string {
     var open=body.dataset.webRemoteRightOpen==='true';
     if(open){
       window.clearTimeout(rightPanelTimer); panel.dataset.webRemotePanelRendered='true';
-      panel.style.display='flex'; panel.style.visibility='visible';
+      panel.style.display='flex'; panel.style.visibility='visible'; panel.style.pointerEvents='';
       window.requestAnimationFrame(function(){window.requestAnimationFrame(function(){panel.dataset.webRemotePanelOpen='true'})});
     } else if(panel.dataset.webRemotePanelRendered==='true'){
       delete panel.dataset.webRemotePanelOpen; panel.style.pointerEvents='none';
@@ -79,23 +81,24 @@ export function renderWebRemoteMobilePatch(): string {
     body.style.setProperty('--web-remote-keyboard-inset',editable&&inset>80?inset+'px':'0px');
     if(editable&&inset>80){try{focused.scrollIntoView({block:'center',inline:'nearest',behavior:'auto'})}catch{};window.setTimeout(function(){window.scrollTo(0,0)},0)}
   }
-  window.addEventListener('proma-web-remote-open-preview',function(){body.dataset.webRemoteRightOpen='true';var toggle=document.querySelector('[data-web-remote-panel-toggle]');if(toggle){toggle.textContent='×';toggle.setAttribute('aria-label','折叠右侧工作区')}});
+  var ICONS={menu:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>',refresh:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg>',files:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>',close:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>',bell:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>'};
+  window.addEventListener('proma-web-remote-open-preview',function(){body.dataset.webRemoteRightOpen='true';var toggle=document.querySelector('[data-web-remote-panel-toggle]');if(toggle){toggle.innerHTML=ICONS.close;toggle.setAttribute('aria-label','折叠右侧工作区（文件）')}});
   document.addEventListener('focusin',syncKeyboardViewport,true);
   document.addEventListener('focusout',function(){window.setTimeout(syncKeyboardViewport,80)},true);
   if(viewport){viewport.addEventListener('resize',syncKeyboardViewport);viewport.addEventListener('scroll',syncKeyboardViewport)}
   function ensure(){
     syncKeyboardViewport();
     if (!document.querySelector('[data-web-remote-mobile-menu]')) {
-      var menu=document.createElement('button'); menu.type='button'; menu.textContent='☰'; menu.setAttribute('aria-label','打开侧栏'); menu.dataset.webRemoteMobileMenu='true';
+      var menu=document.createElement('button'); menu.type='button'; menu.innerHTML=ICONS.menu; menu.setAttribute('aria-label','打开侧栏'); menu.dataset.webRemoteMobileMenu='true';
       menu.addEventListener('click',function(){body.dataset.webRemoteSidebarOpen='true'}); document.body.appendChild(menu);
     }
     if (!document.querySelector('[data-web-remote-mobile-overlay]')) {
       var overlay=document.createElement('div'); overlay.dataset.webRemoteMobileOverlay='true'; overlay.addEventListener('click',function(){delete body.dataset.webRemoteSidebarOpen; delete body.dataset.webRemoteRightOpen}); document.body.appendChild(overlay);
     }
     if (!document.querySelector('[data-web-remote-panel-toggle]')) {
-      var panelToggle=document.createElement('button'); panelToggle.type='button'; panelToggle.dataset.webRemotePanelToggle='true'; panelToggle.textContent='文件'; panelToggle.setAttribute('aria-label','打开文件面板');
+      var panelToggle=document.createElement('button'); panelToggle.type='button'; panelToggle.dataset.webRemotePanelToggle='true'; panelToggle.innerHTML=ICONS.files; panelToggle.setAttribute('aria-label','打开文件面板');
       var suppressClick=false;
-      var togglePanel=function(){var open=body.dataset.webRemoteRightOpen==='true'; if(open){delete body.dataset.webRemoteRightOpen; panelToggle.textContent='文件'; panelToggle.setAttribute('aria-label','打开文件面板')}else{body.dataset.webRemoteRightOpen='true'; panelToggle.textContent='×'; panelToggle.setAttribute('aria-label','折叠右侧工作区')}};
+      var togglePanel=function(){var open=body.dataset.webRemoteRightOpen==='true'; if(open){delete body.dataset.webRemoteRightOpen; panelToggle.innerHTML=ICONS.files; panelToggle.setAttribute('aria-label','打开文件面板')}else{body.dataset.webRemoteRightOpen='true'; panelToggle.innerHTML=ICONS.close; panelToggle.setAttribute('aria-label','折叠右侧工作区（文件）')}};
       window.__PROMA_TOGGLE_PANEL=togglePanel;
       panelToggle.addEventListener('click',function(){if(window.__PROMA_PANEL_TOUCH_HANDLED){window.__PROMA_PANEL_TOUCH_HANDLED=false;return}if(suppressClick){suppressClick=false;return}togglePanel()});
       panelToggle.addEventListener('touchend',function(event){event.preventDefault();suppressClick=true;togglePanel();window.setTimeout(function(){suppressClick=false},700)},{passive:false});
@@ -107,12 +110,12 @@ export function renderWebRemoteMobilePatch(): string {
     }
     var topbar=document.querySelector('[data-web-remote-mobile-topbar]');
     if(topbar&&!topbar.querySelector('[data-web-remote-refresh]')){
-      var refresh=document.createElement('button'); refresh.type='button'; refresh.dataset.webRemoteRefresh='true'; refresh.textContent='刷新'; refresh.setAttribute('aria-label','刷新页面'); refresh.addEventListener('click',function(){window.location.reload()}); topbar.appendChild(refresh);
+      var refresh=document.createElement('button'); refresh.type='button'; refresh.dataset.webRemoteRefresh='true'; refresh.innerHTML=ICONS.refresh; refresh.setAttribute('aria-label','刷新页面'); refresh.addEventListener('click',function(){window.location.reload()}); topbar.appendChild(refresh);
     }
     syncRightPanel();
     var topbar=document.querySelector('[data-web-remote-mobile-topbar]');
     if (topbar && !topbar.querySelector('[data-web-remote-notification-entry]')) {
-      var notify=document.createElement('button'); notify.type='button'; notify.dataset.webRemoteNotificationEntry='true'; notify.textContent='开启通知';
+      var notify=document.createElement('button'); notify.type='button'; notify.dataset.webRemoteNotificationEntry='true'; notify.innerHTML=ICONS.bell; notify.setAttribute('aria-label','开启通知');
       notify.addEventListener('click',async function(){
         try {
           if (/iPhone|iPad|iPod/i.test(navigator.userAgent) && !navigator.standalone && !window.matchMedia('(display-mode: standalone)').matches) { alert('请先将 /app/ 添加到主屏幕，再开启通知。'); return; }
