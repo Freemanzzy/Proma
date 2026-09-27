@@ -2,7 +2,7 @@
 
 ## 目的
 
-本仓库是 Proma 个人版的源码与维护记录。自 2026-09-26 起，个人版安装在 `/Applications/Proma.app`（包内 `personal-build.json` 标记），接管 `~/.proma`，承担日常工作与生产自动化；官方版不再运行（存档于 `~/.proma-switch-backups/official-Proma-0.19.58.app` 与外置硬盘 zip）。维护分工见 `docs/personal/maintenance.md`。
+本仓库是 Proma 个人版的源码与维护记录。自 2026-09-26 起，个人版安装在 `/Applications/Proma.app`（包内 `personal-build.json` 标记），接管 `~/.proma`，承担日常工作与生产自动化；官方版不再运行（存档于外置硬盘 `proma 备份/switch-backups-20260926/official-Proma-0.19.58.app` 与 `official-Proma-0.19.58-20260926.app.zip`）。维护分工见 `docs/personal/maintenance.md`。
 
 ## 基线
 
@@ -529,3 +529,9 @@ python3 scripts/personal/import-proma-backup.py \\
 - 切换后首晚定时任务：Phase A（03:21）、Phase B（05:50）、超14天预警、Codex 守护、Product Analysis、AI 情报日报、Nowledge Mem 追补均成功。09-28 周一为首个周任务批次（周度回顾、Weekly、热点周报、周报、Google 收录、官方版本周检）。
 - 本机电源：接电源时系统不睡眠（`pmset` AC `sleep 0`，显示器 60 分钟关闭），手机访问与定时任务不再依赖 Power Nap 唤醒；合盖仍会睡眠。
 - 仍待办：观察期至约 09-30～10-03；fc-bridge 重配（`~/.proma/fc-bridge` 自 09-20 起未运行，早于切换）；`~/.proma-switch-backups/` 5 份更新前备份与官方版存档（约 17G）观察期后由用户决定是否清理；是否停用 3 个 Proma Cloud Skill 未决定。
+
+## 2026-09-27: 切换期备份移到外置硬盘
+
+- 用户同意：`~/.proma-switch-backups/` 中 4 份较早的更新前数据备份（09-26 22:56、23:00、23:32、23:51）、官方版 `official-Proma-0.19.58.app`、官方更新缓存 `updater-caches-20260926`，以 `ditto` 复制到外置硬盘 `/Volumes/Lexar ssd 2tb/proma 备份/switch-backups-20260926/`（APFS），逐项 `verify-backup.py --preset proma-backup` PASS（仅 `.DS_Store` 差异被排除），随后删除本机副本，释放约 14 GB。
+- 本机保留：最新更新前备份 `20260927-021826-20863`（3.2 GB，供快速恢复）、`pre-/post-switch-snapshot.json`；`install-update.sh` 仍写入 `~/.proma-switch-backups/`。
+- 恢复官方版或较早备份时从外置硬盘上述目录取用（fallback-runbook §1 已更新）。
