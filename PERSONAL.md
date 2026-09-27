@@ -634,3 +634,4 @@ python3 scripts/personal/import-proma-backup.py \\
 - 文档同步（SSOT）：`docs/personal/fallback-runbook.md` §1（上一版应用位置行）与 §3（回退命令改用新路径）、§6（`install-update.sh` 行为摘要）；`CLAUDE.md` §2（上一版应用行）；`docs/personal/switch-runbook.md`（安装步骤摘要一句话，属于对脚本现行机制的描述，同步；观察期收尾等一次性切换历史步骤保持原样不改）。
 - 验证：`bash -n scripts/personal/install-update.sh` 通过；`python3 scripts/personal/test-personal-scripts.py` 退出 0；仓库根 `bun test`：557 pass / 5 fail / 1 error，与基线一致（无新增失败）。
 - 范围：只改 `scripts/personal/install-update.sh`、`scripts/personal/test-personal-scripts.py` 与上述文档；未打包、未安装、未合并、未推送，分支 `fix/previous-outside-applications`。
+- 主会话复核补充：同类隐患（`$pid）`、`$vol）`、`$ARCHIVE_DIR；` 三处，分别在端口冲突、外置硬盘未挂载、归档目录创建失败分支）已一并改为 `${...}` 写法；归档分支在安装成功之后运行，若触发会以非零退出误导安装结果。`bash -n` 与 `test-personal-scripts.py`（38 PASS）通过。
