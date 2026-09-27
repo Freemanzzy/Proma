@@ -560,3 +560,12 @@ python3 scripts/personal/import-proma-backup.py \\
 - `scripts/personal/mobile-harness.mjs` 新增 `mobile-polish` 专项，计划统计刷新、单次切换工作区与会话成功率；此次因上述连接问题未运行成功。android/iphone smoke 与 attachments 未完成；截图目录 `/tmp/web-remote-polish/` 目前仅含开发日志与 PID 文件。
 - 验证：typecheck 通过；`build:main`、`build:renderer`、`build:web-preload` 通过；全量 `bun test` 为 557 pass / 5 fail / 1 error，与记录基线一致。真机 Android/iPhone standalone、触控前后单次点击比例以及附件回归待后续验证。
 - 影响文档：同步更新 `docs/personal/web-remote.md`。
+
+## 2026-09-27: 手机端打磨复核与 iOS 模拟器实测（父会话）
+
+- 复核 Luna `9d67860e` 时发现并修复两处缺陷：① `ensure()` 每次调用都把刷新按钮 `insertBefore` 到文件按钮前，自身又触发 subtree MutationObserver，形成无限循环，`/app/` 加载即冻结（`147c2ba1`，只在位置不对时移动）；② `@media (hover:none)` 强制显示侧栏行悬停操作按钮，但未隐藏被替换的时间标签，归档图标与时间重叠（`2026-09-27` 同分支提交，移除该规则，恢复原样式）。
+- Luna 报告的 8443“TLS 错误”实为本机系统代理（Clash 7897）拦截 tailnet 地址：bun/harness 需去掉代理环境变量运行；用户已在 Clash Verge 系统代理绕过中加入 `*.ts.net`、`100.64.0.0/10`，此后本机工具与 iOS 模拟器 Safari 可直连 tailnet。
+- Level 2 模拟器工具：Homebrew 的 `idb-companion`、`axe` 公式要求 Xcode 27（本机 Xcode 26.5），未升级 Xcode；改为下载 AXe v1.8.0 官方发行包（Developer ID 签名）到 `~/.local/share/axe`，`~/.local/bin/axe` 链接；Proma 工作区新增 MCP `mobilebuildmcp`（`npx -y mobilebuildmcp@latest mcp`，握手通过）。
+- iOS 真实 WebKit 实测（iPhone 17 Pro 模拟器 · iOS 26.5 · Safari，开发实例 17889 经临时 8443）：配对成功；`/app/` 正常加载；侧栏单击切换会话 4/4 成功（含跨工作区），切换后侧栏自动关闭；刷新按钮单击重新加载；右侧面板滑入淡入、左侧抽屉与遮罩过渡正常（录屏 `~/Downloads/proma-mobile-animations.mp4`）；侧栏时间标签无重叠。未做修复前版本的对照测试。
+- Chrome 模拟回归（去代理运行）：android/iphone smoke 各 7 步全过、android attachments 通过、刷新按钮单击 android/iphone 通过，JS exceptions 0；harness `mobile-polish` 套件的“工作区切换”判定条件有误（侧栏工作区为展开/折叠分组，不会改 `agentWorkspaceId`），以模拟器实测为准，待修正 harness。清理：harness 设备均撤销、自建会话删除、残留 headless Chrome 已按 PID 结束。
+- 验证：typecheck 通过；全量 557 pass / 5 fail / 1 error（基线内）；build:main / renderer / web-preload 通过。本批（含右侧 Tab 修复 `4e556323`）为应用代码，需打包安装。
