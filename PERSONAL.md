@@ -545,3 +545,10 @@ python3 scripts/personal/import-proma-backup.py \\
 ## 2026-09-27: 待办——手机端刷新按钮
 
 - 用户需求：手机完整客户端（`/app/`，主屏 standalone 模式没有浏览器刷新手势/地址栏）增加“刷新”按钮；现在遇到界面卡住或连接断开只能退出 App 重新打开。下次更新（下一个 sync 或功能批次）时实现：放在移动端顶栏，行为为重新加载页面并重建 WebSocket 连接，需在 Android/iPhone standalone 下回归。属应用代码改动，需打包并由 Claude Code 安装。
+
+## 2026-09-27: 修复右侧工作区 Tab 点击无效与 Agent 终端 Tab 不出现
+
+- 用户反馈：桌面右侧工作区“文件/改动/Todo/定时任务”等 Tab 点击无反应，只能从左侧栏入口打开。
+- 根因：`650e4953`（移除内置浏览器）误删两段非浏览器代码：① `SidePanel.tsx` `handleWorkspaceTabChange` 末尾的 `if (split) updateSplit(...)` 与 `onTabChange(tab)`，导致点击 Tab 不切换；② `RightSidePanel.tsx` 中同步 Agent 可见终端（`onAgentTerminalOpen/Close`）到右侧工作区的 effect（与浏览器 effect 相邻被一并删除），导致 TerminalExecute 打开的终端不出现 Tab。其余被删代码逐项核对，均为浏览器专用。
+- 修复：两处恢复为 v0.19.58 原文（仅去掉浏览器行），`4e556323`。typecheck 通过；全量测试 557 pass / 5 fail / 1 error（基线内）。
+- 属应用代码；用户选择与“手机端刷新按钮”等一起打包，由 Claude Code 统一安装。
