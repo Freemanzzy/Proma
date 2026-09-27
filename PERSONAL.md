@@ -596,3 +596,14 @@ python3 scripts/personal/import-proma-backup.py \\
 
 - 用户体验后补修：记忆详情可上下滚动（详情保持 flex 列布局）；手机端隐藏全部快捷键徽标（`ShortcutKeycaps` 加 `data-shortcut-keycaps` 标记，另隐藏会话快速切换提示）；记忆长路径改用 RTL 省略显示末尾（避免 React 重渲染覆盖），`c5e53baa`。左上角菜单按钮改为开/关切换，图标随侧栏状态变化（状态标记，无 observer 写循环），`897a2b41`。
 - 用户在 iOS 模拟器体验确认（22:29）。合并前核对 cdaefafd 修复全部保留；全量 557 pass / 5 fail / 1 error（基线内）；harness smoke、mobile-polish、panel-probe、layout 通过。
+
+## 2026-09-27: 安装 c6c27d02（桌面 Tab 修复与手机布局适配）
+
+- 依据 Proma 安装申请 `install-request-2026-09-27-2.md`（取代已撤回的 `-2026-09-27`），安装结果见交接目录 `install-result-2026-09-27-2.md`。首次按“共同维护”流程执行。
+- 复核（`maintenance.md` §3）全部通过：marker commit = `personal` = `origin/personal` = `c6c27d02`；adhoc 签名校验通过；无 `app-update.yml`；打包测试 557/5/1（= 基线）；申请列出的 6 个代码标记与 4 个 PNG 均在包内。
+- 规则冲突处理：本次包含的 `install-update.sh` 旧备份归档（`6175266a`）会在校验后删除本机备份副本，与 `maintenance.md` §4“绝不删除备份”冲突；经用户同意允许，§4 新增唯一例外条款（仅限安装脚本、校验通过后删除本机副本；其他删除备份仍须逐次同意）。
+- 安装：`install-update.sh` 默认参数退出 0；安装前备份 `~/.proma-switch-backups/20260927-223739-56251/`；`20260927-021826-20863` 归档到外置硬盘 `proma 备份/switch-backups/`，主会话对归档副本复跑健康快照一致。`Proma.previous.app` = `041c148d`。安装后 PNG 路由 200 且一致、无 `[FATAL]`。
+- 用户验收：桌面右侧 Tab 切换与 Agent 终端 Tab、两台手机全部清单项通过。
+- 与切换前基线：会话 868 → 884；启用定时任务 20；渠道 9 → 8（已停用的 `omniroute` 于 09-27 02:18 后被删除，非安装所致，待用户确认是否有意）。
+- 新问题：右侧“文件/改动”Tab 恢复后读取 `~/Documents` 下项目，macOS 反复询问文稿访问权限；根因是 ad-hoc 签名每次构建变化，TCC 与 Keychain 授权不能跨版本保留。用户决定创建固定本机代码签名证书（`Proma Personal Code Signing`）长期解决，打包脚本改造交由 Proma（见交接结果待办）。
+- 收尾：关闭遗留的 Tailscale Serve 8443 临时转发。
