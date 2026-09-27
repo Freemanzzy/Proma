@@ -236,6 +236,8 @@ export function SkillDetailView({
   return (
     <div
       className="flex h-full flex-col min-h-0"
+      data-web-remote-split="detail"
+      data-web-remote-skill-detail="true"
       onKeyDownCapture={(event) => {
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
           event.preventDefault()
@@ -247,7 +249,7 @@ export function SkillDetailView({
       {/* 头部 */}
       <div className="shrink-0 border-b border-border/60 px-5 pb-4 pt-5">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" className="h-10 gap-1.5 px-2" type="button" onClick={onBack}>
+          <Button data-web-remote-mobile-back="true" variant="ghost" size="sm" className="h-10 gap-1.5 px-2" type="button" onClick={onBack}>
             <ArrowLeft size={16} />
             返回 Skills
           </Button>

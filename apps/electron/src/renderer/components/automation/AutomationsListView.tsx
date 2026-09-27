@@ -225,7 +225,7 @@ function Section({ title, automations, onEdit, onRefresh, onDelete }: SectionPro
             )}
           >
             <div className="flex-1 min-w-0">
-              <div className="flex items-baseline gap-2">
+              <div data-web-remote-automation-title="true" className="flex items-baseline gap-2">
                 <span className="text-[14px] font-medium text-foreground truncate">{a.name}</span>
                 <span className="text-[12px] text-foreground/45 truncate">
                   {a.prompt.slice(0, 60)}{a.prompt.length > 60 ? '…' : ''}

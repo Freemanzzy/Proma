@@ -61,7 +61,7 @@ tailscale serve --https=8443 off
 3. 添加到主屏幕：iPhone Safari“分享 → 添加到主屏幕”；Android Chrome“菜单 → 添加到主屏幕”。从图标打开为全屏应用。
 4. 开启通知：从主屏幕图标打开后，点顶栏“开启通知”并允许（iPhone 只支持主屏幕模式）。
 
-手机端可用：会话与实时输出、Skill（`/`）、`@` 引用、模型与权限模式切换、新建会话、附件（相册/拍照/文件/粘贴，单文件 25 MB）、提问与计划审批、中止、Todo、定时任务、MCP/Skills、文件面板与预览。顶栏“刷新”会重新加载 `/app/` 并重建 WebSocket；侧栏单击切换会话/工作区，左右面板带手机端过渡与触控反馈。手机端不可用：设置页、终端、原生对话框、在 Finder 打开、解密密钥、快速任务浮窗等桌面专属能力。
+手机端可用：会话与实时输出、Skill（`/`）、`@` 引用、模型与权限模式切换、新建会话、附件（相册/拍照/文件/粘贴，单文件 25 MB）、提问与计划审批、中止、Todo、定时任务、MCP/Skills、文件面板与预览。顶栏“刷新”会重新加载 `/app/` 并重建 WebSocket；右侧工作区使用顶栏标题下拉切换已打开页面，项目记忆与详情表单按“列表 → 详情 → 返回”显示；侧栏单击切换会话，左右面板带手机端过渡与触控反馈。手机端不可用：设置页、终端、原生对话框、在 Finder 打开、解密密钥、快速任务浮窗等桌面专属能力。
 
 ## 5. 通知（Web Push）
 
@@ -86,4 +86,4 @@ tailscale serve --https=8443 off
 | 某个功能在手机上点了没反应 | 可能是上游新增 IPC 通道未分级；查看开发实例日志中的“未分级通道”，在 `channel-policy.ts` 中分级 |
 | 通知收不到 | 确认从主屏幕图标打开并已允许通知；桌面“手机访问”中发送测试通知；检查代理 7897 |
 
-回归测试（只对开发实例）：`bun scripts/personal/mobile-harness.mjs --url https://<主机名>:8443 --suite smoke --user-agent android|iphone`（自动配对、测试、撤销设备并删除自建会话；需先按上文开启 8443 转发并以 `PROMA_WEB_REMOTE=1` 启动开发实例）。手机交互专项可运行 `--suite mobile-polish`，检查刷新、工作区切换与会话切换均为单次触摸。同步上游后必须运行；安装后另由用户在安装版上用两台手机验收（CLAUDE.md §6 第 7 项）。每周一的版本检查任务会报告上游新增、尚未分级的 IPC 通道。
+回归测试（只对开发实例）：运行时先清除系统代理变量，并在外层加 420 秒 alarm 兜底；示例：`perl -e 'alarm 420; exec @ARGV' env -u http_proxy -u https_proxy -u all_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY bun scripts/personal/mobile-harness.mjs --url <allowedOrigin> --suite smoke --user-agent iphone`。harness 默认整体超时 300 秒（可用 `--timeout-ms` 覆盖），每次页面评估前以 3 秒 CDP 探活；运行后撤销配对设备、删除自建会话、关闭 Chrome 并移除临时 profile。可运行 `--suite layout` 截图并检查文件、改动、Todo、定时任务、MCP/Skills 与项目记忆列表/详情的横向溢出和元素可点性；`--suite panel-probe` 检查手机顶栏页面下拉中的 Tab 可点性；`--suite mobile-polish` 检查刷新和会话单击切换。左侧项目名是展开/折叠分组，不是 `agentWorkspaceId` 切换，勿以此字段判定工作区按钮点击。同步上游后必须运行；安装后另由用户在安装版上用两台手机验收（CLAUDE.md §6 第 7 项）。每周一的版本检查任务会报告上游新增、尚未分级的 IPC 通道。

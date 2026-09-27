@@ -575,3 +575,24 @@ python3 scripts/personal/import-proma-backup.py \\
 - 顶栏菜单/通知/刷新/文件按钮改为内联图标（40px，保留可访问名称）`b0f04a81`。
 - 右侧面板 Tab 左半部分点不动的根因：桌面右侧面板左边缘的列宽拖拽条是面板直接子元素，手机注入层 `[data-web-remote-panel="right"] > * { width:100% }` 把它拉满全宽成为透明遮罩（阶段 A 起即存在）；手机端隐藏 col/row-resize 拖拽条。另修复 Luna 动效改动的缺陷：面板关闭时写入的内联 `pointer-events:none` 在重新打开时未清除。新增 harness `panel-probe` 套件（报告每个 Tab 中心点实际命中的元素）。`ebd502a8`。
 - 验证：panel-probe 4/4 命中目标；iOS 模拟器 Safari 点“改动”“文件”Tab 均切换。用户决定（选项 B）：与下一批“手机端布局适配”一起打包安装，本批先合入 personal 保留。
+
+## 2026-09-27: 手机端布局适配
+
+- `apps/electron/src/main/lib/web-remote/full-ui/mobile-patch.ts`：手机端隐藏右侧整行 Tab / 分屏 / 新建标签栏；顶栏标题以下拉形式列出现有 Tab，并代理原 Tab 的切换/关闭，不新增独立状态；面板开关统一以 `body[data-web-remote-right-open]` 同步 📁/✕ 与可访问名称（名称保留“文件”）；记忆文件、文件预览、Automation 表单及 MCP/Skills 详情改为适合手机的全宽视图；输入字号至少 16px、工具区和交互按钮满足触控高度、隐藏快捷键徽标/拖拽提示/附加文件夹；记忆绝对路径显示末两级并支持点开。顶栏开关图标使用显式 `data-icon-state`，标题按 label、Tab 菜单按签名更新；observer 回调链中同步右面板的 style/dataset 写入均改为状态变化时更新，避免 SVG 序列化比较和重复 DOM 写入造成主线程死循环。CSS/注入 JS 相对 `cdaefafd` 分别增加 5,532 B / 4,144 B；无新增依赖，媒体规则仅作用于 `max-width:767px`，桌面布局不变。
+- 上游标记（共 9 个 renderer 文件）：`DiffPanelTabBar.tsx` 标记需手机隐藏的 Tab bar；`WorkspaceMemoryTab.tsx` 标记记忆列表/详情/路径及返回按钮；`PreviewTabContent.tsx` 标记预览详情与返回文件列表；`AutomationFormView.tsx` 标记表单详情；`AgentSkillsView.tsx` 标记工具条和搜索框；`McpDetailView.tsx`、`SkillDetailView.tsx` 标记详情与返回；`SidePanel.tsx` 标记拖拽提示；`FileDropZone.tsx` 标记附加文件夹区域。上游组件改动均只增加手机布局所需的 data 属性/返回控件，无功能状态移交。
+- `scripts/personal/mobile-harness.mjs` 新增 `layout` 套件：每页截图、检查 document 与右面板横向溢出、对当前页可见交互元素用 `elementFromPoint` 检查可点性；逐项包含文件、改动、Todo、定时任务列表/详情、MCP/Skills 列表/详情、项目记忆列表/详情。增加默认 300 秒整体超时（`--timeout-ms` 可覆盖）、每次 CDP evaluate 前 3 秒页面探活（失败报告 `page_unresponsive`）；超时记录就绪态/最近步骤并进入设备、会话、Chrome 与 profile 清理流程。harness 外层另用 420 秒 alarm 兜底。
+- 验证：`bun run typecheck` 通过；`build:main`、`build:renderer`、`build:web-preload` 通过；`node --check scripts/personal/mobile-harness.mjs` 通过；`bun test` 557 pass / 5 fail / 1 error，与基线一致。最终 layout iphone 与 android 均 11 页通过，所有页面 `scrollWidth=innerWidth=412`、面板内无横向溢出、命中检查 0 miss；panel-probe iphone 两项均命中；smoke android/iphone 各 7 步通过；attachments android 通过；mobile-polish android/iphone 刷新与单击会话切换各 2/2。mobile-polish 中“工作区切换”检查明确跳过：侧栏工作区名是折叠分组，不会改变 `agentWorkspaceId`，原断言不适用。
+- 截图：`/tmp/web-remote-layout/layout-iphone-verified/`、`layout-android-verified/`、`panel-probe-verified/`、`smoke-android-final/`、`smoke-iphone-final/`、`attachments-final/`、`mobile-polish-android-final2/`、`mobile-polish-iphone-final/`；iPhone 17 Pro 模拟器 WebKit 刷新后截图 `/tmp/web-remote-layout/sim-refresh-verified.png`。所有最终 harness 运行均撤销配对设备、删除 harness 自建会话、退出 Chrome 并移除 profile；开发实例与临时 8443 保持运行供用户体验。
+- 基线修复保留：逐段核对 `git diff cdaefafd -- apps/electron/src/main/lib/web-remote/full-ui/mobile-patch.ts`，本次只叠加新的 CSS/数据驱动下拉逻辑；原 `handleWorkspaceTabChange`/终端同步效果、刷新按钮循环防护、触屏 hover 拦截、左右面板动效与同步、隐藏拖拽条、顶栏图标、侧栏时间标签规则均保持不变。
+- 文档：同步更新 `docs/personal/web-remote.md`。仅应用代码与验证工具，无版本、数据格式或运行时依赖变化；尚未合并、打包、推送或安装，留待用户在模拟器体验后决定。
+
+## 2026-09-27: 手机端布局适配——父会话复核与补修
+
+- 复核 Luna `67a7a219`：cdaefafd 已完成修复全部保留（刷新防循环、触屏 hover 拦截、面板重开清除 pointer-events、隐藏拖拽条、顶栏图标、右侧 Tab/终端同步）；observer 回调链内 DOM 写入均以状态标记判定（开关 `dataset.iconState`、标题 `dataset.label`、下拉 `dataset.signature`）。此前 Luna 版本曾因比较 SVG innerHTML 造成死循环、页面冻结（父会话定位后回退给 Luna 修复），harness 现有整体超时（默认 300s）与 3 秒 CDP 探活。
+- iOS 模拟器自检发现并补修（`0cb12d32`）：页面下拉在右侧面板关闭时选择不会打开面板；侧栏“项目记忆/日程”不打开右侧面板（未在转发名单）；定时任务列表标题仍截断（加 `data-web-remote-automation-title` 标记，手机端两行显示）。
+- 回归（去代理）：iphone panel-probe 文件/改动命中、smoke 7 步、mobile-polish 3 项、layout iphone/android 11 页均通过，JS exceptions 0，无残留 Chrome。等待用户在 iOS 模拟器体验确认后再合并打包。
+
+## 2026-09-27: 手机端布局适配——用户模拟器体验通过
+
+- 用户体验后补修：记忆详情可上下滚动（详情保持 flex 列布局）；手机端隐藏全部快捷键徽标（`ShortcutKeycaps` 加 `data-shortcut-keycaps` 标记，另隐藏会话快速切换提示）；记忆长路径改用 RTL 省略显示末尾（避免 React 重渲染覆盖），`c5e53baa`。左上角菜单按钮改为开/关切换，图标随侧栏状态变化（状态标记，无 observer 写循环），`897a2b41`。
+- 用户在 iOS 模拟器体验确认（22:29）。合并前核对 cdaefafd 修复全部保留；全量 557 pass / 5 fail / 1 error（基线内）；harness smoke、mobile-polish、panel-probe、layout 通过。

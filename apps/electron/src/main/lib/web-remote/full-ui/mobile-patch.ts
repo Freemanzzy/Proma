@@ -47,10 +47,56 @@ export function renderWebRemoteMobilePatch(): string {
   [data-web-remote-input-toolbar="true"] [data-radix-popper-content-wrapper] { max-width:calc(100vw - 16px); }
   [data-web-remote-input-toolbar="true"] [data-radix-popper-content-wrapper] > * { max-width:calc(100vw - 16px); }
   [data-web-remote-main="true"] [contenteditable="true"] { max-width:100%; overflow-x:hidden; }
-  [data-web-remote-main="true"] kbd, [data-web-remote-main="true"] [data-shortcut], [data-web-remote-main="true"] [class*="shortcut"] { display:none!important; }
+  [data-web-remote-main="true"] kbd, [data-web-remote-main="true"] [data-shortcut], [data-web-remote-main="true"] [class*="shortcut"], [data-web-remote-panel="right"] kbd, [data-web-remote-panel="right"] [data-shortcut], [data-web-remote-panel="right"] [class*="shortcut"] { display:none!important; }
+  [data-web-remote-panel="right"] [role="tablist"][aria-label="右侧工作区"], [data-web-remote-panel="right"] [data-web-remote-mobile-hide="true"] { display:none!important; }
+  [data-web-remote-panel="right"] [data-web-remote-split="memory"] { min-height:0!important; }
+  [data-web-remote-mobile-topbar-title] { display:flex; align-items:center; justify-content:center; gap:6px; border:0; background:transparent; cursor:pointer; }
+  [data-web-remote-mobile-tab-menu] { position:fixed; z-index:10010; top:56px; left:12px; right:12px; max-height:65dvh; overflow:auto; padding:6px; border:1px solid hsl(var(--border)); border-radius:14px; background:hsl(var(--background)); box-shadow:0 12px 32px rgba(0,0,0,.28); }
+  [data-web-remote-mobile-tab-menu] button { display:flex; align-items:center; width:100%; min-height:44px; gap:10px; padding:8px 10px; text-align:left; border-radius:9px; }
+  [data-web-remote-mobile-tab-menu] [data-active="true"] { background:hsl(var(--accent)); }
+  [data-web-remote-memory-list], [data-web-remote-memory-detail] { min-width:0; }
+  [data-web-remote-memory-detail][data-selected="false"] { display:none!important; }
+  [data-web-remote-memory-list][data-selected="false"] { display:none!important; }
+  [data-web-remote-memory-detail] [data-web-remote-memory-path] { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
+  [data-web-remote-split="detail"] { min-width:0!important; width:100%!important; max-width:100%!important; }
+  [data-web-remote-mobile-back] { min-height:40px!important; padding:6px 10px!important; }
+  [data-web-remote-panel="right"] input, [data-web-remote-panel="right"] textarea, [data-web-remote-panel="right"] [contenteditable="true"] { font-size:16px!important; }
+  [data-web-remote-panel="right"] [data-web-remote-mobile-toolbar] { display:flex; flex-wrap:nowrap; overflow-x:auto; gap:8px; width:100%; }
+  [data-web-remote-panel="right"] [data-web-remote-skills-toolbar] { display:flex; flex-wrap:wrap!important; gap:8px!important; }
+  [data-web-remote-panel="right"] [data-web-remote-mobile-search] { flex:1 1 100%!important; width:100%!important; height:40px!important; }
+  [data-web-remote-panel="right"] [data-web-remote-skills-toolbar] > button { min-height:40px; }
+  [data-web-remote-panel="right"] [data-web-remote-mobile-toolbar] > * { flex:none; min-height:40px; }
+  [data-web-remote-panel="right"] [data-web-remote-mobile-hide], [data-web-remote-panel="right"] button[aria-label*="分屏"], [data-web-remote-panel="right"] [role="button"][aria-label*="附加文件夹"] { display:none!important; }
+  [data-web-remote-split="memory"] { display:block!important; min-height:0!important; }
+  [data-web-remote-split="memory"] > * { height:100%; min-height:0; }
+  [data-web-remote-memory-detail] [data-web-remote-mobile-back] { display:flex!important; }
+  [data-web-remote-memory-list] button { min-height:42px; }
+  [data-web-remote-automation-form] { flex-direction:column!important; overflow:auto!important; }
+  [data-web-remote-automation-form] > * { width:100%!important; min-width:0!important; flex:0 0 auto!important; }
+  [data-web-remote-automation-form] > :first-child { min-height:60vh!important; }
+  [data-web-remote-automation-form] > :last-child { border-left:0!important; border-top:1px solid hsl(var(--border)); }
+  [data-web-remote-panel="right"] [role="button"] { min-height:42px; }
+  [data-web-remote-panel="right"] [data-web-remote-memory-list][data-selected="false"], [data-web-remote-panel="right"] [data-web-remote-memory-detail][data-selected="false"], [data-web-remote-split="memory"] > *:has([data-web-remote-memory-list][data-selected="false"]), [data-web-remote-split="memory"] > *:has([data-web-remote-memory-detail][data-selected="false"]) { display:none!important; }
+  [data-web-remote-panel="right"] [data-web-remote-memory-detail][data-selected="true"] { display:flex!important; flex-direction:column!important; height:100%; min-height:0!important; overflow:hidden; }
+  [data-web-remote-panel="right"] [data-web-remote-split="memory"] { min-height:0!important; height:100%; }
+  [data-web-remote-panel="right"] [data-web-remote-memory-detail][data-selected="true"] > :last-child { flex:1 1 auto; min-height:0!important; overflow-y:auto!important; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; }
+  [data-web-remote-panel="right"] [data-web-remote-memory-path] { cursor:pointer; }
+  [data-web-remote-memory-detail] .live-markdown-external-scroll .ink-mde, [data-web-remote-memory-detail] .live-markdown-external-scroll .cm-editor { font-size:16px!important; }
+  [data-web-remote-memory-detail] .live-markdown-external-scroll h1 { font-size:21px!important; line-height:1.4!important; }
+  [data-web-remote-memory-detail] .live-markdown-external-scroll h2 { font-size:19px!important; line-height:1.45!important; }
+  [data-web-remote-memory-detail] .live-markdown-external-scroll h3, [data-web-remote-memory-detail] .live-markdown-external-scroll p, [data-web-remote-memory-detail] .live-markdown-external-scroll li { font-size:16px!important; line-height:1.65!important; }
+  [data-web-remote-preview] [data-web-remote-mobile-back] { display:flex!important; }
+  [data-web-remote-panel="right"] .skills-embedded-card-grid, [data-web-remote-panel="right"] .mcp-section-grid { grid-template-columns:minmax(0,1fr)!important; }
+  [data-web-remote-panel="right"] [data-web-remote-mobile-toolbar] { padding-bottom:4px; }
+  [data-web-remote-panel="right"] [data-web-remote-mobile-long-path] { font-size:12px; }
+  [data-web-remote-panel="right"] [data-web-remote-long-path] { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  [data-web-remote-panel="right"] [data-web-remote-long-path][data-expanded="true"] { white-space:normal; overflow-wrap:anywhere; }
   img[alt="用户头像"] { display:none!important; }
 }
 @media (max-width: 767px) { [data-web-remote-mobile-menu], [data-web-remote-panel-toggle], [data-web-remote-refresh], [data-web-remote-notification-entry] { display:inline-flex!important; align-items:center; justify-content:center; width:40px!important; min-width:40px!important; height:40px!important; min-height:40px!important; padding:0!important; border-radius:12px!important; font-size:0!important; line-height:0!important; } [data-web-remote-mobile-topbar] svg { display:block; flex:none; } }
+@media (max-width: 767px) { [data-web-remote-automation-title="true"] { flex-direction:column!important; align-items:flex-start!important; gap:2px!important; } [data-web-remote-automation-title="true"] > :first-child { white-space:normal!important; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; } [data-web-remote-automation-title="true"] > :last-child { max-width:100%; } }
+@media (max-width: 767px) { [data-shortcut-keycaps], .session-quick-switch-keycap, kbd { display:none!important; } }
+@media (max-width: 767px) { [data-web-remote-panel="right"] [data-web-remote-memory-path] { direction:rtl; text-align:left; } [data-web-remote-panel="right"] [data-web-remote-memory-path]::before { content:"\\200E"; } }
 @media (prefers-reduced-motion: reduce) { [data-web-remote-sidebar="left"], [data-web-remote-mobile-overlay], [data-web-remote-panel="right"], [data-web-remote-mobile-topbar] button, [data-web-remote-sidebar="left"] button, [data-web-remote-panel="right"] button { transition:none!important; } }
 @media (min-width: 768px) { [data-web-remote-mobile-menu], [data-web-remote-mobile-overlay], [data-web-remote-panel-toggle], [data-web-remote-refresh] { display:none!important; } }
 </style>
@@ -61,16 +107,27 @@ export function renderWebRemoteMobilePatch(): string {
   var body=document.body;
   var rightPanelTimer=0;
   var viewport=window.visualViewport;
+  function syncMenuButton(){
+    var menuButton=document.querySelector('[data-web-remote-mobile-menu]'); if(!menuButton)return;
+    var open=body.dataset.webRemoteSidebarOpen==='true'; var state=open?'close':'menu';
+    if(menuButton.dataset.iconState!==state){menuButton.dataset.iconState=state;menuButton.innerHTML=open?ICONS.menuClose:ICONS.menu;menuButton.setAttribute('aria-label',open?'收起侧栏':'打开侧栏');menuButton.setAttribute('aria-expanded',String(open))}
+  }
   function syncRightPanel(){
+    var panelToggle=document.querySelector('[data-web-remote-panel-toggle]');var isOpen=body.dataset.webRemoteRightOpen==='true';
+    if(panelToggle){var iconState=isOpen?'close':'files';var label=isOpen?'折叠右侧工作区（文件）':'打开文件面板';if(panelToggle.dataset.iconState!==iconState){panelToggle.dataset.iconState=iconState;panelToggle.innerHTML=isOpen?ICONS.close:ICONS.files}if(panelToggle.getAttribute('aria-label')!==label)panelToggle.setAttribute('aria-label',label)}
     var panel=document.querySelector('[data-web-remote-panel="right"]'); if(!panel)return;
     var open=body.dataset.webRemoteRightOpen==='true';
     if(open){
-      window.clearTimeout(rightPanelTimer); panel.dataset.webRemotePanelRendered='true';
-      panel.style.display='flex'; panel.style.visibility='visible'; panel.style.pointerEvents='';
-      window.requestAnimationFrame(function(){window.requestAnimationFrame(function(){panel.dataset.webRemotePanelOpen='true'})});
+      if(rightPanelTimer){window.clearTimeout(rightPanelTimer);rightPanelTimer=0}
+      if(panel.dataset.webRemotePanelRendered!=='true')panel.dataset.webRemotePanelRendered='true';
+      if(panel.style.display!=='flex')panel.style.display='flex';
+      if(panel.style.visibility!=='visible')panel.style.visibility='visible';
+      if(panel.style.pointerEvents)panel.style.pointerEvents='';
+      if(panel.dataset.webRemotePanelOpen!=='true')window.requestAnimationFrame(function(){window.requestAnimationFrame(function(){if(body.dataset.webRemoteRightOpen==='true'&&panel.dataset.webRemotePanelOpen!=='true')panel.dataset.webRemotePanelOpen='true'})});
     } else if(panel.dataset.webRemotePanelRendered==='true'){
-      delete panel.dataset.webRemotePanelOpen; panel.style.pointerEvents='none';
-      rightPanelTimer=window.setTimeout(function(){if(body.dataset.webRemoteRightOpen!=='true'){delete panel.dataset.webRemotePanelRendered;panel.style.display='none';panel.style.visibility='hidden'}},210);
+      if(panel.dataset.webRemotePanelOpen)delete panel.dataset.webRemotePanelOpen;
+      if(panel.style.pointerEvents!=='none')panel.style.pointerEvents='none';
+      if(!rightPanelTimer)rightPanelTimer=window.setTimeout(function(){rightPanelTimer=0;if(body.dataset.webRemoteRightOpen!=='true'){delete panel.dataset.webRemotePanelRendered;if(panel.style.display!=='none')panel.style.display='none';if(panel.style.visibility!=='hidden')panel.style.visibility='hidden'}},210);
     }
   }
   function syncKeyboardViewport(){
@@ -81,7 +138,7 @@ export function renderWebRemoteMobilePatch(): string {
     body.style.setProperty('--web-remote-keyboard-inset',editable&&inset>80?inset+'px':'0px');
     if(editable&&inset>80){try{focused.scrollIntoView({block:'center',inline:'nearest',behavior:'auto'})}catch{};window.setTimeout(function(){window.scrollTo(0,0)},0)}
   }
-  var ICONS={menu:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>',refresh:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg>',files:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>',close:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>',bell:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>'};
+  var ICONS={menuClose:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>',chevron:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>',menu:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>',refresh:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg>',files:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>',close:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>',bell:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>'};
   window.addEventListener('proma-web-remote-open-preview',function(){body.dataset.webRemoteRightOpen='true';var toggle=document.querySelector('[data-web-remote-panel-toggle]');if(toggle){toggle.innerHTML=ICONS.close;toggle.setAttribute('aria-label','折叠右侧工作区（文件）')}});
   document.addEventListener('focusin',syncKeyboardViewport,true);
   document.addEventListener('focusout',function(){window.setTimeout(syncKeyboardViewport,80)},true);
@@ -90,7 +147,7 @@ export function renderWebRemoteMobilePatch(): string {
     syncKeyboardViewport();
     if (!document.querySelector('[data-web-remote-mobile-menu]')) {
       var menu=document.createElement('button'); menu.type='button'; menu.innerHTML=ICONS.menu; menu.setAttribute('aria-label','打开侧栏'); menu.dataset.webRemoteMobileMenu='true';
-      menu.addEventListener('click',function(){body.dataset.webRemoteSidebarOpen='true'}); document.body.appendChild(menu);
+      menu.addEventListener('click',function(){if(body.dataset.webRemoteSidebarOpen==='true')delete body.dataset.webRemoteSidebarOpen;else body.dataset.webRemoteSidebarOpen='true'}); document.body.appendChild(menu);
     }
     if (!document.querySelector('[data-web-remote-mobile-overlay]')) {
       var overlay=document.createElement('div'); overlay.dataset.webRemoteMobileOverlay='true'; overlay.addEventListener('click',function(){delete body.dataset.webRemoteSidebarOpen; delete body.dataset.webRemoteRightOpen}); document.body.appendChild(overlay);
@@ -98,7 +155,7 @@ export function renderWebRemoteMobilePatch(): string {
     if (!document.querySelector('[data-web-remote-panel-toggle]')) {
       var panelToggle=document.createElement('button'); panelToggle.type='button'; panelToggle.dataset.webRemotePanelToggle='true'; panelToggle.innerHTML=ICONS.files; panelToggle.setAttribute('aria-label','打开文件面板');
       var suppressClick=false;
-      var togglePanel=function(){var open=body.dataset.webRemoteRightOpen==='true'; if(open){delete body.dataset.webRemoteRightOpen; panelToggle.innerHTML=ICONS.files; panelToggle.setAttribute('aria-label','打开文件面板')}else{body.dataset.webRemoteRightOpen='true'; panelToggle.innerHTML=ICONS.close; panelToggle.setAttribute('aria-label','折叠右侧工作区（文件）')}};
+      var togglePanel=function(){var open=body.dataset.webRemoteRightOpen==='true'; if(open){delete body.dataset.webRemoteRightOpen;panelToggle.dataset.iconState='files';panelToggle.innerHTML=ICONS.files;panelToggle.setAttribute('aria-label','打开文件面板')}else{body.dataset.webRemoteRightOpen='true';panelToggle.dataset.iconState='close';panelToggle.innerHTML=ICONS.close;panelToggle.setAttribute('aria-label','折叠右侧工作区（文件）')}};
       window.__PROMA_TOGGLE_PANEL=togglePanel;
       panelToggle.addEventListener('click',function(){if(window.__PROMA_PANEL_TOUCH_HANDLED){window.__PROMA_PANEL_TOUCH_HANDLED=false;return}if(suppressClick){suppressClick=false;return}togglePanel()});
       panelToggle.addEventListener('touchend',function(event){event.preventDefault();suppressClick=true;togglePanel();window.setTimeout(function(){suppressClick=false},700)},{passive:false});
@@ -106,7 +163,7 @@ export function renderWebRemoteMobilePatch(): string {
     }
     if (!document.querySelector('[data-web-remote-mobile-topbar]')) {
       var topbar=document.createElement('div'); topbar.dataset.webRemoteMobileTopbar='true';
-      var title=document.createElement('div'); title.dataset.webRemoteMobileTopbarTitle='true'; topbar.appendChild(title); document.body.appendChild(topbar);
+      var title=document.createElement('button'); title.type='button'; title.dataset.webRemoteMobileTopbarTitle='true'; title.setAttribute('aria-haspopup','menu'); title.setAttribute('aria-expanded','false'); topbar.appendChild(title); document.body.appendChild(topbar);
     }
     var topbar=document.querySelector('[data-web-remote-mobile-topbar]');
     if(topbar&&!topbar.querySelector('[data-web-remote-refresh]')){
@@ -156,8 +213,14 @@ export function renderWebRemoteMobilePatch(): string {
       var selectedTab=document.querySelector('[data-web-remote-panel="right"] [role="tab"][aria-selected="true"]');
       var sessionButton=document.querySelector('button[aria-label^="会话菜单："]');
       var nextTitle=body.dataset.webRemoteRightOpen==='true' ? ((selectedTab && selectedTab.innerText.trim()) || '工作区') : ((sessionButton && sessionButton.innerText.trim()) || 'Proma');
-      if (title.textContent!==nextTitle) title.textContent=nextTitle;
+      if (title.dataset.label!==nextTitle) { title.dataset.label=nextTitle; title.replaceChildren(document.createTextNode(nextTitle)); title.insertAdjacentHTML('beforeend',ICONS.chevron); }
+      var tabButtons=Array.from(document.querySelectorAll('[data-web-remote-panel="right"] [role="tablist"][aria-label="右侧工作区"] [role="tab"]'));
+      var menu=document.querySelector('[data-web-remote-mobile-tab-menu]');
+      if(menu){var signature=tabButtons.map(function(tab){return (tab.innerText||'').trim()+':'+tab.getAttribute('aria-selected')+':'+!!tab.parentElement?.querySelector('button[aria-label*="关闭"]')}).join('|');if(menu.dataset.signature!==signature){menu.dataset.signature=signature;menu.replaceChildren();tabButtons.forEach(function(tab){var row=document.createElement('div');row.style.display='flex';var choose=document.createElement('button');choose.type='button';choose.setAttribute('role','menuitem');choose.dataset.active=String(tab.getAttribute('aria-selected')==='true');choose.textContent=(tab.innerText||'').trim();choose.addEventListener('click',function(){tab.click();menu.hidden=true;body.dataset.webRemoteRightOpen='true';title.setAttribute('aria-expanded','false')});row.appendChild(choose);var close=tab.parentElement?.querySelector('button[aria-label*="关闭"]');if(close){var closeButton=document.createElement('button');closeButton.type='button';closeButton.setAttribute('aria-label','关闭 '+choose.textContent);closeButton.textContent='×';closeButton.style.width='44px';closeButton.addEventListener('click',function(event){event.stopPropagation();close.click();});row.appendChild(closeButton)}menu.appendChild(row)});}}
+      if(!title.__menuBound){title.__menuBound=true;title.addEventListener('click',function(){var current=document.querySelector('[data-web-remote-mobile-tab-menu]');if(!current){current=document.createElement('div');current.dataset.webRemoteMobileTabMenu='true';current.setAttribute('role','menu');current.hidden=true;document.body.appendChild(current)}current.hidden=!current.hidden;title.setAttribute('aria-expanded',String(!current.hidden));ensure()});}
     }
+    syncRightPanel();
+    document.querySelectorAll('[data-web-remote-memory-path]').forEach(function(path){if(!path.dataset.pathBound){path.dataset.pathBound='true';path.addEventListener('click',function(){var expanded=path.dataset.expanded==='true';path.dataset.expanded=String(!expanded);path.textContent=expanded?path.dataset.pathDisplay:path.dataset.pathOriginal})}if(path.dataset.expanded==='true')return;var current=path.textContent||'';if(current===path.dataset.pathDisplay)return;var parts=current.split(/[\\/]+/).filter(Boolean);path.dataset.pathOriginal=current;path.dataset.pathDisplay=parts.length>2?'…/'+parts.slice(-2).join('/'):current;path.title=current;path.textContent=path.dataset.pathDisplay});
     var settingsOpen=Array.from(document.querySelectorAll('h1,h2,h3')).some(function(node){return /通用设置|模型配置/.test(node.innerText)});
     var notice=document.querySelector('[data-web-remote-settings-notice]');
     if (settingsOpen && !notice) {
@@ -177,7 +240,7 @@ export function renderWebRemoteMobilePatch(): string {
     if (!(target instanceof Element)) return;
     if (window.__PROMA_SKIP_NEXT_CLICK && target.closest('button')) { window.__PROMA_SKIP_NEXT_CLICK=false; event.stopPropagation(); return; }
     if (target.closest('[data-web-remote-sidebar="left"]')) { delete body.dataset.webRemoteSidebarOpen; }
-    var rightPanelTrigger=target.closest('button[aria-label="Todo"],button[aria-label="定时任务"],button[aria-label="MCP/Skills"]');
+    var rightPanelTrigger=target.closest('button[aria-label="Todo"],button[aria-label="定时任务"],button[aria-label="MCP/Skills"],button[aria-label="项目记忆"],button[aria-label="日程"]');
     if (rightPanelTrigger) { window.setTimeout(function(){body.dataset.webRemoteRightOpen='true'}, 0); }
     if (target.closest('button[aria-label="打开设置"]')) { window.setTimeout(function(){delete body.dataset.webRemoteRightOpen}, 0); }
     if (target.closest('[data-web-remote-panel-toggle]')) return;
@@ -186,10 +249,10 @@ export function renderWebRemoteMobilePatch(): string {
   }, true);
   var forwardMobileControl=function(target){
     if (!(target instanceof Element)) return false;
-    var control=target.closest('button[aria-label="Todo"],button[aria-label="定时任务"],button[aria-label="MCP/Skills"],button[aria-label="打开设置"],button[aria-label*="中新建会话"]');
+    var control=target.closest('button[aria-label="Todo"],button[aria-label="定时任务"],button[aria-label="MCP/Skills"],button[aria-label="项目记忆"],button[aria-label="日程"],button[aria-label="打开设置"],button[aria-label*="中新建会话"]');
     if (!control) return false;
     delete body.dataset.webRemoteSidebarOpen; control.click(); window.__PROMA_SKIP_NEXT_CLICK=true; window.setTimeout(function(){window.__PROMA_SKIP_NEXT_CLICK=false},700);
-    if (control.matches('button[aria-label="Todo"],button[aria-label="定时任务"],button[aria-label="MCP/Skills"]')) window.setTimeout(function(){body.dataset.webRemoteRightOpen='true'},0);
+    if (control.matches('button[aria-label="Todo"],button[aria-label="定时任务"],button[aria-label="MCP/Skills"],button[aria-label="项目记忆"],button[aria-label="日程"]')) window.setTimeout(function(){body.dataset.webRemoteRightOpen='true'},0);
     return true;
   };
   document.addEventListener('touchstart',function(event){
@@ -203,7 +266,7 @@ export function renderWebRemoteMobilePatch(): string {
     }
     forwardMobileControl(target);
   }, true);
-  try { ensure(); new MutationObserver(ensure).observe(document.documentElement,{childList:true,subtree:true}); new MutationObserver(syncRightPanel).observe(body,{attributes:true,attributeFilter:['data-web-remote-right-open']}); } catch(error) { window.__PROMA_WEB_REMOTE_PATCH_ERROR=String(error); console.error('[Web Remote mobile patch] 初始化失败',error); }
+  try { ensure(); new MutationObserver(ensure).observe(document.documentElement,{childList:true,subtree:true}); new MutationObserver(syncRightPanel).observe(body,{attributes:true,attributeFilter:['data-web-remote-right-open']}); new MutationObserver(syncMenuButton).observe(body,{attributes:true,attributeFilter:['data-web-remote-sidebar-open']}); syncMenuButton(); } catch(error) { window.__PROMA_WEB_REMOTE_PATCH_ERROR=String(error); console.error('[Web Remote mobile patch] 初始化失败',error); }
   var hiddenAt=0; var lifecycleReady=false; var recovering=false;
   window.setTimeout(function(){lifecycleReady=true},3000);
   function recover(){

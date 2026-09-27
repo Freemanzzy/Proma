@@ -638,7 +638,7 @@ export function AgentSkillsView({
       )}
 
       {/* 工具条 */}
-      <div className={cn('titlebar-no-drag mx-auto flex w-full max-w-6xl shrink-0 items-center gap-3', embedded ? 'px-3 pb-3' : 'px-8 pb-4')}>
+      <div data-web-remote-skills-toolbar="true" className={cn('titlebar-no-drag mx-auto flex w-full max-w-6xl shrink-0 items-center gap-3', embedded ? 'px-3 pb-3' : 'px-8 pb-4')}>
         {/* 全屏能力中心保留总览切换；右侧组件由顶栏独占一个能力域。 */}
         {!embedded && <div className="relative flex h-8 items-stretch rounded-xl bg-muted p-0.5">
           <div
@@ -669,7 +669,7 @@ export function AgentSkillsView({
         </div>}
 
         {/* 搜索框 */}
-        <div className="flex h-8 flex-1 items-center gap-2 rounded-lg border border-border/60 bg-content-area px-3 transition-colors focus-within:border-primary/40">
+        <div data-web-remote-mobile-search="true" className="flex h-8 flex-1 items-center gap-2 rounded-lg border border-border/60 bg-content-area px-3 transition-colors focus-within:border-primary/40">
           <Search size={14} className="shrink-0 text-foreground/40" />
           <input
             value={search}

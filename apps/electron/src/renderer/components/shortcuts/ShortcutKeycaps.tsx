@@ -28,7 +28,7 @@ export function ShortcutKeycaps({
   const keys = activeAccelerator.split('+').map((key) => key.trim()).filter(Boolean)
 
   return (
-    <span className={cn('inline-flex flex-wrap items-center justify-end gap-1', className)} aria-label={getAcceleratorDisplay(activeAccelerator)}>
+    <span data-shortcut-keycaps="true" className={cn('inline-flex flex-wrap items-center justify-end gap-1', className)} aria-label={getAcceleratorDisplay(activeAccelerator)}>
       {keys.map((key, index) => (
         <React.Fragment key={`${key}-${index}`}>
           {index > 0 && <span aria-hidden="true" className={cn('text-[11px] font-medium text-muted-foreground/70', separatorClassName)}>+</span>}

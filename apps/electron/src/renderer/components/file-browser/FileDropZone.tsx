@@ -312,6 +312,7 @@ export function FileDropZone({ workspaceSlug, sessionId, target = 'session', onF
               <div
                 role="button"
                 tabIndex={0}
+                data-web-remote-mobile-hide="true"
                 aria-label={isWorkspace ? '附加项目文件夹' : '附加文件夹'}
                 className={zoneClass('right')}
                 onDragOver={(e) => handleDragOver(e, 'right')}

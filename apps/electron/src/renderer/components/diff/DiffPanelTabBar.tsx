@@ -308,11 +308,11 @@ export function DiffPanelTabBar({
   }, [tabs, visibleTabs?.left, visibleTabs?.right])
 
   return (
-    <div ref={barRef} className="relative flex h-10 shrink-0 items-center border-b border-border/50 bg-content-area">
+    <div ref={barRef} className="relative flex h-10 shrink-0 items-center border-b border-border/50 bg-content-area" data-web-remote-mobile-hide="true">
       <div className="pointer-events-none absolute inset-0 titlebar-drag-region" />
       <div className="relative flex h-full min-w-0 flex-1 items-center titlebar-no-drag">
         <div className="relative flex min-w-0 flex-1 self-stretch">
-          <div ref={tabListRef} className="flex h-9 min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overscroll-x-contain px-2 pt-1.5 pb-0.5 scrollbar-none" role="tablist" aria-label="右侧工作区">
+          <div ref={tabListRef} className="flex h-9 min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overscroll-x-contain px-2 pt-1.5 pb-0.5 scrollbar-none" role="tablist" aria-label="右侧工作区" data-web-remote-mobile-hide="true">
           {orderedTabs.map((tab) => {
             const selected = activeTab === tab.id
             const isSplitView = visibleTabs?.left !== undefined && visibleTabs.right !== undefined
