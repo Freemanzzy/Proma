@@ -15,16 +15,22 @@ LOGS_DIR="$HOME/Library/Logs/@proma/electron"
 ARCHIVE_DIR="/Volumes/Lexar ssd 2tb/proma 备份/switch-backups"
 ARCHIVE_SET=0
 KEEP_LOCAL=1
+PREVIOUS_DIR=""
+PREVIOUS_DIR_SET=0
 usage() {
   cat <<'EOF'
 用法: install-update.sh NEW_APP [--timeout SEC] [--health-seconds SEC]
        [--apps-dir DIR] [--data-dir DIR] [--backup-root DIR] [--logs-dir DIR]
-       [--archive-dir DIR | --no-archive] [--keep-local N]
+       [--previous-dir DIR] [--archive-dir DIR | --no-archive] [--keep-local N]
        [--dry-run] [--test-mode] [--simulate-health-failure] [--simulate-copy-failure]
 安装成功后，除最新 N 份（默认 1）外的旧更新前备份会复制到 --archive-dir（默认外置硬盘
 “proma 备份/switch-backups”），校验通过后才删除本机副本；外置硬盘未挂载或校验失败则保留本机副本。
 默认目标为 /Applications 与 ~/.proma；--test-mode 仅允许配合临时目录使用，跳过真实应用启动。
 演练参数 --simulate-health-failure / --simulate-copy-failure 必须同时指定 --test-mode。
+上一版应用默认保存在 --backup-root 下的 previous/Proma.app（不再放进 --apps-dir，避免与当前版本
+共享同一 bundle ID 导致 TCC/LaunchServices/Spotlight 误指向旧包）；可用 --previous-dir 覆盖，
+--test-mode 下同样必须在 /tmp 内。替换已存在的上一版时会先移入废纸篓（$HOME/.Trash，可自行清空；
+--test-mode 下改移到 --previous-dir 下的 .trash/，不动真实废纸篓），重名时加时间戳后缀，绝不覆盖。
 EOF
 }
 NEW_APP=""
@@ -36,6 +42,7 @@ while (($#)); do
     --data-dir) DATA_DIR="$2"; shift 2;;
     --backup-root) BACKUP_ROOT="$2"; shift 2;;
     --logs-dir) LOGS_DIR="$2"; shift 2;;
+    --previous-dir) PREVIOUS_DIR="$2"; PREVIOUS_DIR_SET=1; shift 2;;
     --archive-dir) ARCHIVE_DIR="$2"; ARCHIVE_SET=1; shift 2;;
     --no-archive) ARCHIVE_DIR=""; ARCHIVE_SET=1; shift;;
     --keep-local) KEEP_LOCAL="$2"; shift 2;;
@@ -59,10 +66,13 @@ APPS_DIR="$(python3 -c 'import os,sys;print(os.path.abspath(os.path.expanduser(s
 DATA_DIR="$(python3 -c 'import os,sys;print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$DATA_DIR")"
 BACKUP_ROOT="$(python3 -c 'import os,sys;print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$BACKUP_ROOT")"
 LOGS_DIR="$(python3 -c 'import os,sys;print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$LOGS_DIR")"
+# 上一版应用默认位置随 --backup-root 走（同一份 --keep-local 之外的树），--previous-dir 可单独覆盖。
+if (( ! PREVIOUS_DIR_SET )); then PREVIOUS_DIR="$BACKUP_ROOT/previous"; fi
+PREVIOUS_DIR="$(python3 -c 'import os,sys;print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$PREVIOUS_DIR")"
 # 演练模式默认不归档（不触碰外置硬盘）；显式传入的归档目录也必须在 /tmp 内。
 if (( TEST_MODE )) && (( ! ARCHIVE_SET )); then ARCHIVE_DIR=""; fi
 if (( TEST_MODE )); then
-  python3 - "$NEW_APP" "$APPS_DIR" "$DATA_DIR" "$BACKUP_ROOT" ${ARCHIVE_DIR:+"$ARCHIVE_DIR"} <<'PY'
+  python3 - "$NEW_APP" "$APPS_DIR" "$DATA_DIR" "$BACKUP_ROOT" "$PREVIOUS_DIR" ${ARCHIVE_DIR:+"$ARCHIVE_DIR"} <<'PY'
 import os,sys
 root=os.path.realpath('/tmp')
 for raw in sys.argv[1:]:
@@ -73,7 +83,8 @@ for raw in sys.argv[1:]:
 PY
 fi
 APP_PATH="$APPS_DIR/Proma.app"
-PREVIOUS_PATH="$APPS_DIR/Proma.previous.app"
+PREVIOUS_PATH="$PREVIOUS_DIR/Proma.app"
+LEGACY_PREVIOUS_PATH="$APPS_DIR/Proma.previous.app"
 
 [[ -d "$NEW_APP" ]] || { echo "ERROR: 新应用不存在: $NEW_APP" >&2; exit 2; }
 MARKER="$NEW_APP/Contents/Resources/personal-build.json"
@@ -95,13 +106,13 @@ if [[ "$DRY_RUN" == 1 ]]; then
   printf 'DRY-RUN data backup: %s/<timestamp>/proma (snapshots stored alongside, not inside)\n' "$BACKUP_ROOT"
   exit 0
 fi
-mkdir -p "$APPS_DIR" "$BACKUP_ROOT"
+mkdir -p "$APPS_DIR" "$BACKUP_ROOT" "$PREVIOUS_DIR"
 [[ -d "$DATA_DIR" ]] || { echo "ERROR: 数据目录不存在: $DATA_DIR" >&2; exit 2; }
 
 STAMP="$(date +%Y%m%d-%H%M%S)-$$"
 STAGING_PATH=""
 BACKUP="$BACKUP_ROOT/$STAMP"
-ROTATED_PREVIOUS_PATH=""
+TRASHED_PREVIOUS_PATH=""
 HAD_APP=0
 ROLLBACK_ARMED=0
 ROLLBACK_COMPLETE=0
@@ -135,7 +146,7 @@ rollback_app() {
   if (( commit_app_is_new == 1 )) && [[ -z "$NEW_PIDS" ]]; then NEW_PIDS="$(find_app_pids "$binary")"; fi
   if [[ -n "$NEW_PIDS" ]]; then
     if ! stop_new_process_tree "$binary" "$NEW_PIDS"; then
-      echo 'ERROR: 新版进程在 20 秒内未退出；为避免移动正在运行的 bundle，保留原版于 Proma.previous.app，并停止自动文件回滚。' >&2
+      echo "ERROR: 新版进程在 20 秒内未退出；为避免移动正在运行的 bundle，保留原版于 ${PREVIOUS_PATH}，并停止自动文件回滚。" >&2
       echo "手动恢复提示：新版仍在运行时不要移动应用包；PID 仅限本次记录的新版本 PID：$NEW_PIDS" >&2
       echo "失败包路径预留为：$FAILED_PACKAGE_PATH" >&2
       return 1
@@ -168,8 +179,8 @@ PY
     echo "ERROR: 原应用副本缺失，保留当前目录结构供人工恢复：$PREVIOUS_PATH" >&2
     return 1
   fi
-  if [[ -n "$ROTATED_PREVIOUS_PATH" && -e "$ROTATED_PREVIOUS_PATH" && ! -e "$PREVIOUS_PATH" ]]; then
-    mv "$ROTATED_PREVIOUS_PATH" "$PREVIOUS_PATH"
+  if [[ -n "$TRASHED_PREVIOUS_PATH" && -e "$TRASHED_PREVIOUS_PATH" && ! -e "$PREVIOUS_PATH" ]]; then
+    mv "$TRASHED_PREVIOUS_PATH" "$PREVIOUS_PATH"
   fi
   if [[ -n "$NEW_PIDS" ]]; then
     local remaining failed_binary
@@ -219,6 +230,37 @@ trap on_exit EXIT
 trap 'on_error $? $LINENO' ERR
 trap 'on_signal INT' INT
 trap 'on_signal TERM' TERM
+
+# Move an existing previous-app bundle out of the way without deleting it: real ~/.Trash normally,
+# or PREVIOUS_DIR/.trash under --test-mode so drills never touch the user's real Trash. Named after the
+# bundle's own personal-build.json commit (first 8 chars) when present, else a timestamp; a name collision
+# gets a timestamp+pid suffix instead of overwriting.
+move_to_trash() {
+  local src="$1" trash_root marker commit name target
+  if (( TEST_MODE )); then trash_root="$PREVIOUS_DIR/.trash"; else trash_root="$HOME/.Trash"; fi
+  mkdir -p "$trash_root"
+  marker="$src/Contents/Resources/personal-build.json"
+  commit=""
+  if [[ -f "$marker" ]]; then
+    commit="$(python3 - "$marker" <<'PY'
+import json,sys
+try:
+    c=json.load(open(sys.argv[1],encoding='utf-8')).get('commit','')
+    print(c[:8] if isinstance(c,str) else '')
+except Exception:
+    print('')
+PY
+)"
+  fi
+  [[ -n "$commit" ]] || commit="$(date +%Y%m%d-%H%M%S)"
+  name="Proma-previous-$commit.app"
+  target="$trash_root/$name"
+  if [[ -e "$target" ]]; then
+    target="$trash_root/Proma-previous-$commit-$(date +%Y%m%d-%H%M%S)-$$.app"
+  fi
+  mv "$src" "$target"
+  printf '%s' "$target"
+}
 
 find_app_pids() {
   local expected_binary="$1"
@@ -341,9 +383,19 @@ if [[ "$TEST_MODE" != 1 ]]; then
   if [[ -n "$REMOTE_PORT" && "$REMOTE_PORT" != 17888 ]]; then assert_port_available_or_installed_app "$REMOTE_PORT"; fi
 fi
 
-mkdir -p "$APPS_DIR"
-if [[ -e "$PREVIOUS_PATH" ]]; then
-  ROTATED_PREVIOUS_PATH="$APPS_DIR/Proma.previous.$STAMP.app"
+mkdir -p "$APPS_DIR" "$PREVIOUS_DIR"
+# 兼容旧布局：旧版本脚本把上一版留在 $APPS_DIR/Proma.previous.app（与当前应用同目录、同 bundle ID）。
+# 迁移它到新位置，除非新位置已经被占用（此时按同样规则把它移去废纸篓，让本次安装的 PREVIOUS_PATH
+# 处理逻辑统一接管）。
+if [[ -e "$LEGACY_PREVIOUS_PATH" ]]; then
+  if [[ -e "$PREVIOUS_PATH" ]]; then
+    legacy_trashed="$(move_to_trash "$LEGACY_PREVIOUS_PATH")"
+    echo "兼容旧布局：$PREVIOUS_PATH 已存在，旧版 $LEGACY_PREVIOUS_PATH 已移至废纸篓：$legacy_trashed" >&2
+  else
+    # $APPS_DIR -> $PREVIOUS_DIR；跨卷时的原子性说明见下方 APP_PATH -> PREVIOUS_PATH 处。
+    mv "$LEGACY_PREVIOUS_PATH" "$PREVIOUS_PATH"
+    echo "兼容旧布局：已将上一版从 $LEGACY_PREVIOUS_PATH 迁移到 $PREVIOUS_PATH" >&2
+  fi
 fi
 HAD_APP=0
 [[ -e "$APP_PATH" ]] && HAD_APP=1
@@ -352,7 +404,12 @@ STAGING_PATH="$APPS_DIR/.Proma.installing-$STAMP.app"
 
 # All writes happen in a sibling staging directory on the same volume. Arm recovery before any app-bundle rename.
 ROLLBACK_ARMED=1
-if [[ -n "$ROTATED_PREVIOUS_PATH" ]]; then mv "$PREVIOUS_PATH" "$ROTATED_PREVIOUS_PATH"; fi
+# 不删除已存在的上一版：移入废纸篓（可自行清空），为当前应用让出 PREVIOUS_PATH。失败时 rollback_app
+# 会把它移回 PREVIOUS_PATH。
+if [[ -e "$PREVIOUS_PATH" ]]; then
+  TRASHED_PREVIOUS_PATH="$(move_to_trash "$PREVIOUS_PATH")"
+  echo "上一版已移至废纸篓，可自行清空：$TRASHED_PREVIOUS_PATH" >&2
+fi
 if [[ "$SIMULATE_COPY_FAILURE" == 1 ]]; then
   mkdir -p "$STAGING_PATH/Contents/Resources"
   cp -a "$MARKER" "$STAGING_PATH/Contents/Resources/personal-build.json"
@@ -369,6 +426,11 @@ import json,sys
 left=json.load(open(sys.argv[1],encoding='utf-8')); right=json.load(open(sys.argv[2],encoding='utf-8'))
 if left != right: raise SystemExit('staging marker does not match source bundle')
 PY
+# APP_PATH -> PREVIOUS_PATH now crosses from $APPS_DIR into $PREVIOUS_DIR (under $BACKUP_ROOT by
+# default). When both are on the same volume (the default: /Applications and ~/.proma-switch-backups
+# share the boot volume) this rename is atomic, same as before. If --backup-root/--previous-dir is
+# pointed at a different volume, `mv` still works (coreutils falls back to copy+remove) but is no
+# longer atomic — an interruption mid-move could leave a partial copy at PREVIOUS_PATH.
 if [[ "$HAD_APP" == 1 ]]; then
   mv "$APP_PATH" "$PREVIOUS_PATH"
   ORIGINAL_MOVED=1
@@ -443,7 +505,7 @@ ROLLBACK_ARMED=0
 printf '安装成功: %s\n' "$APP_PATH"
 printf '个人版版本: %s\n' "$NEW_VERSION"
 printf '备份快照: %s\n' "$BACKUP/health-snapshot-before.json"
-echo "失败包若发生后续人工回滚会保留为 Proma.failed-*.app；旧包为 Proma.previous.app。"
+echo "失败包若发生后续人工回滚会保留为 Proma.failed-*.app；旧包为 ${PREVIOUS_PATH}（可自行移到废纸篓清空）。"
 echo "官方更新缓存可手动移动到：$BACKUP_ROOT/updater-caches-$STAMP/（脚本不自动移动）。"
 # 旧备份归档：安装已成功，以下任何失败都只提示、不影响安装结果，且绝不在校验通过前删除本机副本。
 trap - ERR

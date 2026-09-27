@@ -22,7 +22,7 @@
 | 项目 | 位置 |
 |---|---|
 | 个人版应用 | `/Applications/Proma.app`（切换后） |
-| 上一版应用（安装脚本保留） | `/Applications/Proma.previous.app` |
+| 上一版应用（安装脚本保留） | `~/.proma-switch-backups/previous/Proma.app`（2026-09-27 起；不再放进 `/Applications`，避免与当前版本共享同一 bundle ID 导致 TCC/LaunchServices/Spotlight 误指向旧包）。安装脚本替换已存在的上一版时会先移入 `$HOME/.Trash`（可自行清空），不会直接删除 |
 | 用户数据 | `~/.proma`（个人版切换后直接使用） |
 | 开发/预演数据 | `~/.proma-dev`（与正式数据隔离） |
 | 更新前自动备份 | 最新一份在 `~/.proma-switch-backups/<时间戳>/`（安装脚本在替换应用前生成）；更早的由安装成功后自动归档到外置硬盘 `/Volumes/Lexar ssd 2tb/proma 备份/switch-backups/<时间戳>/`（校验通过才删本机副本；硬盘未挂载时留在本机） |
@@ -93,17 +93,17 @@ ls -lt "/Volumes/Lexar ssd 2tb/proma 备份/" 2>/dev/null | head
 > 换应用前先按 §4 第 2 步把当前 `~/.proma` 另存一份（`cp -a`，不移动），再换应用。两边版本相同时通常不需要恢复数据。
 
 1. 退出个人版（让用户手动退出；无响应时，确认 PID 的命令行属于 `/Applications/Proma.app` 后 `kill <PID>`，等待 10 秒）。
-2. 保留坏版本、换回上一版：
+2. 保留坏版本、换回上一版（上一版应用位于 `~/.proma-switch-backups/previous/Proma.app`，不在 `/Applications`）：
 
 ```bash
 cd /Applications
 mv "Proma.app" "Proma.broken-$(date +%Y%m%d-%H%M%S).app"
-cp -R "Proma.previous.app" "Proma.app"
+cp -R "$HOME/.proma-switch-backups/previous/Proma.app" "Proma.app"
 open "/Applications/Proma.app"
 ```
 
 3. 如果上一版启动后报数据版本过高（新版已迁移数据），转 §4 恢复更新前备份。
-4. 如果 `previous.app` 不存在：个人版上一版从仓库构建（§6）；需要退回官方版时，官方 0.19.58 存放在外置硬盘 `/Volumes/Lexar ssd 2tb/proma 备份/switch-backups-20260926/official-Proma-0.19.58.app`（用 `ditto` 复制回 `/Applications/Proma.app` 前先把当前应用改名保留），外置硬盘另有 `official-Proma-0.19.58-20260926.app.zip`。官方版会自动更新，放回后只在确需回退时打开。
+4. 如果 `~/.proma-switch-backups/previous/Proma.app` 不存在：个人版上一版从仓库构建（§6）；需要退回官方版时，官方 0.19.58 存放在外置硬盘 `/Volumes/Lexar ssd 2tb/proma 备份/switch-backups-20260926/official-Proma-0.19.58.app`（用 `ditto` 复制回 `/Applications/Proma.app` 前先把当前应用改名保留），外置硬盘另有 `official-Proma-0.19.58-20260926.app.zip`。官方版会自动更新，放回后只在确需回退时打开。
 
 ---
 
@@ -187,7 +187,7 @@ python3 scripts/personal/health-snapshot.py --compare /tmp/health-snapshot-befor
 
 - 不要在 `personal` 分支上 `reset --hard` 或强推；在 `recover/*` 分支修复，验证通过后请用户确认再合并。
 - `scripts/personal/package-personal.sh` 负责安装依赖、typecheck、基线测试、全部 Electron 构建及 arm64 目录包；产物仅写入仓库 `apps/electron/out/`，不启动、不安装。
-- `scripts/personal/install-update.sh NEW_APP` 默认安装到 `/Applications/Proma.app` 并备份 `~/.proma`；安装时先复制到同卷 `.Proma.installing-*`，再原子改名，并用 EXIT/ERR/INT/TERM 恢复原应用。只可在 `/tmp` 用 `--test-mode --apps-dir --data-dir --backup-root` 演练。`--dry-run` 不写数据；`--simulate-health-failure` 与 `--simulate-copy-failure` 可分别演练健康失败回滚和 staging 复制中断。新版失败时会在停止本次跟踪的新版 PID/子进程后保留 `Proma.failed-*.app`；脚本不自动还原数据或移动官方更新缓存。默认健康观察 60 秒，更新前后快照写在时间戳备份目录的外层，不污染 `proma/` 副本。
+- `scripts/personal/install-update.sh NEW_APP` 默认安装到 `/Applications/Proma.app` 并备份 `~/.proma`；安装时先复制到同卷 `.Proma.installing-*`，再原子改名，并用 EXIT/ERR/INT/TERM 恢复原应用。只可在 `/tmp` 用 `--test-mode --apps-dir --data-dir --backup-root` 演练。`--dry-run` 不写数据；`--simulate-health-failure` 与 `--simulate-copy-failure` 可分别演练健康失败回滚和 staging 复制中断。新版失败时会在停止本次跟踪的新版 PID/子进程后保留 `Proma.failed-*.app`（仍留在 `/Applications`）；脚本不自动还原数据或移动官方更新缓存。默认健康观察 60 秒，更新前后快照写在时间戳备份目录的外层，不污染 `proma/` 副本。上一版应用（2026-09-27 起）保存在 `--backup-root` 下的 `previous/Proma.app`（默认即 `~/.proma-switch-backups/previous/Proma.app`，可用 `--previous-dir` 覆盖），不再放进 `/Applications`；替换已存在的上一版时先移入 `$HOME/.Trash`（可自行清空，重名加时间戳后缀，绝不覆盖）；旧版脚本留在 `/Applications/Proma.previous.app` 的上一版会在下次安装开始前自动迁移到新位置。
 - `python3 scripts/personal/verify-backup.py SRC BACKUP` 对比目录或 zip 的文件内容、大小、SHA-256、符号链接目标和权限；可多次传 `--exclude GLOB`。
 - 修复后在 `PERSONAL.md` 末尾追加 `## YYYY-MM-DD: 故障回退记录`（原因、操作、结果）。
 
