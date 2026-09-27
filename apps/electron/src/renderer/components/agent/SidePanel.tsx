@@ -1076,7 +1076,9 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
         })
       }
     }
-  }, [markDelegationSessionViewed, onTabChange, previewFiles, sessionId, setPreviewFileMap, sideChatConversationId, sideDelegationSessionId, sideTemporaryAgents])
+    if (split) updateSplit(selectRightWorkspaceSplitTab(split, tab))
+    onTabChange(tab)
+  }, [markDelegationSessionViewed, onTabChange, previewFiles, sessionId, setPreviewFileMap, sideChatConversationId, sideDelegationSessionId, sideTemporaryAgents, split, updateSplit])
 
   // 外部事件仍只更新兼容 activeTab；分屏时把新目标落到当前焦点 Pane。
   React.useEffect(() => {

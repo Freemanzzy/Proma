@@ -42,6 +42,48 @@ export function RightSidePanel({ width }: { width?: number }): React.ReactElemen
     })
   }, [currentSessionId, setDiffPanelTabMap])
 
+  // Agent 可见终端（TerminalExecute/TerminalOpen）打开或关闭时同步到右侧工作区。
+  React.useEffect(() => {
+    const unsubscribeOpen = window.electronAPI.onAgentTerminalOpen((event) => {
+      setTerminalTabsMap((previous) => {
+        const current = previous.get(event.sessionId) ?? []
+        if (current.some((terminal) => terminal.terminalId === event.terminalId)) return previous
+        const next = new Map(previous)
+        next.set(event.sessionId, [...current, { terminalId: event.terminalId, title: event.title, cwd: event.cwd }])
+        return next
+      })
+      if (event.sessionId !== currentSessionId) return
+      setSidePanelOpen(true)
+      setDiffPanelTabMap((previous) => {
+        const next = new Map(previous)
+        next.set(event.sessionId, getTerminalSidePanelTab(event.terminalId))
+        return next
+      })
+    })
+    const unsubscribeClose = window.electronAPI.onAgentTerminalClose((event) => {
+      setTerminalTabsMap((previous) => {
+        const current = previous.get(event.sessionId) ?? []
+        const remaining = current.filter((terminal) => terminal.terminalId !== event.terminalId)
+        if (remaining.length === current.length) return previous
+        const next = new Map(previous)
+        if (remaining.length > 0) next.set(event.sessionId, remaining)
+        else next.delete(event.sessionId)
+        return next
+      })
+      if (event.sessionId !== currentSessionId) return
+      setDiffPanelTabMap((previous) => {
+        if (previous.get(event.sessionId) !== getTerminalSidePanelTab(event.terminalId)) return previous
+        const next = new Map(previous)
+        next.set(event.sessionId, 'files')
+        return next
+      })
+    })
+    return () => {
+      unsubscribeOpen()
+      unsubscribeClose()
+    }
+  }, [currentSessionId, setDiffPanelTabMap, setSidePanelOpen, setTerminalTabsMap])
+
   if (appMode !== 'agent' || !currentSessionId) {
     return null
   }
