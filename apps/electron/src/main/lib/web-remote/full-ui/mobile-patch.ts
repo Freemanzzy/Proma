@@ -37,7 +37,6 @@ export function renderWebRemoteMobilePatch(): string {
   [data-web-remote-mobile-menu] { position:fixed; top:max(8px, env(safe-area-inset-top)); left:max(8px, env(safe-area-inset-left)); z-index:10003; width:42px; height:42px; padding:0; border:1px solid hsl(var(--border)); border-radius:12px; background:hsl(var(--background)/.92); color:hsl(var(--foreground)); box-shadow:0 3px 12px rgba(0,0,0,.16); font-size:22px; line-height:1; }
   [data-web-remote-mobile-overlay] { position:fixed; inset:0; z-index:10000; display:block!important; background:rgba(0,0,0,.38); opacity:0; visibility:hidden; pointer-events:none; transition:opacity .18s ease,visibility .18s; }
   body[data-web-remote-sidebar-open="true"] [data-web-remote-mobile-overlay] { opacity:1; visibility:visible; pointer-events:auto; }
-  @media (hover:none) { [data-web-remote-sidebar="left"] [class*="group-hover:opacity-100"] { opacity:1!important; } [data-web-remote-sidebar="left"] [class*="group-hover:visible"] { visibility:visible!important; } }
   [data-web-remote-main="true"] input, [data-web-remote-main="true"] textarea, [data-web-remote-main="true"] [contenteditable="true"] { font-size:16px!important; }
   [data-web-remote-input-toolbar="true"] { height:auto!important; min-height:48px; flex-wrap:wrap!important; align-items:flex-start!important; gap:8px!important; }
   [data-web-remote-input-toolbar="true"] > :first-child { flex:1 1 100%!important; min-width:0; flex-wrap:wrap!important; overflow:visible!important; }
