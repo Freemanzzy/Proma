@@ -635,3 +635,12 @@ python3 scripts/personal/import-proma-backup.py \\
 - 验证：`bash -n scripts/personal/install-update.sh` 通过；`python3 scripts/personal/test-personal-scripts.py` 退出 0；仓库根 `bun test`：557 pass / 5 fail / 1 error，与基线一致（无新增失败）。
 - 范围：只改 `scripts/personal/install-update.sh`、`scripts/personal/test-personal-scripts.py` 与上述文档；未打包、未安装、未合并、未推送，分支 `fix/previous-outside-applications`。
 - 主会话复核补充：同类隐患（`$pid）`、`$vol）`、`$ARCHIVE_DIR；` 三处，分别在端口冲突、外置硬盘未挂载、归档目录创建失败分支）已一并改为 `${...}` 写法；归档分支在安装成功之后运行，若触发会以非零退出误导安装结果。`bash -n` 与 `test-personal-scripts.py`（38 PASS）通过。
+
+## 2026-09-27: 首个证书签名版本安装（3081e30f）与“文稿”授权反复弹窗根因
+
+- 用户暂停 Proma 打包，由 Claude Code 接手：在 `05cae780`（Proma：固定证书签名）之上合并“上一版移出 /Applications”（`47ae81b7` 及 `${var}` 修复），打包安装 `3081e30f`；详见交接 `install-result-2026-09-27-3.md`。
+- 打包：557/5/1；签名身份 `Proma Personal Code Signing`，designated requirement 含 `certificate leaf = H"d993d52c…"`（主程序与 Helper 一致），非 adhoc。安装脚本退出 0，备份 `20260927-233608-74409`，上一版 `c6c27d02` 存 `~/.proma-switch-backups/previous/Proma.app`，`041c148d` 移入废纸篓，`20260927-223739-56251` 归档到外置硬盘并复核一致。
+- 根因：LaunchServices 中 `com.proma.app` 登记了 5 份、3 种签名身份的副本（证书、两个 ad-hoc、官方 Team ID）。TCC 对该 bundle ID 只存一条带 csreq 的授权，弹窗时解析到不同副本（显示“Proma”或“Proma-previous-041c148d”），每次“允许”都改写 csreq，另一身份随即不匹配，形成反复弹窗。
+- 修复（用户同意）：证书重签 `previous/Proma.app`；外置硬盘官方版改名 `official-Proma-0.19.58.app.disabled`（zip 存档仍在）；`lsregister -u` 注销旧路径；用户清空废纸篓并运行 `tccutil reset SystemPolicyDocumentsFolder com.proma.app`（清除 3 条记录）后重新允许一次。现登记 3 份，签名同为证书，桌面不再反复弹窗。
+- 规则：Proma 副本（含备份）必须与当前版本同一签名身份；外置硬盘存放旧 `.app` 一律改为 `.app.disabled` 或只存 zip（待 Proma 写入 `maintenance.md`）。
+- 手机：两台设备推送订阅登记成功；通知按钮成功后显示为空白块且无反馈（`mobile-patch.ts` 用文字覆盖图标），已交 Proma 修复。
