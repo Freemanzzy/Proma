@@ -58,6 +58,7 @@ function registerProtocolsAndHandlers(): void {
 
 import { getSettings, updateSettings } from './lib/settings-service'
 import { handlePromaFileRequest } from './lib/local-file-protocol'
+import { cleanupSimulatorPreview } from './lib/simulator-preview-service'
 
 // 处理 EPIPE 错误：当 stdout/stderr 管道被关闭时（如 electronmon 重启），忽略写入错误
 // 这在开发环境热重载时经常发生，不影响应用功能
@@ -950,7 +951,14 @@ app.on('window-all-closed', () => {
   }
 })
 
-app.on('before-quit', () => {
+let simulatorCleanupFinished = false
+app.on('before-quit', (event) => {
+  if (!simulatorCleanupFinished) {
+    event.preventDefault()
+    simulatorCleanupFinished = true
+    void cleanupSimulatorPreview().finally(() => app.quit())
+    return
+  }
   // 标记正在退出，让 close 事件不再阻止关闭
   setQuitting()
 

@@ -30,6 +30,7 @@ export * from './reasoning-profile'
 export * from './agent-provider'
 export * from './agent-runtime'
 export * from './terminal'
+export * from './simulator'
 
 // 环境检测相关类型
 export * from './environment'
