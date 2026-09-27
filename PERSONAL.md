@@ -535,3 +535,9 @@ python3 scripts/personal/import-proma-backup.py \\
 - 用户同意：`~/.proma-switch-backups/` 中 4 份较早的更新前数据备份（09-26 22:56、23:00、23:32、23:51）、官方版 `official-Proma-0.19.58.app`、官方更新缓存 `updater-caches-20260926`，以 `ditto` 复制到外置硬盘 `/Volumes/Lexar ssd 2tb/proma 备份/switch-backups-20260926/`（APFS），逐项 `verify-backup.py --preset proma-backup` PASS（仅 `.DS_Store` 差异被排除），随后删除本机副本，释放约 14 GB。
 - 本机保留：最新更新前备份 `20260927-021826-20863`（3.2 GB，供快速恢复）、`pre-/post-switch-snapshot.json`；`install-update.sh` 仍写入 `~/.proma-switch-backups/`。
 - 恢复官方版或较早备份时从外置硬盘上述目录取用（fallback-runbook §1 已更新）。
+
+## 2026-09-27: 安装脚本自动归档旧备份到外置硬盘
+
+- `scripts/personal/install-update.sh`：安装成功（健康检查通过）后，除最新 `--keep-local N`（默认 1）份外，更早的 `~/.proma-switch-backups/20*` 更新前备份用 `ditto` 复制到 `--archive-dir`（默认 `/Volumes/Lexar ssd 2tb/proma 备份/switch-backups/`），`verify-backup.py --preset proma-backup` 通过后才删除本机副本；外置硬盘未挂载、目标已存在、复制或校验失败时一律保留本机副本并提示，不影响安装结果（该阶段关闭 ERR 陷阱与 `set -e`）。`--no-archive` 关闭；回滚路径不归档。`--test-mode` 默认不归档，显式归档目录也必须在 `/tmp` 内。取代原“超过 5 份仅提示”的逻辑。
+- 验证：`bash -n` 通过；`scripts/personal/test-personal-scripts.py` 新增归档用例（不指定归档目录时本机保留 2 份；指定后本机只留最新 1 份、2 份归档且逐份与源数据校验一致；演练模式拒绝 `/tmp` 外归档目录），原有成功/健康失败回滚/复制失败三种演练仍通过。未对真实 `/Applications`、`~/.proma` 或外置硬盘执行。
+- 文档：`docs/personal/fallback-runbook.md` §1 与 `CLAUDE.md` §2 备份位置更新。仅脚本与文档，无需重装（下次由 Claude Code 安装时生效）。

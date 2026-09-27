@@ -113,6 +113,24 @@ def main():
         assert not (backup_dirs[0]/'proma'/'.personal-migration').exists()
         assert (backup_dirs[0]/'health-snapshot-before.json').is_file() and (backup_dirs[0]/'health-snapshot-after.json').is_file()
 
+        # 未指定归档目录时演练模式不归档：第二次安装后本机保留 2 份。
+        assert_run(common)
+        backup_dirs=sorted(p for p in backups.iterdir() if p.is_dir() and p.name[0].isdigit())
+        assert len(backup_dirs)==2
+        # 指定归档目录：第三次安装后本机只留最新 1 份，其余 2 份归档且校验一致。
+        archive=root/'archive'
+        assert_run(common+['--archive-dir',str(archive)])
+        local=sorted(p for p in backups.iterdir() if p.is_dir() and p.name[0].isdigit())
+        archived=sorted(p for p in archive.iterdir() if p.is_dir())
+        assert len(local)==1 and len(archived)==2, (local, archived)
+        assert local[0].name > max(a.name for a in archived)
+        for a in archived:
+            assert (a/'proma').is_dir() and (a/'health-snapshot-before.json').is_file()
+            assert_run(['python3',str(SCRIPTS/'verify-backup.py'),str(data),str(a/'proma')])
+        # 归档目录不在 /tmp 时演练模式拒绝。
+        assert_run(common+['--archive-dir','/Volumes/not-allowed'],expected=2)
+        print('INSTALL BACKUP ARCHIVE PASS: newest kept locally; older backups archived and verified')
+
         rollback_apps=root/'Applications-rollback'; make_apps(rollback_apps)
         failure_args=common.copy(); failure_args[failure_args.index('--apps-dir')+1]=str(rollback_apps); failure_args[failure_args.index('--backup-root')+1]=str(root/'backups-rollback'); failure_args.append('--simulate-health-failure')
         assert_run(failure_args,expected=4)

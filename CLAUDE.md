@@ -22,7 +22,7 @@
 | 用户数据 | `~/.proma`（日常数据，**最高保护级别**） |
 | 预演数据 | `~/.proma-dev`（开发实例，可用于预演更新；其手机访问配置在 `~/.proma-dev/web-remote/`） |
 | 手机访问配置 | 安装版：`~/.proma/web-remote/`（`config.json`、`devices.json`、`vapid.json`、`push-subscriptions.json`，0600，不入库） |
-| 更新前自动备份 | `~/.proma-switch-backups/<时间戳>/` |
+| 更新前自动备份 | 最新一份 `~/.proma-switch-backups/<时间戳>/`；更早的在外置硬盘 `proma 备份/switch-backups/`（安装脚本自动归档，见 fallback-runbook §1） |
 | 外置硬盘完整备份 | `/Volumes/Lexar ssd 2tb/proma 备份/*.zip`（未挂载时 `diskutil list` + `diskutil mount <设备>`） |
 | 个人版脚本 | `scripts/personal/`（开发实例 `dev.sh`、导入 `import-proma-backup.py`、完整性校验 `verify-backup.py`、只读健康快照 `health-snapshot.py`、打包 `package-personal.sh`、安装更新 `install-update.sh`、手机回归 `mobile-harness.mjs`、`web-remote.sh`） |
 | 周检任务 | Proma 内定时任务“Proma 个人版 · 官方版本周检（只读）”，每周一 09:30 生成报告 |

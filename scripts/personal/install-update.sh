@@ -12,11 +12,17 @@ APPS_DIR="/Applications"
 DATA_DIR="$HOME/.proma"
 BACKUP_ROOT="$HOME/.proma-switch-backups"
 LOGS_DIR="$HOME/Library/Logs/@proma/electron"
+ARCHIVE_DIR="/Volumes/Lexar ssd 2tb/proma 备份/switch-backups"
+ARCHIVE_SET=0
+KEEP_LOCAL=1
 usage() {
   cat <<'EOF'
 用法: install-update.sh NEW_APP [--timeout SEC] [--health-seconds SEC]
        [--apps-dir DIR] [--data-dir DIR] [--backup-root DIR] [--logs-dir DIR]
+       [--archive-dir DIR | --no-archive] [--keep-local N]
        [--dry-run] [--test-mode] [--simulate-health-failure] [--simulate-copy-failure]
+安装成功后，除最新 N 份（默认 1）外的旧更新前备份会复制到 --archive-dir（默认外置硬盘
+“proma 备份/switch-backups”），校验通过后才删除本机副本；外置硬盘未挂载或校验失败则保留本机副本。
 默认目标为 /Applications 与 ~/.proma；--test-mode 仅允许配合临时目录使用，跳过真实应用启动。
 演练参数 --simulate-health-failure / --simulate-copy-failure 必须同时指定 --test-mode。
 EOF
@@ -30,6 +36,9 @@ while (($#)); do
     --data-dir) DATA_DIR="$2"; shift 2;;
     --backup-root) BACKUP_ROOT="$2"; shift 2;;
     --logs-dir) LOGS_DIR="$2"; shift 2;;
+    --archive-dir) ARCHIVE_DIR="$2"; ARCHIVE_SET=1; shift 2;;
+    --no-archive) ARCHIVE_DIR=""; ARCHIVE_SET=1; shift;;
+    --keep-local) KEEP_LOCAL="$2"; shift 2;;
     --dry-run) DRY_RUN=1; shift;;
     --test-mode) TEST_MODE=1; shift;;
     --simulate-health-failure) SIMULATE_FAILURE=1; shift;;
@@ -40,6 +49,7 @@ while (($#)); do
   esac
 done
 [[ -n "$NEW_APP" ]] || { usage >&2; exit 2; }
+[[ "$KEEP_LOCAL" =~ ^[1-9][0-9]*$ ]] || { echo 'ERROR: --keep-local 必须是正整数（至少保留 1 份）。' >&2; exit 2; }
 [[ "$TIMEOUT" =~ ^[0-9]+$ && "$HEALTH_SECONDS" =~ ^[0-9]+$ ]] || { echo 'ERROR: timeout 与 health-seconds 必须是非负整数。' >&2; exit 2; }
 if (( SIMULATE_FAILURE || SIMULATE_COPY_FAILURE )) && (( ! TEST_MODE )); then
   echo 'ERROR: 模拟故障参数只允许与 --test-mode 一起使用。' >&2; exit 2
@@ -49,8 +59,10 @@ APPS_DIR="$(python3 -c 'import os,sys;print(os.path.abspath(os.path.expanduser(s
 DATA_DIR="$(python3 -c 'import os,sys;print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$DATA_DIR")"
 BACKUP_ROOT="$(python3 -c 'import os,sys;print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$BACKUP_ROOT")"
 LOGS_DIR="$(python3 -c 'import os,sys;print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$LOGS_DIR")"
+# 演练模式默认不归档（不触碰外置硬盘）；显式传入的归档目录也必须在 /tmp 内。
+if (( TEST_MODE )) && (( ! ARCHIVE_SET )); then ARCHIVE_DIR=""; fi
 if (( TEST_MODE )); then
-  python3 - "$NEW_APP" "$APPS_DIR" "$DATA_DIR" "$BACKUP_ROOT" <<'PY'
+  python3 - "$NEW_APP" "$APPS_DIR" "$DATA_DIR" "$BACKUP_ROOT" ${ARCHIVE_DIR:+"$ARCHIVE_DIR"} <<'PY'
 import os,sys
 root=os.path.realpath('/tmp')
 for raw in sys.argv[1:]:
@@ -433,6 +445,38 @@ printf '个人版版本: %s\n' "$NEW_VERSION"
 printf '备份快照: %s\n' "$BACKUP/health-snapshot-before.json"
 echo "失败包若发生后续人工回滚会保留为 Proma.failed-*.app；旧包为 Proma.previous.app。"
 echo "官方更新缓存可手动移动到：$BACKUP_ROOT/updater-caches-$STAMP/（脚本不自动移动）。"
-old_backups="$(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -name '20*' | sort -r)"
-old_count="$(printf '%s\n' "$old_backups" | sed '/^$/d' | wc -l | tr -d ' ')"
-if (( old_count > 5 )); then echo "提示：更新备份共 ${old_count} 份；全部保留，最近 5 份为：$(printf '%s\n' "$old_backups" | head -5 | tr '\n' ' ')；更早备份请人工审核后再清理。"; fi
+# 旧备份归档：安装已成功，以下任何失败都只提示、不影响安装结果，且绝不在校验通过前删除本机副本。
+trap - ERR
+set +e
+archive_old_backups() {
+  local all old item target
+  all="$(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -name '20*' | sort -r)"
+  old="$(printf '%s\n' "$all" | sed '/^$/d' | tail -n +"$((KEEP_LOCAL + 1))")"
+  [[ -n "$old" ]] || { echo "旧备份归档：本机更新前备份不超过 ${KEEP_LOCAL} 份，无需归档。"; return 0; }
+  if [[ -z "$ARCHIVE_DIR" ]]; then
+    echo "旧备份归档：已关闭；本机保留全部备份：$(printf '%s\n' "$all" | tr '\n' ' ')"; return 0
+  fi
+  local vol
+  vol="$(python3 -c 'import sys;p=sys.argv[1].split("/");print("/".join(p[:3]) if len(p)>2 and p[1]=="Volumes" else "")' "$ARCHIVE_DIR")"
+  if [[ -n "$vol" && ! -d "$vol" ]]; then
+    echo "旧备份归档：外置硬盘未挂载（$vol）；本机保留 $(printf '%s\n' "$old" | wc -l | tr -d ' ') 份旧备份，下次安装或手动再归档。"; return 0
+  fi
+  mkdir -p "$ARCHIVE_DIR" || { echo "旧备份归档：无法创建 $ARCHIVE_DIR；本机保留旧备份。" >&2; return 0; }
+  while IFS= read -r item; do
+    [[ -n "$item" ]] || continue
+    target="$ARCHIVE_DIR/$(basename "$item")"
+    if [[ -e "$target" ]]; then
+      echo "旧备份归档：目标已存在，跳过（本机保留）：$target" >&2; continue
+    fi
+    echo "旧备份归档：$item -> $target"
+    if ! ditto "$item" "$target"; then
+      echo "旧备份归档：复制失败，本机保留：$item" >&2; rm -rf "$target"; continue
+    fi
+    if python3 "$ROOT/scripts/personal/verify-backup.py" --preset proma-backup "$item" "$target" >/dev/null 2>&1; then
+      rm -rf "$item" && echo "旧备份归档：校验通过，已删除本机副本：$(basename "$item")"
+    else
+      echo "旧备份归档：校验未通过，本机与归档副本均保留，请人工检查：$item / $target" >&2
+    fi
+  done <<< "$old"
+}
+archive_old_backups
