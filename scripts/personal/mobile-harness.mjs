@@ -858,6 +858,45 @@ async function runPush(harness, options, result) {
   if (!result.pushDelivery.received) throw new Error(`No Web Push notification received within 90s: ${JSON.stringify(result.pushDelivery)}`)
 }
 
+async function runMobilePolishChecks(harness, options, result) {
+  const refresh = await findElement(harness.client, '刷新页面', '[data-web-remote-refresh]')
+  const beforeReload = await harness.client.evaluate('performance.timeOrigin')
+  await touchAt(harness.client, refresh.x, refresh.y)
+  await waitUntil(harness.client, `performance.timeOrigin !== ${beforeReload}`, 15_000)
+  await waitUntil(harness.client, `document.querySelector('[data-web-remote-refresh]') !== null && document.body.innerText.includes('Agent')`, 30_000)
+  result.steps.push({ name: 'refresh-button-single-tap', ok: true, touchCount: 1 })
+
+  const currentWorkspaceId = await harness.client.evaluate('window.electronAPI.getSettings().then((settings)=>settings?.agentWorkspaceId)')
+  const workspaces = await harness.invokeApi('listAgentWorkspaces')
+  const otherWorkspace = Array.isArray(workspaces) ? workspaces.find((item) => item?.id && item.id !== currentWorkspaceId) : null
+  if (otherWorkspace) {
+    await harness.openDrawer()
+    const target = await findElement(harness.client, otherWorkspace.name, '[data-web-remote-sidebar="left"] *')
+    await touchAt(harness.client, target.x, target.y)
+    const selected = await waitUntil(harness.client, `window.electronAPI.getSettings().then((settings)=>settings?.agentWorkspaceId===${quoteJs(otherWorkspace.id)})`, 10_000)
+    result.steps.push({ name: 'workspace-switch-single-tap', ok: Boolean(selected), touchCount: 1, workspace: otherWorkspace.name })
+    await harness.openDrawer()
+    const restore = await findElement(harness.client, workspaces.find((item) => item?.id === currentWorkspaceId)?.name, '[data-web-remote-sidebar="left"] *')
+    await touchAt(harness.client, restore.x, restore.y)
+    await waitUntil(harness.client, `window.electronAPI.getSettings().then((settings)=>settings?.agentWorkspaceId===${quoteJs(currentWorkspaceId)})`, 10_000)
+  } else result.steps.push({ name: 'workspace-switch-single-tap', ok: false, skipped: '没有可切换的第二个工作区' })
+
+  const sessions = await harness.invokeApi('listAgentSessions')
+  const currentId = await harness.client.evaluate('document.querySelector("[data-session-switch-id].agent-session-item-active")?.getAttribute("data-session-switch-id")')
+  const targetSession = Array.isArray(sessions) ? sessions.find((item) => item?.id && item.id !== currentId && item.workspaceId === currentWorkspaceId && !item.archived) : null
+  if (targetSession) {
+    await harness.openDrawer()
+    const target = await harness.client.evaluate(`(() => { const n=document.querySelector('[data-session-switch-id=${quoteJs(targetSession.id)}]'); if(!n)return null; const r=n.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`)
+    if (!target) throw new Error(`目标会话在侧栏不可见：${targetSession.title}`)
+    await touchAt(harness.client, target.x, target.y)
+    const selected = await waitUntil(harness.client, `document.querySelector('[data-session-switch-id=${quoteJs(targetSession.id)}].agent-session-item-active') !== null`, 10_000)
+    result.steps.push({ name: 'open-session-single-tap', ok: Boolean(selected), touchCount: 1, session: targetSession.title })
+  } else result.steps.push({ name: 'open-session-single-tap', ok: false, skipped: '当前工作区没有可用于切换的第二个活跃会话' })
+  result.singleTapSuccess = result.steps.filter((step) => /single-tap/.test(step.name) && step.ok).length
+  result.singleTapChecks = result.steps.filter((step) => /single-tap/.test(step.name) && !step.skipped).length
+  result.singleTapSuccessRate = result.singleTapChecks ? `${result.singleTapSuccess}/${result.singleTapChecks}` : 'n/a'
+}
+
 async function runSmoke(harness, options, result) {
   result.steps.push({ name: 'load', ok: true, url: new URL('/app/', options.url).toString() })
   const title = `web-remote-harness-smoke-${Date.now()}`
@@ -916,6 +955,7 @@ async function main() {
     result.loadMetrics = { first: paired.firstAppLoad, second: secondAppLoad }
     result.sessionManifestBefore = await harness.readSessionManifest()
     if (options.suite === 'smoke') await runSmoke(harness, options, result)
+    else if (options.suite === 'mobile-polish') await runMobilePolishChecks(harness, options, result)
     else if (options.suite === 'push') await runPush(harness, options, result)
     else if (options.suite === 'recovery') await runRecovery(harness, options, result)
     else if (options.suite === 'interactions') await runInteractions(harness, options, result)

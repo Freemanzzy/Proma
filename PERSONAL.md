@@ -552,3 +552,11 @@ python3 scripts/personal/import-proma-backup.py \\
 - 根因：`650e4953`（移除内置浏览器）误删两段非浏览器代码：① `SidePanel.tsx` `handleWorkspaceTabChange` 末尾的 `if (split) updateSplit(...)` 与 `onTabChange(tab)`，导致点击 Tab 不切换；② `RightSidePanel.tsx` 中同步 Agent 可见终端（`onAgentTerminalOpen/Close`）到右侧工作区的 effect（与浏览器 effect 相邻被一并删除），导致 TerminalExecute 打开的终端不出现 Tab。其余被删代码逐项核对，均为浏览器专用。
 - 修复：两处恢复为 v0.19.58 原文（仅去掉浏览器行），`4e556323`。typecheck 通过；全量测试 557 pass / 5 fail / 1 error（基线内）。
 - 属应用代码；用户选择与“手机端刷新按钮”等一起打包，由 Claude Code 统一安装。
+
+## 2026-09-27: 手机端打磨（刷新按钮、单击、动效）
+
+- `apps/electron/src/main/lib/web-remote/full-ui/mobile-patch.ts`：手机顶栏增加 42px“刷新”按钮并调用 `location.reload()`；左抽屉与遮罩淡入淡出；右工作区采用 display 按需挂载、双 requestAnimationFrame 触发 transform/opacity 过渡、关闭后延迟隐藏并禁用点击；补充触控按下反馈、无 hover 设备操作可见、减少动效偏好，以及捕获阶段过滤触摸后合成的 hover/mouse 事件。未改上游 renderer 组件。
+- 根因代码证据：`LeftSidebar.tsx` 会话行由 `onMouseEnter` 同步更新 `rowHovered` 并触发 preview hover，DOM 行也含 `group` / `group-hover`；这与触摸后兼容 hover 改变 DOM、影响首击派发的假设吻合。实测单次 tap 前后成功率尚未取得：本机访问临时 Tailscale Serve `:8443` 的 TLS 连接失败（`SSL_ERROR_SYSCALL`），新加 harness 专项超时；它创建的临时配对设备已通过 `web-remote.sh revoke` 撤销，因此不能报告复现前后数值或声称该修复已实测通过。
+- `scripts/personal/mobile-harness.mjs` 新增 `mobile-polish` 专项，计划统计刷新、单次切换工作区与会话成功率；此次因上述连接问题未运行成功。android/iphone smoke 与 attachments 未完成；截图目录 `/tmp/web-remote-polish/` 目前仅含开发日志与 PID 文件。
+- 验证：typecheck 通过；`build:main`、`build:renderer`、`build:web-preload` 通过；全量 `bun test` 为 557 pass / 5 fail / 1 error，与记录基线一致。真机 Android/iPhone standalone、触控前后单次点击比例以及附件回归待后续验证。
+- 影响文档：同步更新 `docs/personal/web-remote.md`。
