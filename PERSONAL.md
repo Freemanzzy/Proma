@@ -591,3 +591,8 @@ python3 scripts/personal/import-proma-backup.py \\
 - 复核 Luna `67a7a219`：cdaefafd 已完成修复全部保留（刷新防循环、触屏 hover 拦截、面板重开清除 pointer-events、隐藏拖拽条、顶栏图标、右侧 Tab/终端同步）；observer 回调链内 DOM 写入均以状态标记判定（开关 `dataset.iconState`、标题 `dataset.label`、下拉 `dataset.signature`）。此前 Luna 版本曾因比较 SVG innerHTML 造成死循环、页面冻结（父会话定位后回退给 Luna 修复），harness 现有整体超时（默认 300s）与 3 秒 CDP 探活。
 - iOS 模拟器自检发现并补修（`0cb12d32`）：页面下拉在右侧面板关闭时选择不会打开面板；侧栏“项目记忆/日程”不打开右侧面板（未在转发名单）；定时任务列表标题仍截断（加 `data-web-remote-automation-title` 标记，手机端两行显示）。
 - 回归（去代理）：iphone panel-probe 文件/改动命中、smoke 7 步、mobile-polish 3 项、layout iphone/android 11 页均通过，JS exceptions 0，无残留 Chrome。等待用户在 iOS 模拟器体验确认后再合并打包。
+
+## 2026-09-27: 手机端布局适配——用户模拟器体验通过
+
+- 用户体验后补修：记忆详情可上下滚动（详情保持 flex 列布局）；手机端隐藏全部快捷键徽标（`ShortcutKeycaps` 加 `data-shortcut-keycaps` 标记，另隐藏会话快速切换提示）；记忆长路径改用 RTL 省略显示末尾（避免 React 重渲染覆盖），`c5e53baa`。左上角菜单按钮改为开/关切换，图标随侧栏状态变化（状态标记，无 observer 写循环），`897a2b41`。
+- 用户在 iOS 模拟器体验确认（22:29）。合并前核对 cdaefafd 修复全部保留；全量 557 pass / 5 fail / 1 error（基线内）；harness smoke、mobile-polish、panel-probe、layout 通过。
