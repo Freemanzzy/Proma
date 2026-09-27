@@ -18,6 +18,7 @@ export function renderWebRemoteMobilePatch(): string {
   [data-web-remote-panel="right"][data-web-remote-panel-open="true"] { opacity:1; transform:translateX(0); pointer-events:auto; visibility:visible; }
   [data-web-remote-panel="right"] > * { width:100%!important; max-width:none!important; min-width:0!important; }
   [data-web-remote-panel="right"] > [aria-hidden="true"] { display:none!important; }
+  [data-web-remote-panel="right"] [class*="cursor-col-resize"], [data-web-remote-panel="right"] [class*="cursor-row-resize"] { display:none!important; pointer-events:none!important; }
   body[data-web-remote-right-open="true"] [data-web-remote-panel="right"] [class*="opacity-0"] { opacity:1!important; pointer-events:auto!important; }
   [data-web-remote-panel="right"] [role="tablist"], [data-web-remote-panel="right"] [class*="overflow-x-auto"] { overflow-x:auto!important; white-space:nowrap; scrollbar-width:none; }
   [data-web-remote-panel="right"] button, [data-web-remote-panel="right"] [role="button"] { min-height:42px; }
@@ -65,7 +66,7 @@ export function renderWebRemoteMobilePatch(): string {
     var open=body.dataset.webRemoteRightOpen==='true';
     if(open){
       window.clearTimeout(rightPanelTimer); panel.dataset.webRemotePanelRendered='true';
-      panel.style.display='flex'; panel.style.visibility='visible';
+      panel.style.display='flex'; panel.style.visibility='visible'; panel.style.pointerEvents='';
       window.requestAnimationFrame(function(){window.requestAnimationFrame(function(){panel.dataset.webRemotePanelOpen='true'})});
     } else if(panel.dataset.webRemotePanelRendered==='true'){
       delete panel.dataset.webRemotePanelOpen; panel.style.pointerEvents='none';
