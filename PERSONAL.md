@@ -607,3 +607,8 @@ python3 scripts/personal/import-proma-backup.py \\
 - 与切换前基线：会话 868 → 884；启用定时任务 20；渠道 9 → 8（已停用的 `omniroute` 于 09-27 02:18 后被删除，非安装所致，待用户确认是否有意）。
 - 新问题：右侧“文件/改动”Tab 恢复后读取 `~/Documents` 下项目，macOS 反复询问文稿访问权限；根因是 ad-hoc 签名每次构建变化，TCC 与 Keychain 授权不能跨版本保留。用户决定创建固定本机代码签名证书（`Proma Personal Code Signing`）长期解决，打包脚本改造交由 Proma（见交接结果待办）。
 - 收尾：关闭遗留的 Tailscale Serve 8443 临时转发。
+
+## 2026-09-27: 固定签名证书就绪；omniroute 确认
+
+- 用户在登录钥匙串创建自签名代码签名证书 `Proma Personal Code Signing`（SHA-1 `D993D52C4C13601727F0B22A08133068A6F42589`，有效期至 2036-09-24，EKU = Code Signing，未设“始终信任”），`.p12` 备份在外置硬盘 `proma 自签证书/证书.p12`（密码由用户保管）。Claude Code 试签临时二进制：签名与 `codesign --verify --strict` 通过，designated requirement 为 `certificate leaf = H"d993d52c…"`，跨构建稳定，可让 TCC 文稿访问与 Keychain 授权在更新后保留。打包脚本改用该身份由 Proma 实施（见交接 `install-result-2026-09-27-2.md`）。
+- 更正上一条“待确认”：已停用渠道 `omniroute` 为用户本人删除。
