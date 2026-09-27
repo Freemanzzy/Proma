@@ -4,11 +4,13 @@
 
 ## 1. 先读这些（每次开始工作前）
 
+0. `docs/personal/maintenance.md` — 与 Proma 共同维护的分工、交接单与**硬性规则**（双方共用，必读）。
 1. `PERSONAL.md` — 唯一事实来源：基线版本、与上游的差异清单、同步规则、同步记录、变更记录（末尾最新）。
 2. `docs/personal/fallback-runbook.md` — 故障诊断、回滚应用、恢复数据、从源码重建。
 3. `docs/personal/switch-runbook.md` — 从官方版切换到个人版的逐步执行手册（切换时的主依据）。
 4. `docs/personal/web-remote.md` — 手机访问功能与排错（涉及手机问题时）。
-5. 最近的周检报告（只是生成时刻的快照；同步完成后以 PERSONAL.md 为准）：`~/.proma/agent-workspaces/default/workspace-files/.context/proma-personal/upstream-watch/`（`report-*.md`、`pre-upgrade-assessment-*.md`）。
+5. 交接单目录 `~/.proma/agent-workspaces/default/workspace-files/.context/proma-personal/handoff/`：最新的 `install-request-*.md` 与 `install-result-*.md`。
+6. 最近的周检报告（只是生成时刻的快照；同步完成后以 PERSONAL.md 为准）：`~/.proma/agent-workspaces/default/workspace-files/.context/proma-personal/upstream-watch/`（`report-*.md`、`pre-upgrade-assessment-*.md`）。
 
 ## 2. 关键位置
 
@@ -27,28 +29,23 @@
 
 ## 3. 你的职责
 
-> 自 2026-09-26 起，切换（`docs/personal/switch-runbook.md`）及之后的全部维护由你负责；原 Proma 中控会话不再修改本仓库。
+> 自 2026-09-27 起与 Proma 共同维护（见 `docs/personal/maintenance.md`）：日常的周检评估、同步、测试、打包、文档由 Proma 完成；你只在 Proma 必须退出或无法工作时接手。
 
-1. **官方更新同步**（收到周检报告或用户要求时）：评估 → 用户确认 → 在 `sync/YYYY-MM-DD` 分支合并官方正式 tag → 验证 → 用户确认 → 合并 `personal` 并推送 → 打包 → 安装（安装脚本自动备份与回滚）→ 记录。
+1. **安装**：收到 Proma 的安装申请（或用户要求）后，按 `maintenance.md` §3 复核 → 用户退出 Proma 并同意 → `install-update.sh` → 本机实测与安装版手机验收（§6 第 7 项）→ 写安装结果并在 `PERSONAL.md` 记录、推送。
 2. **故障回滚**：按 `docs/personal/fallback-runbook.md` 诊断与处理。
-3. **突发问题**：应用打不开、数据异常、手机访问失效、渠道或登录失效、定时任务或飞书/微信桥异常等。先诊断、说明、再处理。
+3. **突发问题**：应用打不开、数据异常、Proma 无法自行处理的手机访问、渠道或登录、定时任务、飞书/微信桥异常等。先诊断、说明、再处理。
+4. **用户直接要求**：用户要求时也可承担同步、改代码等日常工作，按单写者规则先确认 Proma 未在改动仓库。
 
 ## 4. 硬性规则
 
-- **数据**：绝不删除、覆盖 `~/.proma` 或任何备份；需要替换时先 `mv` 改名保留。任何恢复数据的操作先向用户说明影响并取得同意。
-- **版本**：`apps/electron/package.json` 的 `version` 必须等于所跟随的官方 tag，不得自行递增。只同步官方正式 tag，不追 `upstream/main` 零散提交。个人版版本必须 ≥ 已安装数据所对应的版本，否则可能读不了数据。
-- **官方安装包**：不要下载或安装官方 Proma（同名同 ID，会覆盖个人版）。个人版必须保持官方自动更新关闭。
-- **Git**：不 `push --force`，不 `reset --hard` 已推送分支；一件事一个分支，`--no-ff` 合并；每个提交信息末尾唯一一行 `Made-with: Proma`，不加 Co-Authored-By；提交邮箱用仓库已配置的 noreply。
-- **公开仓库**：不提交密钥、令牌、`/Users/<用户名>` 绝对路径、IP、Tailscale 主机名与设备名、邮箱；推送前扫描 diff。
-- **进程**：禁止 `pkill` / `killall`；只按 PID 结束进程，且先征得用户同意。例外说明：切换时可按 PID 结束无响应的官方版进程与开发实例进程（仍需同意）。
-- **输出**：不打印密钥与 API Key；读取配置只取需要的字段（如 `version`）。
-- **网络**：git 用 `GIT_TERMINAL_PROMPT=0 perl -e 'alarm 120; exec @ARGV' git -c http.proxy=http://127.0.0.1:7897 ...`；其他下载设 `HTTPS_PROXY=http://127.0.0.1:7897`；bun 在 `~/.bun/bin`（先 `export PATH="$HOME/.bun/bin:$PATH"`）；macOS 无 `timeout`，用 `perl -e 'alarm N; exec @ARGV'`。
+见 `docs/personal/maintenance.md` §4（与 Proma 共用，唯一来源）。开工前必须读过。
 
 ## 5. 分工：主会话与执行子代理
 
 - **主会话**负责诊断、决策、与用户确认、最终验收；**子代理（Sonnet 5）**负责执行命令与改代码。
 - 子代理的报告不能直接采信：主会话必须亲自复跑关键验证——测试数量对比、构建、IPC 分级覆盖率、渠道清单前后对比、备份完整性校验、应用能启动。
-- 给子代理的任务说明必须包含本文件第 4 节的硬性规则。
+- 给子代理的任务说明必须包含 `maintenance.md` §4 的硬性规则。
+- Proma 的安装申请与子代理报告同等对待：不直接采信，按 `maintenance.md` §3 亲自复核关键项后才安装。
 
 ## 6. 同步后的验证清单
 
@@ -64,11 +61,7 @@
 
 ## 7. 文档规则（SSOT）
 
-- 每类事实只有一个权威位置：基线、与上游差异、同步与变更记录 → `PERSONAL.md`；职责与硬性规则 → 本文件；操作步骤 → `docs/personal/*-runbook.md`；手机访问 → `docs/personal/web-remote.md`。其他文档引用，不复制。
-- 变更记录只追加（`## YYYY-MM-DD: ...`），不改写历史；发现旧记录有误，用新记录更正并写明更正了什么。
-- 改动影响权威内容（基线、差异清单、规则、步骤、路径）时，同一提交内同步更新对应文档，并在变更记录中写明改了哪些文档。
-- 验证、审查、故障处理的结果直接写入变更记录，不需要询问：方法、实测证据（不是推断）、通过项、缺陷项、待办。
-- 周检报告、日志、对话都是快照；与 SSOT 冲突时以 SSOT 为准，并修正过时的一方。
+见 `docs/personal/maintenance.md` §5（与 Proma 共用）。
 
 ## 8. 汇报
 
