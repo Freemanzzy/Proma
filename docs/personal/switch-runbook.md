@@ -28,7 +28,7 @@ bash scripts/personal/package-personal.sh 2>&1 | tee /tmp/proma-package-$(date +
 ```
 - 耗时较长，放后台并监控。
 - 必须看到：测试失败/错误数不超过 PERSONAL.md 基线（当前 5 fail / 1 error）；`APP_UPDATE_YML=absent`；产物 `apps/electron/out/mac-arm64/Proma.app`。
-- 复核：`cat apps/electron/out/mac-arm64/Proma.app/Contents/Resources/personal-build.json`（`personal: true`、`version` 与官方一致、`commit` = 当前 HEAD）；`codesign -dv` 显示 `Signature=adhoc`。
+- 复核：`cat apps/electron/out/mac-arm64/Proma.app/Contents/Resources/personal-build.json`（`personal: true`、`version` 与官方一致、`commit` = 当前 HEAD）；`codesign -dv` 显示 `Authority=Proma Personal Code Signing`（2026-09-27 起；切换当时为 adhoc）。
 
 ## 2. 退出官方版与开发实例（用户操作）
 

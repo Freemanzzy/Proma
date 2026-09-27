@@ -147,7 +147,7 @@ sqlite3 ~/.proma/planning.db "PRAGMA integrity_check;"
 
 ## 5. 局部问题（不回退整个应用）
 
-- **渠道密钥读不出 / Keychain 被拒绝**：不要在应用里保存该渠道（会覆盖原凭据）；退出应用，重新打开并在 Keychain 弹窗点“始终允许”。每次安装新构建（ad-hoc 签名变化）都会再次弹出。
+- **渠道密钥读不出 / Keychain 被拒绝**：不要在应用里保存该渠道（会覆盖原凭据）；退出应用，重新打开并在 Keychain 弹窗点“始终允许”。2026-09-27 起个人版用固定证书 `Proma Personal Code Signing` 签名，授权可跨版本保留；若再次频繁弹出，检查包是否被 ad-hoc 签名或证书是否被删除/更换。
 - **定时任务异常**：先看应用内该任务的运行记录与错误；依赖网页的任务个人版需使用 ego-browser（无内置浏览器）；不要批量启停，逐个经用户确认。
 - **飞书 / 微信桥断开**：在设置中查看连接状态与错误；凭据失效（如 `app_id or app_secret is invalid`）需用户在应用内重新填写。
 - **渠道登录过期（ChatGPT / xAI 等 OAuth）**：在设置中重新登录，不需要回退。
@@ -171,8 +171,8 @@ export PATH="$HOME/.bun/bin:$PATH"
 bun install
 bun run typecheck
 bun test                                     # 对照 PERSONAL.md 记录的基线失败数，不得新增
-# 先在仓库目录打包（macOS arm64 目录包；使用 ad-hoc 签名，不需要 Apple Developer 证书）：
-# ad-hoc 不是开发者身份签名，也不包含公证；分发到其他机器时 macOS 可能要求用户在系统设置中手动允许打开。
+# 先在仓库目录打包（macOS arm64 目录包；用本机自签名证书 "Proma Personal Code Signing" 签名，不需要 Apple Developer 证书）：
+# 该证书只存在于本机登录钥匙串，不含公证；证书缺失时脚本报错退出（可临时设 PROMA_PERSONAL_SIGN_IDENTITY 指定其他身份）。
 bash scripts/personal/package-personal.sh
 # 安装前核对新包的 personal-build.json；安装脚本会自动备份数据并校验：
 bash scripts/personal/install-update.sh "apps/electron/out/mac-arm64/Proma.app"

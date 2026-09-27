@@ -46,7 +46,7 @@
 
 **安装结果** `install-result-YYYY-MM-DD[-N].md`（Claude Code 写）：结论（成功/回滚/未执行）、复核项结果、安装脚本退出码、快照对比、安装版手机验收结果、遗留事项；同时在 `PERSONAL.md` 末尾追加记录并推送。
 
-Claude Code 接手安装时只做必要复核：包内 marker commit 等于 `personal` HEAD 且已推送；`codesign` 为 adhoc 且校验通过；包内无 `app-update.yml`；打包日志测试数不超过基线；申请中列出的“需重点验证”项在包内可见（如 asar 内代码、`Contents/Resources` 文件）。任一不符则不安装，写安装结果说明原因。
+Claude Code 接手安装时只做必要复核：包内 marker commit 等于 `personal` HEAD 且已推送；`codesign --verify --deep --strict` 通过，且签名身份为本机固定证书 `Proma Personal Code Signing`（`codesign -dv` 显示 `Authority=Proma Personal Code Signing`，`codesign -d -r-` 的 designated requirement 含 `certificate leaf`；不得为 adhoc）；包内无 `app-update.yml`；打包日志测试数不超过基线；申请中列出的“需重点验证”项在包内可见（如 asar 内代码、`Contents/Resources` 文件）。任一不符则不安装，写安装结果说明原因。
 
 ## 4. 硬性规则（双方共用）
 

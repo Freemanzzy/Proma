@@ -612,3 +612,10 @@ python3 scripts/personal/import-proma-backup.py \\
 
 - 用户在登录钥匙串创建自签名代码签名证书 `Proma Personal Code Signing`（SHA-1 `D993D52C4C13601727F0B22A08133068A6F42589`，有效期至 2036-09-24，EKU = Code Signing，未设“始终信任”），`.p12` 备份在外置硬盘 `proma 自签证书/证书.p12`（密码由用户保管）。Claude Code 试签临时二进制：签名与 `codesign --verify --strict` 通过，designated requirement 为 `certificate leaf = H"d993d52c…"`，跨构建稳定，可让 TCC 文稿访问与 Keychain 授权在更新后保留。打包脚本改用该身份由 Proma 实施（见交接 `install-result-2026-09-27-2.md`）。
 - 更正上一条“待确认”：已停用渠道 `omniroute` 为用户本人删除。
+
+## 2026-09-27: 个人版改用固定代码签名身份
+
+- 背景（install-result-2026-09-27-2 待办 1）：ad-hoc 签名每次构建都变化，macOS TCC（“想访问文稿文件夹”）与 Keychain 授权无法跨版本保留。用户在登录钥匙串创建自签名代码签名证书 “Proma Personal Code Signing”（10 年）。
+- `scripts/personal/package-personal.sh`：签名身份默认 `Proma Personal Code Signing`，可用 `PROMA_PERSONAL_SIGN_IDENTITY` 覆盖；构建前用 `security find-identity -p codesigning`（不加 `-v`，自签名证书显示为未受信任但可用于签名）检查，找不到即报错退出，不退回 ad-hoc；沿用 `codesign --force --deep`，签名后 `--verify --deep --strict`，并校验非 adhoc、designated requirement 含 `certificate leaf`；输出 designated requirement。
+- 文档：`docs/personal/maintenance.md` §3 复核项、`CLAUDE.md` §6 第 4 项、`fallback-runbook.md`（Keychain 说明与打包注释）、`switch-runbook.md` 复核项同步。首次以新身份安装后 TCC/Keychain 会再询问一次，之后跨版本保留。
+- 待办 2（验证后关闭 8443）已记入 Proma 工作说明。
