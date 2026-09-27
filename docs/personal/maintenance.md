@@ -51,6 +51,7 @@ Claude Code 接手安装时只做必要复核：包内 marker commit 等于 `per
 ## 4. 硬性规则（双方共用）
 
 - **数据**：绝不删除、覆盖 `~/.proma` 或任何备份；需要替换时先 `mv` 改名保留。任何恢复数据、写入 `~/.proma`（交接单目录除外）的操作先向用户说明影响并取得同意。
+  - 唯一例外（用户 2026-09-27 同意）：`install-update.sh` 在安装成功后，可将本机较早的更新前备份（`~/.proma-switch-backups/20*`，保留最新 `--keep-local` 份）用 `ditto` 转存到外置硬盘 `proma 备份/switch-backups/`，经 `verify-backup.py --preset proma-backup` 逐文件校验通过后删除本机副本；未挂载、目标已存在、复制或校验失败时一律保留本机副本。其他任何删除备份的操作仍须用户逐次同意。
 - **版本**：`apps/electron/package.json` 的 `version` 必须等于所跟随的官方 tag，不得自行递增。只同步官方正式 tag，不追 `upstream/main` 零散提交。
 - **官方安装包**：不要下载或安装官方 Proma（同名同 ID，会覆盖个人版）。个人版必须保持官方自动更新关闭。
 - **Git**：不 `push --force`，不 `reset --hard` 已推送分支；一件事一个分支，`--no-ff` 合并；每个提交信息末尾唯一一行 `Made-with: Proma`，不加 Co-Authored-By；提交邮箱用仓库已配置的 noreply。
