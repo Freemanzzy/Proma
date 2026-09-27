@@ -92,6 +92,7 @@ export function renderWebRemoteMobilePatch(): string {
   img[alt="用户头像"] { display:none!important; }
 }
 @media (max-width: 767px) { [data-web-remote-mobile-menu], [data-web-remote-panel-toggle], [data-web-remote-refresh], [data-web-remote-notification-entry] { display:inline-flex!important; align-items:center; justify-content:center; width:40px!important; min-width:40px!important; height:40px!important; min-height:40px!important; padding:0!important; border-radius:12px!important; font-size:0!important; line-height:0!important; } [data-web-remote-mobile-topbar] svg { display:block; flex:none; } }
+@media (max-width: 767px) { [data-web-remote-automation-title="true"] { flex-direction:column!important; align-items:flex-start!important; gap:2px!important; } [data-web-remote-automation-title="true"] > :first-child { white-space:normal!important; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; } [data-web-remote-automation-title="true"] > :last-child { max-width:100%; } }
 @media (prefers-reduced-motion: reduce) { [data-web-remote-sidebar="left"], [data-web-remote-mobile-overlay], [data-web-remote-panel="right"], [data-web-remote-mobile-topbar] button, [data-web-remote-sidebar="left"] button, [data-web-remote-panel="right"] button { transition:none!important; } }
 @media (min-width: 768px) { [data-web-remote-mobile-menu], [data-web-remote-mobile-overlay], [data-web-remote-panel-toggle], [data-web-remote-refresh] { display:none!important; } }
 </style>
@@ -206,7 +207,7 @@ export function renderWebRemoteMobilePatch(): string {
       if (title.dataset.label!==nextTitle) { title.dataset.label=nextTitle; title.replaceChildren(document.createTextNode(nextTitle)); title.insertAdjacentHTML('beforeend',ICONS.chevron); }
       var tabButtons=Array.from(document.querySelectorAll('[data-web-remote-panel="right"] [role="tablist"][aria-label="右侧工作区"] [role="tab"]'));
       var menu=document.querySelector('[data-web-remote-mobile-tab-menu]');
-      if(menu){var signature=tabButtons.map(function(tab){return (tab.innerText||'').trim()+':'+tab.getAttribute('aria-selected')+':'+!!tab.parentElement?.querySelector('button[aria-label*="关闭"]')}).join('|');if(menu.dataset.signature!==signature){menu.dataset.signature=signature;menu.replaceChildren();tabButtons.forEach(function(tab){var row=document.createElement('div');row.style.display='flex';var choose=document.createElement('button');choose.type='button';choose.setAttribute('role','menuitem');choose.dataset.active=String(tab.getAttribute('aria-selected')==='true');choose.textContent=(tab.innerText||'').trim();choose.addEventListener('click',function(){tab.click();menu.hidden=true;title.setAttribute('aria-expanded','false')});row.appendChild(choose);var close=tab.parentElement?.querySelector('button[aria-label*="关闭"]');if(close){var closeButton=document.createElement('button');closeButton.type='button';closeButton.setAttribute('aria-label','关闭 '+choose.textContent);closeButton.textContent='×';closeButton.style.width='44px';closeButton.addEventListener('click',function(event){event.stopPropagation();close.click();});row.appendChild(closeButton)}menu.appendChild(row)});}}
+      if(menu){var signature=tabButtons.map(function(tab){return (tab.innerText||'').trim()+':'+tab.getAttribute('aria-selected')+':'+!!tab.parentElement?.querySelector('button[aria-label*="关闭"]')}).join('|');if(menu.dataset.signature!==signature){menu.dataset.signature=signature;menu.replaceChildren();tabButtons.forEach(function(tab){var row=document.createElement('div');row.style.display='flex';var choose=document.createElement('button');choose.type='button';choose.setAttribute('role','menuitem');choose.dataset.active=String(tab.getAttribute('aria-selected')==='true');choose.textContent=(tab.innerText||'').trim();choose.addEventListener('click',function(){tab.click();menu.hidden=true;body.dataset.webRemoteRightOpen='true';title.setAttribute('aria-expanded','false')});row.appendChild(choose);var close=tab.parentElement?.querySelector('button[aria-label*="关闭"]');if(close){var closeButton=document.createElement('button');closeButton.type='button';closeButton.setAttribute('aria-label','关闭 '+choose.textContent);closeButton.textContent='×';closeButton.style.width='44px';closeButton.addEventListener('click',function(event){event.stopPropagation();close.click();});row.appendChild(closeButton)}menu.appendChild(row)});}}
       if(!title.__menuBound){title.__menuBound=true;title.addEventListener('click',function(){var current=document.querySelector('[data-web-remote-mobile-tab-menu]');if(!current){current=document.createElement('div');current.dataset.webRemoteMobileTabMenu='true';current.setAttribute('role','menu');current.hidden=true;document.body.appendChild(current)}current.hidden=!current.hidden;title.setAttribute('aria-expanded',String(!current.hidden));ensure()});}
     }
     syncRightPanel();
@@ -230,7 +231,7 @@ export function renderWebRemoteMobilePatch(): string {
     if (!(target instanceof Element)) return;
     if (window.__PROMA_SKIP_NEXT_CLICK && target.closest('button')) { window.__PROMA_SKIP_NEXT_CLICK=false; event.stopPropagation(); return; }
     if (target.closest('[data-web-remote-sidebar="left"]')) { delete body.dataset.webRemoteSidebarOpen; }
-    var rightPanelTrigger=target.closest('button[aria-label="Todo"],button[aria-label="定时任务"],button[aria-label="MCP/Skills"]');
+    var rightPanelTrigger=target.closest('button[aria-label="Todo"],button[aria-label="定时任务"],button[aria-label="MCP/Skills"],button[aria-label="项目记忆"],button[aria-label="日程"]');
     if (rightPanelTrigger) { window.setTimeout(function(){body.dataset.webRemoteRightOpen='true'}, 0); }
     if (target.closest('button[aria-label="打开设置"]')) { window.setTimeout(function(){delete body.dataset.webRemoteRightOpen}, 0); }
     if (target.closest('[data-web-remote-panel-toggle]')) return;
@@ -239,10 +240,10 @@ export function renderWebRemoteMobilePatch(): string {
   }, true);
   var forwardMobileControl=function(target){
     if (!(target instanceof Element)) return false;
-    var control=target.closest('button[aria-label="Todo"],button[aria-label="定时任务"],button[aria-label="MCP/Skills"],button[aria-label="打开设置"],button[aria-label*="中新建会话"]');
+    var control=target.closest('button[aria-label="Todo"],button[aria-label="定时任务"],button[aria-label="MCP/Skills"],button[aria-label="项目记忆"],button[aria-label="日程"],button[aria-label="打开设置"],button[aria-label*="中新建会话"]');
     if (!control) return false;
     delete body.dataset.webRemoteSidebarOpen; control.click(); window.__PROMA_SKIP_NEXT_CLICK=true; window.setTimeout(function(){window.__PROMA_SKIP_NEXT_CLICK=false},700);
-    if (control.matches('button[aria-label="Todo"],button[aria-label="定时任务"],button[aria-label="MCP/Skills"]')) window.setTimeout(function(){body.dataset.webRemoteRightOpen='true'},0);
+    if (control.matches('button[aria-label="Todo"],button[aria-label="定时任务"],button[aria-label="MCP/Skills"],button[aria-label="项目记忆"],button[aria-label="日程"]')) window.setTimeout(function(){body.dataset.webRemoteRightOpen='true'},0);
     return true;
   };
   document.addEventListener('touchstart',function(event){
