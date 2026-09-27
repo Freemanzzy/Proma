@@ -512,3 +512,8 @@ python3 scripts/personal/import-proma-backup.py \\
 - 新增 `docs/personal/maintenance.md`：分工表、单写者规则（安装申请写出后 Proma 停止改仓库，直到安装结果写回；Proma 无法启动时 Claude Code 直接接手）、交接单目录与模板（`install-request-*.md` / `install-result-*.md`，位于 `~/.proma/.../.context/proma-personal/handoff/`，不入库）、Claude Code 接手安装时的复核项、双方共用的硬性规则（由 `CLAUDE.md` §4 迁入，新增“Proma 不得运行 install-update.sh”）与 SSOT 规则（由 `CLAUDE.md` §7 迁入）。
 - `CLAUDE.md`：§1 必读新增 `maintenance.md` 与交接单目录；§3 职责改为安装、故障回滚、突发问题、用户直接要求；§4、§7 改为指向 `maintenance.md` 对应章节（规则只保留一份）；§5 新增“Proma 的安装申请按子代理报告对待、复核后才安装”。原“Proma 中控不再修改本仓库”的说法作废。
 - 待 Proma 侧完成（不在仓库）：Proma 的工作说明引用 `docs/personal/maintenance.md`，打包后按模板写安装申请。仓库根 `AGENTS.md` 为上游文件，未修改，以免同步冲突。
+
+## 2026-09-27: 清理本地分支；Nowledge 定时任务状态确认
+
+- 经用户同意，用 `git branch -d`（只删已合并分支）删除 31 个已合并进 `personal` 的本地分支；本地只保留 `main`（官方镜像）与 `personal`。这些分支从未推送，GitHub 不受影响；提交均在 `personal` 历史中（同步记录表中的 `sync/2026-09-26` 现仅作名称引用）。
+- 更正上一条“待确认”：定时任务“Nowledge Mem 每日追补（会话归档 + Working Memory）”09-27 01:54 的停用是用户本人操作，现已由用户重新启用，不影响个人版。
