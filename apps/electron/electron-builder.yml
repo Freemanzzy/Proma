@@ -44,6 +44,8 @@ files:
   # 直接使用原始资源；仅保留 Linux runtime 需要的 icon.png，避免重复打包。
   - "!dist/resources/**"
   - "dist/resources/icon.png"
+  # Main process and workspace-memory window resolve the macOS icon from dist/resources.
+  - "dist/resources/icon.icns"
   - package.json
   # Pi runtime 作为主进程 external 运行。打包前 sync:runtime-deps 会
   # 将 external 依赖闭包同步到 apps/electron/node_modules。

@@ -734,4 +734,9 @@
 - Keychain ACL 调研结论（未读取/修改任何钥匙串条目）：Apple TN2206 将 Keychain 授权描述为由应用代码签名 requirement/DR 跟踪；Apple TN3127 说明 ad-hoc 的 DR 与特定版本 cdhash 绑定，更新后不能可靠保持身份。Proma 现有签名报告中的 designated requirement 含固定 certificate leaf，而非单纯 cdhash；无 Team ID 本身并不能证明 Keychain 必然按 cdhash 绑定。故同证书升级后仍弹窗不能仅归因为“缺少 Team ID”，更可能涉及首次授权、访问的实际二进制/Helper 身份不同、条目 ACL 或 Keychain 项目的迁移/创建者身份，需在用户实际授权弹窗时再针对目标 item 的访问方做无密钥诊断。
 - 建议：首次授权可选择“始终允许”，通常意在保存该访问方对当前项目的授权，但不能保证为其他 Helper/签名 requirement 不同的访问者授权，也不能修复不允许变更 ACL 的旧条目；不要自动删除条目或放宽为允许所有应用。若仍重复弹窗，先识别发起访问的进程与其 `codesign -d -r-` requirement，再针对该进程/目标条目让用户手动处理；固定身份与包含证书约束的稳定 DR 应继续保留。
 - 资料：Apple [TN2206](https://developer.apple.com/library/archive/technotes/tn2206/_index.html)；Apple [TN3127](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)。
-- 验证：`bash -n scripts/personal/install-update.sh` 通过；未运行安装脚本、未触碰 Keychain、未停止或重启已安装 Proma。`shellcheck` 本机不可用；安装健康等待与回滚分支尚未在真实安装流程演练，最终验证仍需 Claude Code 在授权安装时执行。
+- 验证：`bash -n scripts/personal/install-update.sh`、typecheck、`build:main` 通过；静态断言确认 Web Remote 启动位于 Bridge 初始化之前，安装等待/主进程独立回滚分支文本有效。未运行安装脚本、未触碰 Keychain、未停止或重启已安装 Proma。`shellcheck` 本机不可用；安装健康等待与回滚分支尚未在真实安装流程演练，最终验证仍需 Claude Code 在授权安装时执行。
+
+## 2026-09-28: 随包包含主进程使用的 macOS ICNS
+
+- electron-builder 的 `files` 规则原先排除整个 `dist/resources/**`，只重新纳入 PNG；`index.ts:getIconPath()` 与 `workspace-memory-window.ts` 都从 `dist/resources` 查找 `icon.icns`，因此包内资源缺失并触发 `[WARN] App icon not found`。在排除规则后显式纳入 `dist/resources/icon.icns`，让 ASAR 路径与两处现有查找路径一致。
+- 验证：源码 `dist/resources/icon.icns` 存在（116,454 bytes）；最终包中的 ASAR 文件存在性及两处路径命中将在最终打包后核对。
