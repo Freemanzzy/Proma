@@ -1,6 +1,6 @@
 # 手机访问（Web Remote）使用说明
 
-> 个人版功能。经 Tailscale 私有网络，用手机操作 Mac 上正在运行的 Proma。代码位于 `apps/electron/src/main/lib/web-remote/`，变更记录见 [`PERSONAL.md`](../../PERSONAL.md)。
+> 个人版功能。经 Tailscale 私有网络，用手机操作 Mac 上正在运行的 Proma。代码位于 `apps/electron/src/main/lib/web-remote/`；手机适配 CSS/JS 源文件分别位于 `full-ui/mobile-patch/mobile-css.ts` 与 `mobile-js.ts`，由主进程 esbuild 内联至 `renderWebRemoteMobilePatch()` 输出。变更记录见 [`PERSONAL.md`](../../PERSONAL.md)。
 
 ## 1. 它是什么
 
@@ -93,4 +93,4 @@ tailscale serve --https=8443 off
 - `bash scripts/personal/mobile-preview.sh test [suites...]`：默认运行 iPhone 的 panel-probe/smoke/mobile-polish/layout 与 Android 的 smoke/attachments；每套单独去掉代理变量并受 420 秒外层 watchdog 保护，结束核查无残留 `proma-mobile-chrome`。
 - `bash scripts/personal/mobile-preview.sh status` 查看服务、模拟器与 harness 进程；`stop` 只按记录 PID 停止开发实例进程树，关闭 8443 并确认 Serve 路由状态。用户需要继续体验时，最后运行 `start` 与 `sim`，保持服务运行，不要执行 `stop`。
 
-harness 默认整体超时 300 秒（可用 `--timeout-ms` 覆盖），每次页面评估前以 3 秒 CDP 探活；每次运行后自动撤销测试配对设备、删除自建会话、关闭 Chrome 并移除临时 profile。`layout` 检查文件、改动、Todo、定时任务、MCP/Skills 与项目记忆列表/详情的横向溢出和元素可点性；`panel-probe` 检查页面下拉中的 Tab 可点性；`mobile-polish` 检查刷新和会话单击切换。左侧项目名是展开/折叠分组，不是 `agentWorkspaceId` 切换，勿以此字段判定工作区按钮点击。同步上游后必须运行；安装后另由用户在安装版上用两台手机验收（CLAUDE.md §6 第 7 项）。每周一的版本检查任务会报告上游新增、尚未分级的 IPC 通道。
+harness 默认整体超时 300 秒（可用 `--timeout-ms` 覆盖），每次页面评估前以 3 秒 CDP 探活；每次运行后自动撤销测试配对设备、删除自建会话、关闭 Chrome 并移除临时 profile。`full-ui/mobile-patch.test.ts` 使用 linkedom 执行注入脚本并多次触发 MutationObserver，验证刷新/面板/菜单/通知图标、标题和 Tab 下拉菜单的 DOM 写入趋于稳定。`layout` 检查文件、改动、Todo、定时任务、MCP/Skills 与项目记忆列表/详情的横向溢出和元素可点性；`panel-probe` 检查页面下拉中的 Tab 可点性；`mobile-polish` 检查刷新和会话单击切换。左侧项目名是展开/折叠分组，不是 `agentWorkspaceId` 切换，勿以此字段判定工作区按钮点击。同步上游后必须运行；安装后另由用户在安装版上用两台手机验收（CLAUDE.md §6 第 7 项）。每周一的版本检查任务会报告上游新增、尚未分级的 IPC 通道。

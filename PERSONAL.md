@@ -692,3 +692,12 @@ python3 scripts/personal/import-proma-backup.py \\
 
 - 首次模拟器成功配对后再次运行 `mobile-preview.sh sim` 时，Safari 已由现有 Cookie 直接进入应用；原脚本仍试图在根页面按配对表单定位控件。调整为仅在 AXe 点查询发现配对码输入框和“开始配对”按钮时输入新配对码；已配对时保留配对并直接校验 `/app/`，点位仍从 AXe `describe-ui` 返回的控件 frame 推导，不硬编码屏幕坐标。
 - 验证：脚本在已配对 iPhone 17 Pro 上重跑成功，截图 `/tmp/proma-mobile-preview-sim.png`，识别并保留原配对，/app 界面核验通过；`bash -n` 通过。
+
+## 2026-09-28: mobile-patch 源码拆分与 observer 写入收敛
+
+- 将 `full-ui/mobile-patch.ts` 的 CSS、注入 JS 抽到 `full-ui/mobile-patch/mobile-css.ts` 与 `mobile-js.ts`，`renderWebRemoteMobilePatch()` 对外 API 不变，由 esbuild 正常静态打包；CSS 完整内容与 `4954e7d1` 的原规则逐字节一致（16,491 bytes）。JS 与原脚本的唯一行为逻辑差别为 `setIfChanged` 的状态标记辅助：通知 on/off、侧栏/面板图标、键盘 inset、标题 label、下拉菜单 signature 只在值变化时执行 DOM 写入；其他 JS 行为保持一致。
+- 新增轻量 devDependency `linkedom@0.18.13` 与 `mobile-patch.test.ts`：真实加载拼接后的注入脚本到模拟 DOM，手动重复触发 100 轮 ensure/right-panel/menu MutationObserver；检查刷新按钮、面板图标、菜单图标、通知状态（含异步从 off→on）、标题与 Tab 下拉菜单。重复触发后写入计数不再增长。
+- 等价性与回归：CSS 规则内容 byte-for-byte 相同；JS diff 审查只涉及上述状态 setter 加 guard，无其他行为差异。typecheck、`build:main`、`build:renderer`、`build:web-preload` 通过（renderer 保留既有大 chunk 警告）；定向单测 1 pass / 0 fail / 8 assertions。A 脚本的 iPhone 17 Pro `/app/` 界面检查通过；iPhone 与 Android 的 layout 11/11、smoke 7/7、panel-probe 2/2、mobile-polish 刷新与会话单击 2/2 全部通过，JS exceptions 0；mobile-polish 工作区切换项按既有逻辑标记 skip（该点击是折叠/展开分组，不切换 workspace ID）。所有 harness 配对设备撤销、session/profile/Chrome 清理完成，无 Chrome 残留。
+- 全量 `bun test`：567 pass / 3 fail（570 tests）；3 个失败为既有 Electron `dialog` mock、Electron `shell` mock、planning-manager Electron binary 类型问题，统一由项 C 修复。仅新增 `linkedom` devDependency，未新增运行时依赖。
+- 保留核对：原 CSS、刷新按钮循环防护、触屏 `lastTouchAt` hover 拦截、面板开关/动效/重开 pointer-events、隐藏拖拽条、顶栏图标及状态标记、菜单、通知状态与 toast、标题下拉/模拟器入口隐藏等原逻辑均保留。
+- 文档：更新 `docs/personal/web-remote.md` 标出源文件路径与 observer 单测。
