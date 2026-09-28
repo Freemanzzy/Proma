@@ -9,10 +9,11 @@
  * no private hostname is embedded in this file.
  */
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { setTimeout as delay } from 'node:timers/promises'
 import WebSocket from 'ws'
 
@@ -186,6 +187,25 @@ async function waitUntil(client, expression, timeoutMs = 30_000, intervalMs = 25
 
 function quoteJs(value) { return JSON.stringify(value) }
 
+function websocketExtensions(headers) {
+  const entry = Object.entries(headers ?? {}).find(([key]) => key.toLowerCase() === 'sec-websocket-extensions')
+  return typeof entry?.[1] === 'string' ? entry[1] : ''
+}
+
+async function assertIpcCompressionHandshake(harness, options, result) {
+  const end = Date.now() + 15_000
+  let response
+  while (Date.now() < end) {
+    response = harness.websocketHandshakes.find((item) => item.url?.endsWith('/api/ipc') && /permessage-deflate/i.test(websocketExtensions(item.headers)))
+    if (response) break
+    await delay(100)
+  }
+  const extension = response ? websocketExtensions(response.headers) : ''
+  result.websocketCompression = { userAgent: options.userAgent, ipcHandshakeStatus: response?.status ?? null, extension: extension || null }
+  if (!response || !/permessage-deflate/i.test(extension)) throw new Error(`/api/ipc 未协商 permessage-deflate：${JSON.stringify(result.websocketCompression)}`)
+  result.websocketCompression.cdpFramePayload = 'Network.webSocketFrameReceived.payloadData 按解压后的 WebSocket 消息内容报告，无法从该字段测量线上的压缩字节。'
+}
+
 let lastHarnessStep = 'harness initialization'
 
 function sdkMessageRole(message) {
@@ -270,6 +290,20 @@ async function createHarness(options) {
   await client.command('Runtime.enable')
   await client.command('Page.enable')
   await client.command('Network.enable')
+  const websocketUrls = new Map()
+  const websocketHandshakes = []
+  const websocketFramesReceived = []
+  const websocketDataReceived = []
+  client.on('Network.webSocketCreated', (event) => { websocketUrls.set(event.requestId, event.url) })
+  client.on('Network.webSocketHandshakeResponseReceived', (event) => websocketHandshakes.push({ requestId: event.requestId, url: websocketUrls.get(event.requestId), status: event.response?.status, headers: event.response?.headers ?? {} }))
+  client.on('Network.webSocketFrameReceived', (event) => {
+    const url = websocketUrls.get(event.requestId)
+    websocketFramesReceived.push({ requestId: event.requestId, url, payloadBytes: Buffer.byteLength(event.response?.payloadData ?? '', 'utf8'), opcode: event.response?.opcode })
+  })
+  client.on('Network.dataReceived', (event) => {
+    const url = websocketUrls.get(event.requestId)
+    if (url) websocketDataReceived.push({ requestId: event.requestId, url, dataLength: Number(event.dataLength ?? 0), encodedDataLength: Number(event.encodedDataLength ?? 0) })
+  })
   let activeNavigation = null
   const loadMetrics = []
   client.on('Network.requestWillBeSent', (event) => {
@@ -537,7 +571,7 @@ async function createHarness(options) {
     activeChrome = null
     activeProfile = null
   }
-  return { client, chrome, profile, pair, navigate, installInteractionStreamAudit, loadMetrics, openDrawer, clickSidebarText, clickText, openSession, createHarnessSession, setPermissionMode, inputAndSend, waitText, readHistory, waitForUserSubmission, waitForAssistantReply, waitForRunning, waitForAbortedAssistant, resolveVisibleAskUserA, resolveVisiblePlanApproval, getInteractionStreamEvents, getActiveSessionId: () => activeSessionId, getCreatedSessionIds: () => new Set(createdSessionIds), invokeApi, invokeRaw, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, readSessionManifest, close }
+  return { client, chrome, profile, pair, navigate, installInteractionStreamAudit, loadMetrics, openDrawer, clickSidebarText, clickText, openSession, createHarnessSession, setPermissionMode, inputAndSend, waitText, readHistory, waitForUserSubmission, waitForAssistantReply, waitForRunning, waitForAbortedAssistant, resolveVisibleAskUserA, resolveVisiblePlanApproval, getInteractionStreamEvents, getActiveSessionId: () => activeSessionId, getCreatedSessionIds: () => new Set(createdSessionIds), invokeApi, invokeRaw, websocketUrls, websocketHandshakes, websocketFramesReceived, websocketDataReceived, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, readSessionManifest, close }
 }
 
 async function runDeadSocket(harness, options, result) {
@@ -997,6 +1031,134 @@ async function runMobilePolishChecks(harness, options, result) {
   result.singleTapSuccessRate = result.singleTapChecks ? `${result.singleTapSuccess}/${result.singleTapChecks}` : 'n/a'
 }
 
+function createSyntheticHeavyHistory(roundCount = 500) {
+  const lines = []
+  const visibleMarker = 'SYNTHETIC_HEAVY_HISTORY_VISIBLE_MARKER'
+  for (let index = 0; index < roundCount; index++) {
+    const callId = `synthetic-tool-${index}`
+    const payload = randomBytes(48 * 1024).toString('base64')
+    const userText = index === roundCount - 1 ? `${visibleMarker} round=${index}` : `SYNTHETIC_USER round=${index}`
+    const imageBlocks = index % 50 === 0 || index === roundCount - 1 ? [{ type: 'image', source: { media_type: 'image/png', data: randomBytes(16 * 1024).toString('base64') } }] : []
+    const messages = [
+      { type: 'user', uuid: `synthetic-user-${index}`, message: { role: 'user', content: [{ type: 'text', text: userText }, ...imageBlocks] }, parent_tool_use_id: null },
+      { type: 'assistant', uuid: `synthetic-assistant-call-${index}`, message: { role: 'assistant', content: [{ type: 'tool_use', id: callId, name: 'Read', input: { file_path: 'synthetic-heavy-session.txt' } }] }, parent_tool_use_id: null },
+      { type: 'user', uuid: `synthetic-tool-result-${index}`, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: callId, content: `SYNTHETIC_TOOL_RESULT_${index} ${payload}` }] }, parent_tool_use_id: null },
+      { type: 'assistant', uuid: `synthetic-assistant-final-${index}`, message: { role: 'assistant', content: [{ type: 'text', text: `SYNTHETIC_ASSISTANT_REPLY round=${index}` }] }, parent_tool_use_id: null },
+    ]
+    for (const message of messages) lines.push(JSON.stringify(message))
+  }
+  return { content: `${lines.join('\n')}\n`, visibleMarker }
+}
+
+async function waitForVisibleHistoryMarker(client, marker, timeoutMs) {
+  const end = Date.now() + timeoutMs
+  while (Date.now() < end) {
+    const visible = await client.evaluate(`(() => [...document.querySelectorAll('[data-message-id][data-message-role]')].some((node)=>(node.innerText||'').includes(${quoteJs(marker)})))()`)
+    if (visible) return true
+    await delay(150)
+  }
+  return false
+}
+
+async function runHeavySession(harness, options, result, onSyntheticFileCreated) {
+  const baselineMode = process.env.PROMA_WEB_REMOTE_HEAVY_SESSION_BASELINE === '1'
+  const title = `web-remote-heavy-session-${Date.now()}`
+  const awayTitle = `web-remote-heavy-away-${Date.now()}`
+  const heavy = await harness.createHarnessSession(title)
+  const messagesPath = join(homedir(), '.proma-dev', 'agent-sessions', `${heavy.id}.jsonl`)
+  if (!messagesPath.startsWith(join(homedir(), '.proma-dev', 'agent-sessions') + '/')) throw new Error('拒绝写入开发会话目录以外的文件')
+  const synthetic = createSyntheticHeavyHistory()
+  writeFileSync(messagesPath, synthetic.content, { encoding: 'utf8', flag: 'w' })
+  onSyntheticFileCreated(messagesPath, heavy.id)
+  const syntheticBytes = Buffer.byteLength(synthetic.content, 'utf8')
+  if (syntheticBytes < 30 * 1024 * 1024) throw new Error(`合成大会话不足 30 MiB：${syntheticBytes}`)
+  // Move away from the just-created empty snapshot, then reopen it after network throttling is active.
+  await harness.createHarnessSession(awayTitle)
+  await harness.client.command('Network.emulateNetworkConditions', { offline: false, latency: 300, downloadThroughput: 3 * 1024 * 1024 / 8, uploadThroughput: 1 * 1024 * 1024 / 8, connectionType: 'cellular3g' })
+  const firstFrameIndex = harness.websocketFramesReceived.length
+  const firstNetworkIndex = harness.websocketDataReceived.length
+  const exceptionStart = harness.exceptions.length
+  const startedAt = Date.now()
+  await harness.openDrawer()
+  const heavySessionPoint = await harness.client.evaluate(`(() => {const n=document.querySelector('[data-session-switch-id=${quoteJs(heavy.id)}]');if(!n)return null;n.scrollIntoView({block:'center'});const r=n.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`)
+  if (!heavySessionPoint) throw new Error(`新建的大会话未出现在侧栏：${heavy.id}`)
+  await touchAt(harness.client, heavySessionPoint.x, heavySessionPoint.y)
+  await waitUntil(harness.client, `document.querySelector('[data-session-switch-id=${quoteJs(heavy.id)}].agent-session-item-active') !== null`, 10_000)
+  const historyVisible = await waitForVisibleHistoryMarker(harness.client, synthetic.visibleMarker, baselineMode ? 40_000 : 20_000)
+  const firstHistoryMs = historyVisible ? Date.now() - startedAt : null
+  const timeoutObserved = harness.consoleErrors.slice().some((entry) => JSON.stringify(entry).includes('IPC 请求超时'))
+  const frameEvents = harness.websocketFramesReceived.slice(firstFrameIndex).filter((item) => item.url && new URL(item.url).pathname === '/api/ipc')
+  const networkEvents = harness.websocketDataReceived.slice(firstNetworkIndex).filter((item) => item.url && new URL(item.url).pathname === '/api/ipc')
+  const receivedPayloadBytes = frameEvents.reduce((total, item) => total + item.payloadBytes, 0)
+  const encodedNetworkBytes = networkEvents.reduce((total, item) => total + item.encodedDataLength, 0)
+  const exceptionsDuringTest = harness.exceptions.slice(exceptionStart)
+  result.heavySession = {
+    syntheticSessionId: heavy.id,
+    syntheticJsonlBytes: syntheticBytes,
+    baselineMode,
+    network: { latencyMs: 300, downloadBitsPerSecond: 3 * 1024 * 1024, uploadBitsPerSecond: 1 * 1024 * 1024 },
+    firstHistoryMs,
+    observedThroughMs: Date.now() - startedAt,
+    historyVisible,
+    timeoutObserved,
+    websocketFrameCount: frameEvents.length,
+    websocketPayloadBytes: receivedPayloadBytes,
+    maxDecodedFrameBytes: frameEvents.reduce((max, item) => Math.max(max, item.payloadBytes), 0),
+    cdpEncodedNetworkBytes: encodedNetworkBytes,
+    cdpDataReceivedEventCount: networkEvents.length,
+    exceptions: exceptionsDuringTest.length,
+  }
+  if (baselineMode) {
+    // The pre-fix comparison deliberately expects the unpaged response to miss the 20 s target or hit the 35 s client timeout.
+    if (historyVisible && firstHistoryMs !== null && firstHistoryMs < 20_000) throw new Error(`基线对照意外在 20 秒内加载完成：${firstHistoryMs} ms`)
+    return
+  }
+  if (!historyVisible || firstHistoryMs === null || firstHistoryMs >= 20_000) throw new Error(`大会话首屏历史未在 20 秒内出现：${JSON.stringify(result.heavySession)}`)
+  const hasEarlier = await harness.client.evaluate(`!!document.querySelector('[data-web-remote-load-earlier]:not([hidden])')`)
+  if (!hasEarlier) throw new Error('大会话历史顶部未出现“加载更早”按钮')
+  const visibleMessagesBefore = await harness.client.evaluate(`document.querySelectorAll('[data-message-id][data-message-role]').length`)
+  const earlierButton = await findElement(harness.client, '加载更早', '[data-web-remote-load-earlier]')
+  await touchAt(harness.client, earlierButton.x, earlierButton.y)
+  await waitUntil(harness.client, `document.querySelectorAll('[data-message-id][data-message-role]').length>${visibleMessagesBefore}`, 15_000)
+  result.heavySession.visibleMessagesBeforeLoadEarlier = visibleMessagesBefore
+  result.heavySession.visibleMessagesAfterLoadEarlier = await harness.client.evaluate(`document.querySelectorAll('[data-message-id][data-message-role]').length`)
+  const executionSummary = await harness.client.evaluate(`(() => {const node=[...document.querySelectorAll('button')].filter((item)=>(item.innerText||'').includes('执行过程：1 次工具调用')).at(-1);if(!node)return null;node.scrollIntoView({block:'center'});const r=node.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`)
+  if (!executionSummary) throw new Error('合成大会话中没有可展开的工具调用组')
+  await touchAt(harness.client, executionSummary.x, executionSummary.y)
+  await waitUntil(harness.client, `document.body.innerText.includes('synthetic-heavy-session.txt')`, 10_000)
+  const toolButton = await harness.client.evaluate(`(() => {const nodes=[...document.querySelectorAll('button')];const matches=nodes.filter((item)=>(item.innerText||'').includes('synthetic-heavy-session.txt'));const node=matches.at(-1)||nodes.filter((item)=>(item.innerText||'').includes('读取文件')).at(-1);if(!node)return {missing:true,buttons:nodes.map((item)=>(item.innerText||'').trim()).filter(Boolean).slice(-40),bodyIncludesFile:document.body.innerText.includes('synthetic-heavy-session.txt')};node.scrollIntoView({block:'center'});const r=node.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2,label:(node.innerText||'').trim()}})()`)
+  if (!toolButton || toolButton.missing) throw new Error(`无法定位 Read 工具结果按钮：${JSON.stringify(toolButton)}`)
+  result.heavySession.expandedToolLabel = toolButton.label
+  await touchAt(harness.client, toolButton.x, toolButton.y)
+  const expandAll = await harness.client.evaluate(`(() => {const node=[...document.querySelectorAll('button')].filter((item)=>(item.innerText||'').includes('展开全部')).at(-1);if(!node)return null;node.scrollIntoView({block:'center'});const r=node.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`)
+  if (expandAll) await touchAt(harness.client, expandAll.x, expandAll.y)
+  const copyProof = await harness.client.evaluate(`window.electronAPI.getAgentSessionSDKMessages(${quoteJs(heavy.id)}).then(messages=>{const all=Array.isArray(messages)?messages:[];const blocks=all.flatMap(message=>Array.isArray(message?.message?.content)?message.message.content:[]);const toolResult=blocks.find(block=>block?.type==='tool_result'&&typeof block.content==='string'&&block.content.includes('内容已截断，原文'));const image=blocks.find(block=>block?.type==='text'&&typeof block.text==='string'&&block.text.includes('图片已省略：image/png'));return {truncationCopy:!!toolResult,imageCopy:!!image,toolResultPreview:toolResult?.content?.slice(-100),imagePreview:image?.text}})`)
+  result.heavySession.transformedCopyProof = copyProof
+  const resultExpanded = await harness.client.evaluate(`document.body.innerText.includes('收起')`)
+  const truncationTextVisible = copyProof.truncationCopy && resultExpanded
+  if (!truncationTextVisible) {
+    result.heavySession.visibleTextAfterToolExpand = await harness.client.evaluate(`document.body.innerText.slice(-2200)`)
+    result.screenshots.push(await harness.screenshot('heavy-tool-result'))
+    throw new Error(`展开 Read 结果后未能证明截断文案已渲染：${JSON.stringify(copyProof)}`)
+  }
+  const imagePlaceholderVisible = copyProof.imageCopy && await harness.client.evaluate(`(document.body.innerText+'\\n'+document.body.textContent).includes('图片已省略：image/png')`)
+  if (!imagePlaceholderVisible) throw new Error(`大会话页面未显示图片占位文案：${JSON.stringify(copyProof)}`)
+  const imagePlaceholderPoint = await harness.client.evaluate(`(() => {const node=[...document.querySelectorAll('[data-message-id][data-message-role]')].find((item)=>(item.textContent||'').includes('图片已省略：image/png'));if(!node)return null;node.scrollIntoView({block:'center'});const r=node.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2,top:r.top,bottom:r.bottom}})()`)
+  if (!imagePlaceholderPoint) throw new Error('图片占位消息未出现在已渲染的对话 DOM 中')
+  await delay(300)
+  const imagePlaceholderInViewport = await harness.client.evaluate(`(() => {const node=[...document.querySelectorAll('[data-message-id][data-message-role]')].find((item)=>(item.textContent||'').includes('图片已省略：image/png'));if(!node)return false;const r=node.getBoundingClientRect();return r.bottom>0&&r.top<innerHeight})()`)
+  if (!imagePlaceholderInViewport) throw new Error(`图片占位消息未滚动到视口：${JSON.stringify(imagePlaceholderPoint)}`)
+  result.screenshots.push(await harness.screenshot('heavy-image-placeholder-visible'))
+  result.screenshots.push(await harness.screenshot('heavy-history-copy-visible'))
+  result.heavySession.truncationTextVisible = true
+  result.heavySession.imagePlaceholderVisible = true
+  result.screenshots.push(await harness.screenshot('heavy-truncation-visible'))
+  result.heavySession.exceptions = harness.exceptions.slice(exceptionStart).length
+  if (result.heavySession.exceptions !== 0) throw new Error(`大会话页面出现 JS exception：${JSON.stringify(exceptionsDuringTest)}`)
+  if (!frameEvents.some((item) => item.payloadBytes > 16 * 1024)) throw new Error('未捕获到大于 16 KB 的 WebSocket 接收帧')
+  result.heavySession.largeDecodedFrameObserved = true
+}
+
 async function runSmoke(harness, options, result) {
   result.steps.push({ name: 'load', ok: true, url: new URL('/app/', options.url).toString() })
   const title = `web-remote-harness-smoke-${Date.now()}`
@@ -1047,6 +1209,7 @@ async function main() {
   }
   let deviceId
   let timeoutTimer
+  let syntheticFileCleanupPath = null
   try {
     const timeoutDiagnostics = async () => {
       const evaluateSafely = (expression) => Promise.race([harness.client.evaluate(expression), delay(4000).then(() => { throw new Error('diagnostic timeout') })]).catch((error) => ({ error: String(error) }))
@@ -1061,12 +1224,14 @@ async function main() {
     const paired = await harness.pair()
     deviceId = paired.deviceId
     result.pairedDeviceId = deviceId
+    await assertIpcCompressionHandshake(harness, options, result)
     const secondAppLoad = await harness.navigate('/app/')
     await harness.installInteractionStreamAudit()
     result.loadMetrics = { first: paired.firstAppLoad, second: secondAppLoad }
     result.sessionManifestBefore = await harness.readSessionManifest()
     if (options.suite === 'smoke') await runSmoke(harness, options, result)
     else if (options.suite === 'mobile-polish') await runMobilePolishChecks(harness, options, result)
+    else if (options.suite === 'heavy-session') await runHeavySession(harness, options, result, (path) => { syntheticFileCleanupPath = path })
     else if (options.suite === 'panel-probe') await runPanelProbe(harness, options, result)
     else if (options.suite === 'layout') await runLayout(harness, options, result)
     else if (options.suite === 'push') await runPush(harness, options, result)
@@ -1154,6 +1319,10 @@ async function main() {
       harnessSessionCleanup.errors.push(String(error))
       result.harnessSessionCleanup = harnessSessionCleanup
       if (!result.error) result.error = `无法执行 harness 专用会话清理: ${String(error)}`
+    }
+    if (syntheticFileCleanupPath && existsSync(syntheticFileCleanupPath)) {
+      try { unlinkSync(syntheticFileCleanupPath); result.syntheticJsonlCleanup = 'removed' }
+      catch (error) { result.syntheticJsonlCleanup = `failed: ${String(error)}`; if (!result.error) result.error = result.syntheticJsonlCleanup }
     }
     try {
       result.sessionManifestAfter = await harness.readSessionManifest()

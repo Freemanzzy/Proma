@@ -110,8 +110,9 @@ export const MOBILE_JS = String.raw`(function(){
             var requested=new URLSearchParams(location.search).get('session');
             var sessionButton=document.querySelector('button[aria-label^="会话菜单："]');
             var title=sessionButton?sessionButton.getAttribute('aria-label').replace(/^会话菜单：/,''):'';
+            var sessionId=currentMeta.sessionId||requested;
             var sessions=await window.electronAPI?.listAgentSessions?.();
-            var session=(sessions||[]).find(function(item){return requested?item.id===requested:item.title===title});
+            var session=(sessions||[]).find(function(item){return sessionId?item.id===sessionId:item.title===title});
             var load=window.__PROMA_WEB_REMOTE_LOAD_EARLIER;
             if(session&&typeof load==='function')await load(session.id,currentMeta.startIndex);
           }catch(error){

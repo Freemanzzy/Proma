@@ -15,6 +15,7 @@ const CONFIRM_TTL_MS = 60_000
 const WEB_REMOTE_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024
 const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024
 const SENSITIVE_KEY = /(?:api.?key|token|secret|password|credential|authorization|private.?key|refresh|cookie|encrypted|decrypted)/i
+const HEAVY_SESSION_BASELINE = process.env.NODE_ENV !== 'production' && process.env.PROMA_WEB_REMOTE_HEAVY_SESSION_BASELINE === '1'
 
 type InvokeHandler = (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
 type EventHandler = (event: IpcMainEvent, ...args: unknown[]) => void
@@ -351,7 +352,7 @@ export class WebRemoteIpcBridge {
 
   private filterResult(channel: string, value: unknown, args: unknown[]): unknown {
     let filtered = channel === 'settings:get' || channel === 'channel:list' ? redactSensitive(value) : channel === 'agent:get-mcp-config' ? redactMcpConfig(value) : value
-    if (channel === 'agent:get-sdk-messages' && Array.isArray(value)) {
+    if (!HEAVY_SESSION_BASELINE && channel === 'agent:get-sdk-messages' && Array.isArray(value)) {
       const paging = args[1] && typeof args[1] === 'object' ? args[1] as { budgetBytes?: unknown; endIndex?: unknown } : {}
       const budget = typeof paging.budgetBytes === 'number' ? paging.budgetBytes : 2 * 1024 * 1024
       const endIndex = typeof paging.endIndex === 'number' ? paging.endIndex : value.length
@@ -444,6 +445,7 @@ export class WebRemoteIpcBridge {
 
   private send(client: IpcClient, message: unknown): void { if (client.ws.readyState === WebSocket.OPEN) this.sendRaw(client.ws, JSON.stringify(message)) }
   private sendRaw(ws: WebSocket, message: string): void {
+    if (HEAVY_SESSION_BASELINE) { (ws as unknown as { send(data: string): void }).send(message); return }
     const bytes = Buffer.from(message, 'utf8')
     const chunkBytes = 180 * 1024
     if (bytes.byteLength <= 256 * 1024) { (ws as unknown as { send(data: string): void }).send(message); return }

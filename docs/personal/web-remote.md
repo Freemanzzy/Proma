@@ -90,7 +90,7 @@ tailscale serve --https=8443 off
 
 - `bash scripts/personal/mobile-preview.sh start`：检查 17889/5173 空闲、开启临时 8443 Tailscale Serve、后台启动开发实例并等待启动与分级覆盖率 100% 日志；PID/日志分别记于 `/tmp/proma-mobile-preview.pids` 与 `/tmp/proma-mobile-preview.log`。
 - `bash scripts/personal/mobile-preview.sh sim [--device <name|udid>]`：默认启动 iPhone 17 Pro 模拟器、打开 Simulator、生成配对码并通过 AXe 的辅助功能树定位配对控件，配对后打开 `/app/` 并以 `simctl` 截图确认界面。
-- `bash scripts/personal/mobile-preview.sh test [suites...]`：默认运行 iPhone 的 panel-probe/smoke/mobile-polish/layout 与 Android 的 smoke/attachments；每套单独去掉代理变量并受 420 秒外层 watchdog 保护，终端只汇总结果，完整 harness 输出分别保存在 `/tmp/proma-mobile-preview-<ua>-<suite>.log`；结束核查无残留 `proma-mobile-chrome`。
+- `bash scripts/personal/mobile-preview.sh test [suites...]`：默认运行 8 个既有 iPhone/Android 回归套件，并追加 `iphone:heavy-session` 大会话套件；每套单独去掉代理变量并受 420 秒外层 watchdog 保护，终端只汇总结果，完整 harness 输出分别保存在 `/tmp/proma-mobile-preview-<ua>-<suite>.log`；结束核查无残留 `proma-mobile-chrome`。
 - `bash scripts/personal/mobile-preview.sh status` 查看服务、模拟器与 harness 进程；`stop` 只按记录 PID 停止开发实例进程树，关闭 8443 并确认 Serve 路由状态。用户需要继续体验时，最后运行 `start` 与 `sim`，保持服务运行，不要执行 `stop`。
 
 ### 首屏资源拆分评估（2026-09-28）
@@ -124,7 +124,7 @@ harness 默认整体超时 300 秒（可用 `--timeout-ms` 覆盖），每次页
 
 ### WebSocket 压缩（2026-09-29）
 
-Web Remote WebSocket 为超过 16 KB 的消息启用 per-message deflate；服务端与客户端均禁用 context takeover，zlib 并发限制为 2，避免跨消息压缩状态与过量并发占用。浏览器在握手协商扩展；本轮尚未完成 iOS Safari 与 Android Chrome 真机/模拟器握手验证。
+Web Remote WebSocket 为超过 16 KB 的消息启用 per-message deflate；服务端与客户端均禁用 context takeover，zlib 并发限制为 2，避免跨消息压缩状态与过量并发占用。iPhone UA 与 Android UA 的 Chromium harness 对 `/api/ipc` 均收到 HTTP 101，并协商 `permessage-deflate; server_no_context_takeover; client_no_context_takeover`。独立线缆侧探针确认 118,784 B 高重复文本帧在线路上压缩为 335 B，RSV1=true。此结果验证协议与压缩帧；不等同于 iOS Safari 真机验收。CDP 的 `Network.webSocketFrameReceived.payloadData` 是解压后的消息内容，当前 `Network.dataReceived` 未提供 WebSocket 线缆字节，因此不能据 CDP payload 计算实际压缩传输量。
 
 ### 大会话历史（2026-09-29）
 
@@ -132,4 +132,6 @@ Web Remote WebSocket 为超过 16 KB 的消息启用 per-message deflate；服�
 - 手机通过固定的“加载更早（已省略 N 条）”按钮以 2 MiB 页预算回取并前置到当前列表。此实现复用现有 `agent:get-sdk-messages` session-scope IPC，无新增通道或额外分级；桌面 IPC 返回值不变。React 侧只增加一行事件钩子，手机 DOM 入口由个人版 mobile-patch 添加。
 - 大于 256 KB 的 IPC WebSocket 响应使用约 180 KiB UTF-8 分片并 base64 编码，携带请求 ID、序号和总数；客户端按序重组，任何进度分片都重置 35 秒无进展计时。小响应、ping/pong、断线恢复和 `agent:send-message` 失败提示沿用原路径。
 - 全量大结果单条展开未实现：当前 SDK 历史 IPC 仅提供整段会话读取，不暴露有稳定消息 ID 的单条 tool_result 读取入口；故占位明确要求桌面查看，不在客户端保留或再次传输大原文。
-- 未完成弱网合成大会话端到端测量与 iOS Safari/Android Chrome 压缩握手验收；详见 `docs/personal/changelog.md` 本次记录中的验证状态。
+- 端到端弱网验收：在 `~/.proma-dev` 创建 33,408,055 B 全合成 JSONL，会话覆盖 user/assistant/tool_use/tool_result 与 base64 图片。iPhone UA、300 ms 延迟、下行 3 Mbps、上行 1 Mbps 下，当前实现 7,911 ms 首次显示历史；点按“加载更早”后 DOM 消息数 242→484；工具结果截断副本与图片占位副本均确认，0 JS exceptions。临时 session 与 JSONL 已清理。CDP 观测到 2,831,569 B 解压后的 WebSocket payload、最大解压帧 245,870 B；这些是 payload 统计，不是线缆字节。
+- 修复前对照使用开发版专用 `PROMA_WEB_REMOTE_HEAVY_SESSION_BASELINE=1`（仅 `NODE_ENV !== 'production'` 生效），关闭历史窗口/瘦身及分片传输，保留 WebSocket 压缩。相同 33 MB 测试在 40,420 ms 内仍未显示历史，随后 Web Remote IPC 连接断开；对照记录到 117,103 B 已解压帧，未获得编码线缆字节。由于页面断开，harness 无法经 UI 清理；仅删除其精确标记的两个 `~/.proma-dev` 合成会话索引项与合成文件，其他条目不变。详细证据见 `docs/personal/changelog.md`。
+- 压缩握手为 iPhone/Android Chromium UA 验证，不代表 iOS Safari 真机验收；CDP 当前不暴露 WebSocket 压缩后的线上 payload 字节。
