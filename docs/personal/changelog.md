@@ -757,3 +757,9 @@
 - 打包后自检通过：serve-sim middleware ESM import、入口 `--help`、随包 serve-sim 在 Booted iPhone 17 Pro 上 127.0.0.1 临时端口 HTTP 200 冒烟（运行 5 秒并按 UDID 停止）；ASAR 含 `dist/resources/icon.icns`；App Authority `Proma Personal Code Signing`，designated requirement 包含固定 certificate leaf，app deep strict 签名通过。3 个原生 helper 已 thin 到 arm64，并分别 strict 验签。
 - 产物：`apps/electron/out/mac-arm64/Proma.app`。脚本明示“包未启动”；未运行 `install-update.sh`、未安装、未退出/重启已安装 Proma。
 - 最终 marker 对齐：本节文档变更提交后再次运行同一完整打包脚本；包内 `personal-build.json.commit` 与该次最终分支 HEAD 完全一致。此次重打包只包含本文档差异，没有新的应用代码变更。
+
+## 2026-09-28: 手机端失效连接自动恢复
+
+- 问题：19:33 手机发送的消息未到达 Mac（会话记录、运行时、main.log 均无痕迹），界面停在 “Agent Running”。推断：iOS 切后台再回到前台后，页面沿用“看似 OPEN 实已断开”的 IPC WebSocket，`ws.send` 静默丢失，35 秒后才超时，且上游发送失败时只停止运行状态、消息仍显示为已发送。
+- 修复（`web-electron-shim.ts` / `web-remote-ipc.ts`，均为个人版文件）：服务端支持 `ping` → `pong`；客户端空闲超过 10 秒时先 ping（3 秒无响应即丢弃旧连接并重连）再发请求；页面回到前台 / `pageshow` / `online` 时强制校验连接；连接关闭时立即让该连接上的在途请求失败（按连接区分，不误伤新连接）；`agent:send-message` 失败时显示红色提示“消息未送达 Mac”。
+- 验证：新增 harness 套件 `dead-socket`（让当前 `/api/ipc` 连接双向静默 11 秒后发请求），iPhone / Android 均在约 3.0 秒内重连并成功（修复前会挂起 35 秒）；首版实现中旧连接关闭误伤新连接请求，由该套件发现并修正。`mobile-preview.sh test` 默认 8 套全过；全量 601 pass / 0 fail；新增 ping/pong 单测。发送失败提示未做端到端验证。

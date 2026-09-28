@@ -157,7 +157,7 @@ NODE
 
 run_tests() {
   local suites=("$@") suite agent="$(dirname "$0")/mobile-harness.mjs" url config origin chrome_pids failed=0
-  if ((${#suites[@]} == 0)); then suites=(iphone:panel-probe iphone:smoke iphone:mobile-polish iphone:layout android:smoke android:attachments); fi
+  if ((${#suites[@]} == 0)); then suites=(iphone:panel-probe iphone:smoke iphone:mobile-polish iphone:layout iphone:dead-socket android:smoke android:attachments android:dead-socket); fi
   config="$HOME/.proma-dev/web-remote/config.json"
   [[ -r "$config" ]] || fail "找不到开发实例配置：$config"
   origin="$(node -e 'const c=require(process.argv[1]); process.stdout.write(c.allowedOrigin||"")' "$config")"

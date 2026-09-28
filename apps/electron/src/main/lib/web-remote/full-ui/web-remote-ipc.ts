@@ -406,6 +406,7 @@ export class WebRemoteIpcBridge {
     let message: BridgeMessage
     try { message = JSON.parse(raw) as BridgeMessage } catch { this.send(client, { type: 'error', error: 'invalid json' }); return }
     const { type, id, channel } = message
+    if ((type as string) === 'ping') { this.send(client, { type: 'pong', id }); return }
     if (!channel || (type !== 'invoke' && type !== 'send')) { this.send(client, { type: 'error', id, error: 'unsupported message' }); return }
     const args = Array.isArray(message.args) ? message.args.map(decodeWebRemoteValue) : []
     const attachmentError = this.validateRemoteAttachment(channel, args)
