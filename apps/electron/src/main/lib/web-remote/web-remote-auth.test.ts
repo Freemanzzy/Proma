@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   MAX_PAIRING_FAILURES,
+  PAIRED_DEVICE_IDLE_TTL_MS,
   PAIRING_LOCK_MS,
   WebRemoteAuth,
   expectedWebRemoteOrigin,
@@ -72,6 +73,64 @@ describe('WebRemoteAuth', () => {
     expect(auth.authenticateToken(paired.token, 1_000)?.lastUsedAt).toBe(1_000)
     expect(auth.authenticateToken(paired.token, 2_000)?.lastUsedAt).toBe(1_000)
     expect(auth.authenticateToken(paired.token, 62_000)?.lastUsedAt).toBe(62_000)
+  })
+
+  test('超过 30 天未使用的配对设备在鉴权时惰性撤销并原子持久化', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'proma-web-remote-auth-'))
+    const auth = new WebRemoteAuth({}, dir)
+    const paired = auth.pair(auth.createPairingCode(1_000).code, 'idle phone', 1_000)!
+    const now = 1_000 + PAIRED_DEVICE_IDLE_TTL_MS + 1
+
+    expect(auth.authenticateToken(paired.token, now)).toBeNull()
+    const devices = JSON.parse(readFileSync(join(dir, 'devices.json'), 'utf8')) as { devices: Array<{ id: string; revokedAt?: number }> }
+    expect(devices.devices).toHaveLength(1)
+    expect(devices.devices[0]).toMatchObject({ id: paired.deviceId, revokedAt: now })
+    expect(readdirSync(dir).some((name) => name.endsWith('.tmp'))).toBe(false)
+  })
+
+  test('超过 30 天未使用时以 lastUsedAt 计算期限', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'proma-web-remote-auth-'))
+    const auth = new WebRemoteAuth({}, dir)
+    const createdAt = 1_000
+    const paired = auth.pair(auth.createPairingCode(createdAt).code, 'stale use', createdAt)!
+    const now = createdAt + PAIRED_DEVICE_IDLE_TTL_MS + 1
+    const devicePath = join(dir, 'devices.json')
+    const file = JSON.parse(readFileSync(devicePath, 'utf8')) as { version: number; devices: Array<Record<string, unknown>> }
+    file.devices[0]!.lastUsedAt = now - PAIRED_DEVICE_IDLE_TTL_MS - 1
+    writeFileSync(devicePath, JSON.stringify(file))
+
+    expect(auth.authenticateToken(paired.token, now)).toBeNull()
+    expect(auth.listDevices(now)[0]?.revokedAt).toBe(now)
+  })
+
+  test('有 lastUsedAt 时以最近使用时间计算期限而非创建时间', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'proma-web-remote-auth-'))
+    const auth = new WebRemoteAuth({}, dir)
+    const paired = auth.pair(auth.createPairingCode(1_000).code, 'recent phone', 1_000)!
+    const now = 1_000 + PAIRED_DEVICE_IDLE_TTL_MS + 1
+    const devicePath = join(dir, 'devices.json')
+    const file = JSON.parse(readFileSync(devicePath, 'utf8')) as { version: number; devices: Array<Record<string, unknown>> }
+    file.devices[0]!.lastUsedAt = now - PAIRED_DEVICE_IDLE_TTL_MS + 1
+    writeFileSync(devicePath, JSON.stringify(file))
+
+    expect(auth.authenticateToken(paired.token, now)?.id).toBe(paired.deviceId)
+  })
+
+  test('清除撤销超过 30 天的记录但保留近期撤销与 tailnet 身份', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'proma-web-remote-auth-'))
+    const now = 40 * 24 * 60 * 60_000
+    writeFileSync(join(dir, 'devices.json'), JSON.stringify({ version: 1, devices: [
+      { id: 'old-revoked', tokenHash: 'old', label: 'old', createdAt: 1, revokedAt: now - PAIRED_DEVICE_IDLE_TTL_MS - 1 },
+      { id: 'recent-revoked', tokenHash: 'recent', label: 'recent', createdAt: 1, revokedAt: now - PAIRED_DEVICE_IDLE_TTL_MS + 1 },
+      { id: 'tailnet:trusted-node', tokenHash: '', label: 'trusted', createdAt: 0 },
+    ] }))
+    const auth = new WebRemoteAuth({}, dir)
+
+    auth.refreshFromDisk(now)
+
+    const devices = auth.listDevices(now)
+    expect(devices.map((device) => device.id)).toEqual(['recent-revoked', 'tailnet:trusted-node'])
+    expect(JSON.parse(readFileSync(join(dir, 'devices.json'), 'utf8')).devices.map((device: { id: string }) => device.id)).toEqual(['recent-revoked', 'tailnet:trusted-node'])
   })
 
   test('Tailnet 受信设备满足身份、地址、whois 与节点 allowlist 时通过', async () => {

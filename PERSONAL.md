@@ -12,7 +12,7 @@
 - 基线 commit：`f20943edd047ecdc929df67de9412d6e58cd4312`
 - 当前个人主线：`personal`
 - Electron 版本：`0.19.58`
-- 全量测试基线（2026-09-28）：`bun test` 必须达到 0 fail / 0 error；本次验证 592 pass / 0 fail / 0 error。
+- 全量测试基线（2026-09-28）：`bun test` 必须达到 0 fail / 0 error；最新全量验证 596 pass / 0 fail / 0 error。
 
 ## 分支策略
 
@@ -715,3 +715,11 @@ python3 scripts/personal/import-proma-backup.py \\
 - 响应头核验：HTML、JS、CSS、preload 均有 `Content-Encoding: br`、`Vary: Accept-Encoding`；hash 静态资源返回 `Cache-Control: public, max-age=31536000, immutable`，HTML 与 preload 为 `no-cache`，符合动态页面与预加载脚本需要检查更新的要求。WOFF2 与大 PNG 未压缩；多个 MP3 资源的 Brotli 收益很小但服务端仅在编码体更小时返回压缩版本。`web-remote-server.ts` 已实现上述能力，无需源代码修改，因此无压缩前后对比数据。
 - 回归：通过 `mobile-preview.sh start → test iphone:smoke → stop` 实跑；smoke 7/7，JS exceptions 0，测试设备撤销、会话/profile/Chrome 清理完成，停止后 17889/5173 释放、Serve 仅 443。harness 音效预加载 XHR console error 为既有问题，不影响 smoke。
 - 未实施的后续建议（按本项范围不改代码）：评估将 5.74 MB 的主 JS 与桌面专用模块拆分/按需载入；单个约 1.51 MB 图片也可独立评估格式与首屏必要性。
+
+## 2026-09-28: 已配对设备 30 天惰性过期
+
+- `WebRemoteAuth.refreshFromDisk(now)`：配对设备按 `lastUsedAt`（无则 `createdAt`）判断；超过 30 天未使用即写入 `revokedAt=now`，超过 30 天的撤销记录从 `devices.json` 移除。`authenticateToken` 与桌面状态 `listDevices()` 均在处理时刷新期限；受信 `tailnet:*` 身份不因不活跃撤销/清理。设备 JSON 的配对创建、最近使用、手动撤销及惰性清理统一通过同目录临时文件 + 原子 rename 持久化（临时及目标权限 0600）。
+- 桌面手机访问设置已有“已配对设备”列表和 `!revokedAt` 过滤；刷新时将 expired 设备从有效列表移除，无需改 UI。
+- 新增 4 项 auth 单测：旧 lastUsedAt 撤销；lastUsedAt 缺省回退 createdAt；近 30 天 lastUsedAt 覆盖较旧创建时间并保持有效；清除过期撤销记录且保留近期撤销与 tailnet 身份。另验证临时文件清理和写盘结果。
+- 验证：auth 定向测试 16 pass / 0 fail / 51 assertions；workspace typecheck、`build:main`、`build:renderer`、`build:web-preload` 通过；全量 `bun test` 596 pass / 0 fail / 0 error（91 files，1314 assertions）。Renderer 仍显示既有 large chunk warning。所有验证只写临时测试目录；未读取、修改或清理 `~/.proma` 正式数据。
+- 文档：更新 `docs/personal/web-remote.md` 的设备安全与过期说明；本文件当前基线同步为 596/0/0。
