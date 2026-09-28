@@ -756,4 +756,4 @@
 - 基于本轮代码提交 `e1ac4446` 完成完整 `scripts/personal/package-personal.sh`：typecheck 通过；全量 Bun 测试 **600 pass / 0 fail / 0 error**；main、agent runtime、terminal runtime、preload、renderer、web-preload、CLI 与 native helpers 构建通过；personal build marker 的 version `0.19.58`、commit `e1ac4446`，无 `app-update.yml`。
 - 打包后自检通过：serve-sim middleware ESM import、入口 `--help`、随包 serve-sim 在 Booted iPhone 17 Pro 上 127.0.0.1 临时端口 HTTP 200 冒烟（运行 5 秒并按 UDID 停止）；ASAR 含 `dist/resources/icon.icns`；App Authority `Proma Personal Code Signing`，designated requirement 包含固定 certificate leaf，app deep strict 签名通过。3 个原生 helper 已 thin 到 arm64，并分别 strict 验签。
 - 产物：`apps/electron/out/mac-arm64/Proma.app`。脚本明示“包未启动”；未运行 `install-update.sh`、未安装、未退出/重启已安装 Proma。
-- 本节文档提交后 HEAD 将前移；最终交付前会再跑同一打包脚本一次，使 `personal-build.json.commit` 与分支最终 HEAD 精确一致。该复跑仅包含本文档差异，不再变更应用代码。
+- 最终 marker 对齐：本节文档变更提交后再次运行同一完整打包脚本；包内 `personal-build.json.commit` 与该次最终分支 HEAD 完全一致。此次重打包只包含本文档差异，没有新的应用代码变更。
