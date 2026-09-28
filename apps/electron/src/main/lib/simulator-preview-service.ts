@@ -122,6 +122,15 @@ export async function getSimulatorPreviewStatus(): Promise<SimulatorPreviewStatu
   return { ...current, udid: pickActiveDevice(currentUdid, streams), streams }
 }
 
+export function shouldRetryBundledServeSim(isBundled: boolean, exitCode: number | null, output: string): boolean {
+  return isBundled && (exitCode !== 0 || /ERR_MODULE_NOT_FOUND|Cannot find package/i.test(output))
+}
+
+function firstSafeErrorLine(output: string): string {
+  const line = output.split(/\r?\n/).find((value) => value.trim())?.trim() || '未提供错误详情'
+  return line.replace(/\/Users\/[^/\s]+/g, '[用户路径]').slice(0, 240)
+}
+
 export async function startSimulatorPreview(udid: string): Promise<SimulatorPreviewStatus> {
   if (!/^[A-Fa-f0-9-]{20,}$/.test(udid)) throw new Error('模拟器 UDID 无效。')
   if (child && current.running && current.udid === udid) return { ...current }
@@ -130,26 +139,63 @@ export async function startSimulatorPreview(udid: string): Promise<SimulatorPrev
   const device = devices.find((item) => item.udid === udid)
   if (!device) throw new Error('找不到该 iOS 模拟器。')
   if (device.state !== 'Booted') await execFile('/usr/bin/xcrun', ['simctl', 'boot', udid])
-  const invocation = await getServeSimInvocation()
+  const bundledInvocation = await getServeSimInvocation()
   const port = await choosePort(portAvailable)
-  const env = { ...invocation.env }
+  const env = { ...bundledInvocation.env }
   if (!env.HTTPS_PROXY && !env.https_proxy) { const proxy = await getEffectiveProxyUrl().catch(() => undefined); if (proxy) { env.HTTPS_PROXY = proxy; env.HTTP_PROXY = env.HTTP_PROXY ?? proxy } }
-  const proc = spawn(invocation.command, invocationArgs(invocation, buildServeSimArgs(udid, port)), { env, stdio: ['ignore', 'pipe', 'pipe'] })
-  child = proc
-  currentUdid = udid
   const url = `http://127.0.0.1:${port}`
+  let invocation = bundledInvocation
+  let isBundled = Boolean(bundledInvocation.scriptPath)
+  let retried = false
   let output = ''
-  proc.stdout?.on('data', (chunk: Buffer) => { output += chunk.toString() })
-  proc.stderr?.on('data', (chunk: Buffer) => { output += chunk.toString() })
-  proc.once('exit', (code) => { if (child === proc) { child = null; current = { running: false, error: `serve-sim 已退出（${code ?? '未知'}）：${output.trim().slice(-500)}` } } })
+  let exitCode: number | null = null
+  let launchAt = Date.now()
+  let proc: ChildProcess
+  const launch = (next: ServeSimInvocation): ChildProcess => {
+    launchAt = Date.now()
+    output = ''
+    exitCode = null
+    const launched = spawn(next.command, invocationArgs(next, buildServeSimArgs(udid, port)), { env: next.env, stdio: ['ignore', 'pipe', 'pipe'] })
+    child = launched
+    launched.stdout?.on('data', (chunk: Buffer) => { output += chunk.toString() })
+    launched.stderr?.on('data', (chunk: Buffer) => { output += chunk.toString() })
+    launched.once('exit', (code) => {
+      exitCode = code
+      if (child === launched) {
+        child = null
+        current = { running: false, udid, error: `serve-sim 启动失败（退出码 ${code ?? '未知'}）：${firstSafeErrorLine(output)}` }
+      }
+    })
+    return launched
+  }
+  proc = launch(invocation)
+  currentUdid = udid
   const deadline = Date.now() + 120_000
   while (Date.now() < deadline) {
-    if (child !== proc) throw new Error(current.error || 'serve-sim 启动失败。')
+    if (child !== proc) {
+      if (!retried && Date.now() - launchAt <= 10_000 && shouldRetryBundledServeSim(isBundled, exitCode, output)) {
+        retried = true
+        isBundled = false
+        try { invocation = { command: await verifyNode(), env: { ...env } } }
+        catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          current = { running: false, udid, error: `内置 serve-sim 启动失败，且无法启用 npx 回退（退出码 ${exitCode ?? '未知'}）：${firstSafeErrorLine(output || message)}` }
+          throw new Error(current.error)
+        }
+        proc = launch(invocation)
+        continue
+      }
+      const error = `serve-sim 启动失败（退出码 ${exitCode ?? '未知'}）：${firstSafeErrorLine(output)}`
+      current = { running: false, udid, error }
+      throw new Error(error)
+    }
     try { const response = await fetch(url); if (response.ok) { current = { running: true, udid, url }; return { ...current } } } catch { /* wait for server */ }
     await new Promise((resolve) => setTimeout(resolve, 500))
   }
   await stopSimulatorPreview()
-  throw new Error(`serve-sim 启动超时。${output.trim().slice(-500)}`)
+  const error = `serve-sim 启动超时（120 秒）：${firstSafeErrorLine(output)}`
+  current = { running: false, udid, error }
+  throw new Error(error)
 }
 
 export async function stopSimulatorPreview(udid = currentUdid): Promise<void> {

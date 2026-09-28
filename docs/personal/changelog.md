@@ -720,3 +720,9 @@
 - `package-personal.sh` 签名后使用打包产物 `Contents/MacOS/Proma` 在 `ELECTRON_RUN_AS_NODE=1` 下执行 serve-sim 入口帮助路径，并实际 `import()` 独立资源目录中的 `dist/middleware.js`；任一模块加载失败即中止打包。
 - 若本机存在 Booted 模拟器，脚本在 127.0.0.1 临时端口启动随包 serve-sim，最多等待 10 秒检查 HTTP 200，持续 5 秒后用设备 UDID 执行 `--kill` 并清理测试进程；没有 Booted 设备则提示跳过，不阻断打包。
 - 验证：`bash -n scripts/personal/package-personal.sh`、typecheck、`build:main` 通过；对生成的独立资源目录用 Node ESM `import()` middleware 通过、入口 `--help` 通过。完整修复前/修复后打包证据和最终包结果待全批次结束时记录。
+
+## 2026-09-28: serve-sim 启动回退与设备状态同步
+
+- 内置 serve-sim 在启动 10 秒内以非零码退出或报告 ESM 模块缺失时，只重试一次 npx；npx 失败会在服务状态中保留 UDID，并报中文错误、退出码和脱敏后的首行输出。模拟器面板启动失败时刷新设备与预览状态，因此先 `simctl boot` 后启动失败也能显示真实 Booted 状态。
+- 空状态和启动提示改为说明默认使用内置 serve-sim，组件不可用时才回退到 npx 下载。
+- 单测覆盖回退条件：内置异常/缺包会回退，npx 失败和正常退出不重试；模拟器服务定向测试 7 pass / 0 fail；typecheck 和 renderer build 通过（仅既有大 chunk 提示）。
