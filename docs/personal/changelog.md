@@ -714,3 +714,9 @@
 - `sonner` 在 serve-sim 的 package.json 声明为依赖，但在发布的 `dist` JS 中没有运行时导入；扫描后未打包。`ws` 被编译产物实际引用并以嵌套 `node_modules` 方式随资源分发；`inspect-webkit` 的实现已被 serve-sim 编译产物内嵌，没有外部包导入，不重复打包。
 - 验证：`bun run sync:runtime-deps` 同步 138 个运行依赖；独立资源目录中只包含 serve-sim 与实际外部依赖 `ws`；Node ESM 实际导入 `dist/middleware.js` 通过，serve-sim 主入口 `--help` 通过；typecheck、`build:main`、模拟器服务单测 6 pass / 0 fail、`bash -n scripts/personal/package-personal.sh` 通过。尚未完整打包验证。
 - 文件：`apps/electron/scripts/sync-runtime-deps.ts`、`apps/electron/electron-builder.yml`、`apps/electron/src/main/lib/simulator-preview-service.ts`、`scripts/personal/package-personal.sh`（打包后检查）；对应验证与后续打包结果将继续补录。
+
+## 2026-09-28: 打包后验证 serve-sim ESM 加载与预览服务
+
+- `package-personal.sh` 签名后使用打包产物 `Contents/MacOS/Proma` 在 `ELECTRON_RUN_AS_NODE=1` 下执行 serve-sim 入口帮助路径，并实际 `import()` 独立资源目录中的 `dist/middleware.js`；任一模块加载失败即中止打包。
+- 若本机存在 Booted 模拟器，脚本在 127.0.0.1 临时端口启动随包 serve-sim，最多等待 10 秒检查 HTTP 200，持续 5 秒后用设备 UDID 执行 `--kill` 并清理测试进程；没有 Booted 设备则提示跳过，不阻断打包。
+- 验证：`bash -n scripts/personal/package-personal.sh`、typecheck、`build:main` 通过；对生成的独立资源目录用 Node ESM `import()` middleware 通过、入口 `--help` 通过。完整修复前/修复后打包证据和最终包结果待全批次结束时记录。

@@ -67,6 +67,52 @@ node "$ROOT/scripts/personal/check-packaged-mobile-selectors.cjs" "$APP/Contents
 printf '\n== code signature (%s) ==\n' "$SIGN_IDENTITY"
 codesign --force --deep --sign "$SIGN_IDENTITY" "$APP"
 codesign --verify --deep --strict "$APP"
+
+printf '\\n== packaged serve-sim ESM dependency check ==\\n'
+PACKAGED_ELECTRON="$APP/Contents/MacOS/Proma"
+SERVE_SIM_ROOT="$APP/Contents/Resources/serve-sim/node_modules/serve-sim/dist"
+[[ -x "$PACKAGED_ELECTRON" && -f "$SERVE_SIM_ROOT/serve-sim.js" && -f "$SERVE_SIM_ROOT/middleware.js" ]] || {
+  echo 'ERROR: packaged serve-sim runtime resources are incomplete' >&2; exit 1;
+}
+ELECTRON_RUN_AS_NODE=1 "$PACKAGED_ELECTRON" --input-type=module -e 'await import(process.argv[1]); console.log("serve-sim middleware import OK")' "$(python3 -c 'import pathlib,sys;print(pathlib.Path(sys.argv[1]).resolve().as_uri())' "$SERVE_SIM_ROOT/middleware.js")"
+# Exercise the real CLI entry via its non-mutating --help path, which loads its static ESM dependency graph.
+ELECTRON_RUN_AS_NODE=1 "$PACKAGED_ELECTRON" "$SERVE_SIM_ROOT/serve-sim.js" --help >/dev/null
+printf 'serve-sim entry and middleware ESM imports passed\\n'
+
+BOOTED_UDID="$(/usr/bin/xcrun simctl list devices available -j | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next((d["udid"] for group in data.get("devices",{}).values() for d in group if d.get("state")=="Booted" and d.get("udid")), ""))')"
+if [[ -n "$BOOTED_UDID" ]]; then
+  SMOKE_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
+  SMOKE_LOG="$(mktemp -t proma-serve-sim-smoke.XXXXXX)"
+  SMOKE_PID=""
+  cleanup_serve_sim_smoke() {
+    ELECTRON_RUN_AS_NODE=1 "$PACKAGED_ELECTRON" "$SERVE_SIM_ROOT/serve-sim.js" --kill "$BOOTED_UDID" >/dev/null 2>&1 || true
+    if [[ -n "$SMOKE_PID" ]] && kill -0 "$SMOKE_PID" 2>/dev/null; then
+      kill -TERM "$SMOKE_PID" 2>/dev/null || true
+      wait "$SMOKE_PID" 2>/dev/null || true
+    fi
+    rm -f "$SMOKE_LOG"
+  }
+  trap cleanup_serve_sim_smoke EXIT
+  ELECTRON_RUN_AS_NODE=1 "$PACKAGED_ELECTRON" "$SERVE_SIM_ROOT/serve-sim.js" --host 127.0.0.1 --port "$SMOKE_PORT" --fit --panes none -q "$BOOTED_UDID" >"$SMOKE_LOG" 2>&1 &
+  SMOKE_PID=$!
+  SMOKE_OK=0
+  for _ in {1..10}; do
+    if curl --silent --show-error --fail "http://127.0.0.1:$SMOKE_PORT/" >/dev/null 2>&1; then SMOKE_OK=1; break; fi
+    if ! kill -0 "$SMOKE_PID" 2>/dev/null; then break; fi
+    sleep 1
+  done
+  if (( SMOKE_OK == 0 )); then
+    echo 'ERROR: bundled serve-sim simulator smoke test did not return HTTP 200' >&2
+    exit 1
+  fi
+  sleep 5
+  cleanup_serve_sim_smoke
+  trap - EXIT
+  printf 'serve-sim simulator smoke passed: HTTP 200; ran 5 seconds; stopped by UDID\\n'
+else
+  printf 'serve-sim simulator smoke skipped: no Booted simulator found\\n'
+fi
+
 if codesign -dv "$APP" 2>&1 | grep -q '^Signature=adhoc'; then
   echo 'ERROR: package ended up ad-hoc signed' >&2; exit 1
 fi
