@@ -790,3 +790,12 @@
 - 最小上游接入：`agent-collaboration-tools.ts` 新增个人模块 import、终态回调一行、wait/get 两处消费标记调用，并在委派记录保留父工作区；未改其他上游文件。
 - 文档：新增 `docs/personal/delegation-auto-wake.md` 开关说明，并更新 `PERSONAL.md` 的个人版差异索引。
 - 验证：`bun run typecheck`、`build:main`、`build:renderer`、`build:web-preload` 通过；全仓 `bun test` 602 pass / 0 fail / 0 error。开发实例 `mobile-preview.sh start`、`sim` 均通过；`mobile-preview.sh test` 全部默认套件通过（iPhone panel-probe/smoke/mobile-polish/layout/dead-socket，Android smoke/attachments/dead-socket，异常数均 0）。尚未完成专用协作子 Agent 发起、消费去重与自动续轮的端到端实测；对应功能单测亦未新增，属于待验证项。开发实例及 8443 保持运行，未停止正式版、未运行安装更新脚本。
+
+## 2026-09-28: 自动唤醒父会话身份修正与验收完成
+
+- 修正上一节实现的身份错误：自动唤醒输入改为 `triggeredBy: 'external'`，headless `source` 使用 `bridge`。父会话因此不再被 `agent-collaboration-tools.ts` 判定为子会话；复核直接依赖 `triggeredBy === 'delegation'` 的委派创建、工作区 MCP/视觉中继与规划策略，以及 renderer 的子会话完成提醒分支，均不会误判唤醒父会话。`agent-service.runAgentHeadless` 仍负责发出完整 stream/`STREAM_COMPLETE`、`external_run_started` 与 `run_completed`；bridge source 走 Web Remote 的普通“运行已完成”推送。完成/失败回调现在有可观测的结束/错误日志，不替代现有事件分发。
+- `personal-delegation-wake.ts` 改为依赖注入控制器，单测不导入真实 Electron；加入 `personal-delegation-wake.test.ts` 的 8 项测试：consumed、stoppedByUser、开关关闭、忙时排队后空闲、合并、每小时 10 次、failed/cancelled 消息状态、external/bridge 身份及原会话参数。全仓 `bun test`：610 pass / 0 fail / 0 error；workspace typecheck 通过。
+- 开发实例真实模型端到端：测试父会话 `6c156e88-d803-4864-ac3f-a55cf629f69d` 首轮只委派“只回复 pong”并直接结束；子会话于 2026-09-28 21:56:41.608 GMT+8 完成，父会话自动轮于 21:57:11.623 GMT+8 开始，延迟 **30.015 秒**。父 Agent 调用 `get_delegation_results` 后成功再次调用 `delegate_agent` 创建第二子任务，未出现“协作子会话不能继续创建”错误；第二子任务结果后也收到后续唤醒。
+- 消费去重端到端：另一父会话先用 `wait_for_delegations` 收回子任务终态并回复 `WAIT_RESULT_COLLECTED`；观察后续 **36.016 秒**无自动运行/通知，开发日志记录 `[子任务唤醒] consumed`。两组 E2E 测试父会话、子会话均通过 IPC 删除；配对设备撤销。
+- 手机回归：`mobile-preview.sh test` 默认 iPhone/Android 套件全过，JS exceptions 0。为修复附件套件中模型对单词 `Red`/`red` 的大小写差异导致的误失败，`scripts/personal/mobile-harness.mjs:waitForAssistantReply` 将期望文本匹配改为大小写不敏感；图像答案仍由后续 `\bred\b/i` 断言实际验证为红色。复跑 `android:attachments` 及完整默认套件均通过。
+- 文档更新：`docs/personal/delegation-auto-wake.md` 补充 identity/source 与事件推送说明；本记录补记修复原因、单测和 E2E 证据。开发实例、8443 Serve 与 iPhone 17 Pro 模拟器保持运行；未运行打包、安装更新或重启正式 Proma。
