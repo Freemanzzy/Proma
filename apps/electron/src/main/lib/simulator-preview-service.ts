@@ -20,7 +20,9 @@ function findBundledServeSimScript(): string | undefined {
   const require = createRequire(__filename)
   const searchPaths = require.resolve.paths('serve-sim') ?? []
   const candidates = searchPaths.map((nodeModules) => join(nodeModules, 'serve-sim', 'dist', 'serve-sim.js'))
-  return candidates.find((candidate) => existsSync(candidate))
+  // 打包后 serve-sim/dist 被 asarUnpack；优先用 app.asar.unpacked 下的真实路径，让其原生 helper 按真实目录解析。
+  const unpacked = candidates.map((candidate) => candidate.replace(/app\.asar([\\/])/, 'app.asar.unpacked$1'))
+  return [...unpacked, ...candidates].find((candidate) => existsSync(candidate))
 }
 
 async function getServeSimInvocation(): Promise<ServeSimInvocation> {
