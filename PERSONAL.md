@@ -12,6 +12,7 @@
 - 基线 commit：`f20943edd047ecdc929df67de9412d6e58cd4312`
 - 当前个人主线：`personal`
 - Electron 版本：`0.19.58`
+- 全量测试基线（2026-09-28）：`bun test` 必须达到 0 fail / 0 error；本次验证 592 pass / 0 fail / 0 error。
 
 ## 分支策略
 
@@ -701,3 +702,9 @@ python3 scripts/personal/import-proma-backup.py \\
 - 全量 `bun test`：567 pass / 3 fail（570 tests）；3 个失败为既有 Electron `dialog` mock、Electron `shell` mock、planning-manager Electron binary 类型问题，统一由项 C 修复。仅新增 `linkedom` devDependency，未新增运行时依赖。
 - 保留核对：原 CSS、刷新按钮循环防护、触屏 `lastTouchAt` hover 拦截、面板开关/动效/重开 pointer-events、隐藏拖拽条、顶栏图标及状态标记、菜单、通知状态与 toast、标题下拉/模拟器入口隐藏等原逻辑均保留。
 - 文档：更新 `docs/personal/web-remote.md` 标出源文件路径与 observer 单测。
+
+## 2026-09-28: 全量测试基线归零
+
+- 按全仓实际运行结果处理现存三项失败，没有为通过测试改动产品逻辑：①`agent-session-manager.test.ts` 的 Electron 命名导出 `dialog` 与 `channel-runtime-api-key.test.ts` 的 `shell` 缺失，根因是 Bun `mock.module()` 会跨测试文件持续覆盖全局 `electron` 模块，其他测试的 mock 可能成为最终活跃版本；相关 `electron` mock 统一补齐所需的 `BrowserWindow`、`dialog`、`shell` 等命名导出。②`planning-manager.test.ts` 用 `createRequire('electron')` 取运行文件时可能读到前序测试留下的 mock 对象；改为通过 `createRequire.resolve('electron')` 找包目录，再读取包内 `path.txt` 计算 Electron 二进制真实路径，不受模块 mock 影响。
+- 定向验证：四个相关文件 29 pass / 0 fail；typecheck 通过。全量 `bun test`：592 pass / 0 fail / 0 error（91 files，1305 assertions）。
+- `scripts/personal/package-personal.sh` 的全测门槛改为 0 fail / 0 error；`CLAUDE.md` §6 第 2 项与本文件基线同步更新。历史记录保留原始当时数字，未改写。
