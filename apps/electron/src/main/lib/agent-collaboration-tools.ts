@@ -41,6 +41,7 @@ import {
 } from './agent-collaboration-utils'
 import { assertEnabledModelForChannel, listEnabledAgentModelsForChannel } from './agent-model-selection'
 import { serializePiToolResultPayload } from './adapters/pi-tool-result-json'
+import { markPersonalDelegationsConsumed, notifyPersonalDelegationFinished } from './personal-delegation-wake'
 
 interface CollaborationToolContext {
   sessionId: string
@@ -61,6 +62,7 @@ interface DelegationRecord {
   childSessionId: string
   channelId: string
   modelId?: string
+  workspaceId?: string
   title: string
   thinkingLevel?: AgentThinkingLevel
   role: AgentDelegationRole
@@ -368,6 +370,7 @@ function markDelegationFinished(
   record.resultSummary = fields.resultSummary
   updateAgentSessionMeta(record.childSessionId, { delegationStatus: status })
   record.resolveCompletion()
+  notifyPersonalDelegationFinished({ delegationId: record.delegationId, parentSessionId: record.parentSessionId, title: record.title, status, channelId: record.channelId, modelId: record.modelId, workspaceId: record.workspaceId, permissionMode: record.permissionMode })
 }
 
 function getDelegationSummary(record: DelegationRecord): Record<string, unknown> {
@@ -729,6 +732,7 @@ function startDelegation(
     childSessionId: child.id,
     channelId: ctx.channelId,
     modelId: effectiveModelId,
+    workspaceId: ctx.workspaceId,
     thinkingLevel: childThinkingLevel,
     title,
     role,
@@ -977,6 +981,7 @@ export function buildPiCollaborationTools(
           ? await waitForLiveRecords(liveRecords, timeoutSeconds, liveTarget)
           : 'completed'
         const allDelegations = [...liveRecords.map(getDelegationSummary), ...settled]
+        markPersonalDelegationsConsumed(allDelegations.filter((item) => item.status !== 'running').map((item) => String(item.delegationId)))
         return piJsonResult({
           status: waitResult,
           mode,
@@ -1015,9 +1020,9 @@ export function buildPiCollaborationTools(
       }),
       async execute(_toolCallId: string, params: unknown) {
         const args = params as { delegationIds: string[] }
-        return piJsonResult({
-          delegations: args.delegationIds.map((delegationId) => getDelegationResult(ctx.sessionId, delegationId)),
-        })
+        const results = args.delegationIds.map((delegationId) => getDelegationResult(ctx.sessionId, delegationId))
+        markPersonalDelegationsConsumed(results.filter((item) => item.status !== 'running').map((item) => String(item.delegationId)))
+        return piJsonResult({ delegations: results })
       },
     }),
     sdk.defineTool({

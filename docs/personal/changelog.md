@@ -782,3 +782,11 @@
 - `personal-log-writer.ts` / `personal-main-log.ts`：经 console.error 输出的 Node 进程警告（`(node:PID) [DEPxxxx] DeprecationWarning:`、`ExperimentalWarning` 等，或 name 以 Warning 结尾的 Error）记为 `[WARN]`；其他文本中提到 Warning 不降级。新增单测；判定函数放在不依赖 electron 的 writer 中，避免测试间 electron 模块污染。
 - `electron-builder.yml`：`files` 排除 `node_modules/serve-sim/**`，运行时只用 `Contents/Resources/serve-sim`。
 - 验证：typecheck、全量 602 pass / 0 fail、build:main / build:renderer。打包层面的副本移除与截屏提示待下次打包/安装验证。
+
+## 2026-09-28: 协作子 Agent 完成后自动唤醒父会话
+
+- 新增 `apps/electron/src/main/lib/personal-delegation-wake.ts`：默认开启（数据目录 `personal-settings.json` 中 `delegationAutoWake: false` 可关闭，读取失败按开启处理）；在子会话完成、失败或取消后合并父会话 30 秒内的结果，并等待父会话空闲后通过 `runAgentHeadless` 在原会话渠道、模型、工作区与权限模式发起带 `triggeredBy: 'delegation'` 的自动通知轮次。相同父会话每小时最多 10 次；不存在/归档/用户停止、已消费、关闭开关和限频均跳过并记录 `[子任务唤醒]` 原因。
+- 消费判定：`wait_for_delegations` 返回以及 `get_delegation_results` 读取时，将已返回终态的 delegationId 标记为 consumed；未完成状态不标记。唤醒前再次过滤 consumed，父会话忙碌时每秒轮询并重新检查终止/归档/消费条件。子会话运行与 `wait_for_delegations` 行为不变。
+- 最小上游接入：`agent-collaboration-tools.ts` 新增个人模块 import、终态回调一行、wait/get 两处消费标记调用，并在委派记录保留父工作区；未改其他上游文件。
+- 文档：新增 `docs/personal/delegation-auto-wake.md` 开关说明，并更新 `PERSONAL.md` 的个人版差异索引。
+- 验证：`bun run typecheck`、`build:main`、`build:renderer`、`build:web-preload` 通过；全仓 `bun test` 602 pass / 0 fail / 0 error。开发实例 `mobile-preview.sh start`、`sim` 均通过；`mobile-preview.sh test` 全部默认套件通过（iPhone panel-probe/smoke/mobile-polish/layout/dead-socket，Android smoke/attachments/dead-socket，异常数均 0）。尚未完成专用协作子 Agent 发起、消费去重与自动续轮的端到端实测；对应功能单测亦未新增，属于待验证项。开发实例及 8443 保持运行，未停止正式版、未运行安装更新脚本。
