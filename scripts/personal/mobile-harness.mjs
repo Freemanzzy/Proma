@@ -983,17 +983,15 @@ async function runMobilePolishChecks(harness, options, result) {
   const otherWorkspace = Array.isArray(workspaces) ? workspaces.find((item) => item?.id && item.id !== currentWorkspaceId) : null
   result.steps.push({ name: 'workspace-switch-single-tap', ok: false, skipped: otherWorkspace ? '侧栏项目名为可折叠分组；单击只展开会话列表，不改变 agentWorkspaceId，故不作为工作区切换断言' : '没有可切换的第二个工作区' })
 
-  const sessions = await harness.invokeApi('listAgentSessions')
-  const currentId = await harness.client.evaluate('document.querySelector("[data-session-switch-id].agent-session-item-active")?.getAttribute("data-session-switch-id")')
-  const targetSession = Array.isArray(sessions) ? sessions.find((item) => item?.id && item.id !== currentId && item.workspaceId === currentWorkspaceId && !item.archived) : null
-  if (targetSession) {
-    await harness.openDrawer()
-    const target = await harness.client.evaluate(`(() => { const n=document.querySelector('[data-session-switch-id=${quoteJs(targetSession.id)}]'); if(!n)return null; const r=n.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`)
-    if (!target) throw new Error(`目标会话在侧栏不可见：${targetSession.title}`)
-    await touchAt(harness.client, target.x, target.y)
-    const selected = await waitUntil(harness.client, `document.querySelector('[data-session-switch-id=${quoteJs(targetSession.id)}].agent-session-item-active') !== null`, 10_000)
-    result.steps.push({ name: 'open-session-single-tap', ok: Boolean(selected), touchCount: 1, session: targetSession.title })
-  } else result.steps.push({ name: 'open-session-single-tap', ok: false, skipped: '当前工作区没有可用于切换的第二个活跃会话' })
+  // Build two harness-owned sessions rather than assuming an arbitrary existing session (for example “回复 pong”) is visible in the current sidebar viewport.
+  const sourceSession = await harness.createHarnessSession(`web-remote-harness-mobile-polish-source-${Date.now()}`)
+  const targetSession = await harness.createHarnessSession(`web-remote-harness-mobile-polish-target-${Date.now()}`)
+  await harness.openDrawer()
+  const target = await harness.client.evaluate(`(() => { const n=document.querySelector('[data-session-switch-id=${quoteJs(sourceSession.id)}]'); if(!n)return null; n.scrollIntoView({block:'center'}); const r=n.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`)
+  if (!target) throw new Error(`本套件自建的源会话未出现在侧栏：${sourceSession.id}`)
+  await touchAt(harness.client, target.x, target.y)
+  const selected = await waitUntil(harness.client, `document.querySelector('[data-session-switch-id=${quoteJs(sourceSession.id)}].agent-session-item-active') !== null`, 10_000)
+  result.steps.push({ name: 'open-session-single-tap', ok: Boolean(selected), touchCount: 1, session: sourceSession.title, target: targetSession.title })
   result.singleTapSuccess = result.steps.filter((step) => /single-tap/.test(step.name) && step.ok).length
   result.singleTapChecks = result.steps.filter((step) => /single-tap/.test(step.name) && !step.skipped).length
   result.singleTapSuccessRate = result.singleTapChecks ? `${result.singleTapSuccess}/${result.singleTapChecks}` : 'n/a'
