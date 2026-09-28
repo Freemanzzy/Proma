@@ -699,3 +699,11 @@
 
 - 父会话补充 `dca3e775`：打包后 serve-sim 优先从 `app.asar.unpacked` 运行，使原生 helper 按真实目录解析。
 - 父会话复核：全量 599 pass / 0 fail；手机回归 6 套全过；上游改动面未缩减（71→72，新增 `sync-runtime-deps.ts`），标记替换另立任务。用户 2026-09-28 16:42 确认并同意打包。
+
+## 2026-09-28: 安装 f2db00f3（Claude Code）
+
+- 结果：安装成功，未回滚；`/Applications/Proma.app` = `f2db00f3`，previous = `d6af4f8b`，本机最新备份 `20260928-183544-89297`（BACKUP VERIFY PASS，SNAPSHOT MATCH）。桌面、两台手机通过；TCC 未弹窗；main.log 新格式正常，`[FATAL]` 为 0。
+- 健康检查误判：新版启动停在钥匙串授权，60 秒内 17888 未监听 → EXIT=4 并尝试回滚，SIGTERM 结束了 Helper 但主进程未退出，脚本停止文件回滚；用户输入钥匙串密码并干净重启后核对健康，未回滚、数据无变化。
+- **模拟器面板不可用**：`asarUnpack` 只解包 `serve-sim/dist/**`，其依赖 `ws`、`inspect-webkit`、`sonner` 留在 asar 内，从 `app.asar.unpacked` 以 ESM 运行时 `ERR_MODULE_NOT_FOUND`；打包自检只跑 `--help` 未加载 middleware，故未发现；内置包崩溃时不回退 npx；启动失败后面板显示“已关机”而设备实为 Booted。
+- 其他发现：退出迟滞（quit/SIGTERM 20–60 秒不退出）；`icon.icns` 未打入包（启动 `[WARN]`）；随包 helper 的 x86_64 切片未签名（arm64 通过）；钥匙串在同证书升级后仍弹窗。
+- 待办转入修复批次：见 install-result-2026-09-28-2 “给 Proma 的待办” 1–7。
