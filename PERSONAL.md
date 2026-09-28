@@ -663,3 +663,11 @@ python3 scripts/personal/import-proma-backup.py \\
 - 复核 Luna `bdcb98f0`：serve-sim 固定 0.1.47、只绑 127.0.0.1；停止必带 UDID（`buildKillArgs` 空 UDID 抛错），兜底只结束自有子进程；6 个 `simulator:*` IPC 仅接受 macOS 桌面主窗口，web-remote 分级为 denied（开发实例覆盖率 100%，invoke=376）；Node 经已加载的登录 shell PATH 解析；退出时 `before-quit` 先清理 serve-sim，不关模拟器。父会话按实际参数实跑：页面 200、`button home -d` 成功、`--kill <udid>` 后端口释放无残留。已有修复全部保留；全量 561 pass / 5 fail / 1 error（基线内，新增 4 个测试）；iphone layout 11/11、panel-probe、smoke 通过，手机端无模拟器入口。
 - Luna 曾调用 `screencapture` 1 次（约 02:22，失败未出图），触发 Proma“屏幕录制”权限请求；已禁止，本功能不需要屏幕录制权限（serve-sim 读模拟器帧缓冲，截屏用 `simctl io`）。
 - 用户在开发实例桌面窗口体验通过（02:46）。与通知按钮修复一起打包安装。
+
+## 2026-09-28: 安装 d6af4f8b（通知按钮修复、iOS 模拟器面板）
+
+- 依据 Proma 安装申请 `install-request-2026-09-28.md`，结果见交接 `install-result-2026-09-28.md`。
+- 复核（`maintenance.md` §3）通过：marker = `personal` = `origin/personal` = `d6af4f8b`；证书签名 leaf `d993d52c`（与上一版相同）；无 `app-update.yml`；打包测试 561/5/1（失败/错误 = 基线）；申请列出的包内标记可见；安装脚本与依赖无改动。另审查 `simulator-preview-service.ts`：固定 `serve-sim@0.1.47`、无 shell spawn、仅 127.0.0.1:3200–3299、用户主动打开时启动，手机端 `simulator:*` 全部 denied。
+- 安装 12:10，脚本退出 0，备份 `20260928-121054-80664`，上一版 `3081e30f` → `previous/`，`c6c27d02` → 废纸篓，`20260927-233608-74409` 归档到外置硬盘并复核一致。**首次同证书升级：无文稿/Keychain 授权弹窗**，固定签名方案验证有效。
+- 用户验收：桌面 iOS 模拟器面板与两台手机（通知已开启状态、无模拟器入口）全部通过。
+- 基线差异均已确认：会话 899（正常使用）；渠道 8（用户删 omniroute）；启用定时任务 20 → 18（“Google 收录完成度监测（每周）”“Obsidian 归档同步 - 每周报告落盘”于 09-28 11:49/11:50 由用户停用）。
