@@ -763,3 +763,8 @@
 - 问题：19:33 手机发送的消息未到达 Mac（会话记录、运行时、main.log 均无痕迹），界面停在 “Agent Running”。推断：iOS 切后台再回到前台后，页面沿用“看似 OPEN 实已断开”的 IPC WebSocket，`ws.send` 静默丢失，35 秒后才超时，且上游发送失败时只停止运行状态、消息仍显示为已发送。
 - 修复（`web-electron-shim.ts` / `web-remote-ipc.ts`，均为个人版文件）：服务端支持 `ping` → `pong`；客户端空闲超过 10 秒时先 ping（3 秒无响应即丢弃旧连接并重连）再发请求；页面回到前台 / `pageshow` / `online` 时强制校验连接；连接关闭时立即让该连接上的在途请求失败（按连接区分，不误伤新连接）；`agent:send-message` 失败时显示红色提示“消息未送达 Mac”。
 - 验证：新增 harness 套件 `dead-socket`（让当前 `/api/ipc` 连接双向静默 11 秒后发请求），iPhone / Android 均在约 3.0 秒内重连并成功（修复前会挂起 35 秒）；首版实现中旧连接关闭误伤新连接请求，由该套件发现并修正。`mobile-preview.sh test` 默认 8 套全过；全量 601 pass / 0 fail；新增 ping/pong 单测。发送失败提示未做端到端验证。
+
+## 2026-09-28: 安装后修复批次合并（待安装）
+
+- 合并 `fix/post-install-2026-09-28`：serve-sim 独立 extraResources 与依赖、打包实跑冒烟、启动失败回退 npx 与状态同步、Web Remote 先于钥匙串相关初始化启动、安装脚本 SecurityAgent 等待与只对主进程回滚、退出清理限时、icon.icns 打包、helper thin arm64 签名、手机失效连接自动恢复。
+- 用户 2026-09-28 20:15 在开发实例确认。
