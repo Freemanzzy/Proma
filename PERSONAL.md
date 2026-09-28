@@ -743,3 +743,8 @@ python3 scripts/personal/import-proma-backup.py \\
 - `personal-main-log.ts` 记录安全摘要；console.warn 记为 `[WARN]`，console.error 记为 `[ERROR]`，仅 `uncaughtExceptionMonitor` 记为 `[FATAL]`。普通内容含 “fatal” 不提升级别；启动标记保持 `personal main process started`，兼容 `install-update.sh` 健康检查。
 - 验证：定向测试 4 pass / 0 fail / 22 assertions；全量 `bun test` 599 pass / 0 fail（91 files，1331 assertions）；workspace typecheck、`build:main`、`build:renderer`、`build:web-preload` 通过。Renderer 构建有既有大 chunk 提示。
 - 范围：仅主进程日志实现、单测与本记录；未改动既有界面、手机补丁或模拟器功能。
+
+## 2026-09-28: 记录上游改动面基线
+
+- 对 `git diff --name-status v0.19.58..personal` 去掉新增文件后统计 71 个上游已有文件变更：浏览器/主题资源清理 8、模拟器入口/挂载 4、其他个人版改动 59。`data-web-remote-*` 标记分布在 13 个 renderer 源文件、22 种标记名；因对应节点没有足够稳定且唯一的上游语义定位器，本次保留，避免以易变 class/文案替代造成手机回归。
+- `docs/personal/web-remote.md` 新增“上游改动面”记录，前后上游已有改动文件数仍为 71（未修改标记）。
