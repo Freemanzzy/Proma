@@ -125,3 +125,11 @@ harness 默认整体超时 300 秒（可用 `--timeout-ms` 覆盖），每次页
 ### WebSocket 压缩（2026-09-29）
 
 Web Remote WebSocket 为超过 16 KB 的消息启用 per-message deflate；服务端与客户端均禁用 context takeover，zlib 并发限制为 2，避免跨消息压缩状态与过量并发占用。浏览器在握手协商扩展；本轮尚未完成 iOS Safari 与 Android Chrome 真机/模拟器握手验证。
+
+### 大会话历史（2026-09-29）
+
+- 手机通过完整 UI IPC 读取 SDK 历史时，服务端先将 tool_result 文本裁剪至约 16 KB（追加原长度提示），把 base64 图片块替换为含 MIME/尺寸估算的占位；原文提示“完整内容请在桌面查看”。随后按约 2 MiB 序列化字节预算从尾部取完整轮次；未裁剪历史会以 `hasEarlier/startIndex/omittedCount` 元数据标记。tool_use 与其 tool_result 被识别为同一轮，单个超预算轮次不拆分。
+- 手机通过固定的“加载更早（已省略 N 条）”按钮以 2 MiB 页预算回取并前置到当前列表。此实现复用现有 `agent:get-sdk-messages` session-scope IPC，无新增通道或额外分级；桌面 IPC 返回值不变。React 侧只增加一行事件钩子，手机 DOM 入口由个人版 mobile-patch 添加。
+- 大于 256 KB 的 IPC WebSocket 响应使用约 180 KiB UTF-8 分片并 base64 编码，携带请求 ID、序号和总数；客户端按序重组，任何进度分片都重置 35 秒无进展计时。小响应、ping/pong、断线恢复和 `agent:send-message` 失败提示沿用原路径。
+- 全量大结果单条展开未实现：当前 SDK 历史 IPC 仅提供整段会话读取，不暴露有稳定消息 ID 的单条 tool_result 读取入口；故占位明确要求桌面查看，不在客户端保留或再次传输大原文。
+- 未完成弱网合成大会话端到端测量与 iOS Safari/Android Chrome 压缩握手验收；详见 `docs/personal/changelog.md` 本次记录中的验证状态。

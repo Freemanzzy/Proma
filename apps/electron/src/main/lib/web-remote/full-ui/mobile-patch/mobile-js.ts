@@ -82,6 +82,50 @@ export const MOBILE_JS = String.raw`(function(){
     if(topbar&&!topbar.querySelector('[data-web-remote-refresh]')){
       var refresh=document.createElement('button'); refresh.type='button'; refresh.dataset.webRemoteRefresh='true'; refresh.innerHTML=ICONS.refresh; refresh.setAttribute('aria-label','刷新页面'); refresh.addEventListener('click',function(){window.location.reload()}); topbar.appendChild(refresh);
     }
+    function syncEarlierHistory(){
+      var meta=window.__PROMA_WEB_REMOTE_HISTORY_META;
+      var button=document.querySelector('[data-web-remote-load-earlier]');
+      var activeSession=document.querySelector('[data-session-switch-id].agent-session-item-active');
+      var activeId=activeSession&&activeSession.getAttribute('data-session-switch-id');
+      if(!meta||!meta.hasEarlier||!meta.startIndex||(meta.sessionId&&activeId&&meta.sessionId!==activeId)){
+        if(button)setIfChanged(button,'historyState','hidden',function(){button.hidden=true});
+        return;
+      }
+      if(!button){
+        button=document.createElement('button');
+        button.type='button';
+        button.dataset.webRemoteLoadEarlier='true';
+        button.style.cssText='position:fixed;z-index:2147483000;left:50%;top:calc(env(safe-area-inset-top) + 68px);transform:translateX(-50%);padding:7px 13px;border:1px solid rgba(127,127,127,.3);border-radius:999px;background:var(--background,#fff);color:var(--foreground,#222);font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.12)';
+        document.body.appendChild(button);
+      }
+      setIfChanged(button,'visibilityState','visible',function(){button.hidden=false});
+      setIfChanged(button,'historyState',String(meta.startIndex),function(){button.textContent='加载更早（已省略 '+meta.omittedCount+' 条）'});
+      if(!button.dataset.loadEarlierBound){
+        setIfChanged(button,'loadEarlierBound','true',function(){});
+        button.addEventListener('click',async function(){
+          var currentMeta=window.__PROMA_WEB_REMOTE_HISTORY_META;
+          if(!currentMeta||!currentMeta.hasEarlier||button.dataset.loading==='true')return;
+          setIfChanged(button,'loading','true',function(){button.textContent='正在加载…'});
+          try{
+            var requested=new URLSearchParams(location.search).get('session');
+            var sessionButton=document.querySelector('button[aria-label^="会话菜单："]');
+            var title=sessionButton?sessionButton.getAttribute('aria-label').replace(/^会话菜单：/,''):'';
+            var sessions=await window.electronAPI?.listAgentSessions?.();
+            var session=(sessions||[]).find(function(item){return requested?item.id===requested:item.title===title});
+            var load=window.__PROMA_WEB_REMOTE_LOAD_EARLIER;
+            if(session&&typeof load==='function')await load(session.id,currentMeta.startIndex);
+          }catch(error){
+            console.error('[Web Remote] 加载更早消息失败',error);
+            webRemoteToast('加载更早消息失败，请重试');
+          }finally{
+            var latest=window.__PROMA_WEB_REMOTE_HISTORY_META;
+            setIfChanged(button,'loading','false',function(){button.textContent=latest&&latest.hasEarlier?'加载更早（已省略 '+latest.omittedCount+' 条）':'加载更早的消息'});
+            syncEarlierHistory();
+          }
+        });
+      }
+    }
+    syncEarlierHistory();
     syncRightPanel();
     var topbar=document.querySelector('[data-web-remote-mobile-topbar]');
     if (topbar && !topbar.querySelector('[data-web-remote-notification-entry]')) {

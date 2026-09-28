@@ -31,6 +31,24 @@ let livenessCheck: Promise<WebSocket> | null = null
 const LIVENESS_IDLE_MS = 10_000
 const PING_TIMEOUT_MS = 3_000
 const pending = new Map<string, { resolve(value: unknown): void; reject(error: unknown): void; timer: number; ws?: WebSocket }>()
+const responseChunks = new Map<string, { requestId?: string; total: number; parts: string[]; received: number }>()
+const RESPONSE_TIMEOUT_MS = 35_000
+
+function consumeChunk(message: { id?: string; requestId?: string; seq?: number; total?: number; data?: string }): string | null {
+  if (!message.id || !Number.isInteger(message.seq) || !Number.isInteger(message.total) || typeof message.data !== 'string' || !message.total || message.total > 4096 || message.seq! < 0 || message.seq! >= message.total) return null
+  let transfer = responseChunks.get(message.id)
+  if (!transfer) { transfer = { requestId: message.requestId, total: message.total!, parts: new Array(message.total), received: 0 }; responseChunks.set(message.id, transfer) }
+  if (transfer.total !== message.total || transfer.requestId !== message.requestId) { responseChunks.delete(message.id); return null }
+  if (transfer.parts[message.seq!] === undefined) { transfer.parts[message.seq!] = message.data; transfer.received++ }
+  const request = message.requestId ? pending.get(message.requestId) : undefined
+  if (request) { window.clearTimeout(request.timer); request.timer = window.setTimeout(() => { pending.delete(message.requestId!); responseChunks.delete(message.id!); request.reject(new Error('IPC 请求超时: response chunks stalled')) }, RESPONSE_TIMEOUT_MS) }
+  if (transfer.received !== transfer.total) return null
+  responseChunks.delete(message.id)
+  const binary = atob(transfer.parts.join(''))
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index)
+  return new TextDecoder().decode(bytes)
+}
 
 function encode(value: unknown): unknown {
   if (value === undefined) return { [TYPE_KEY]: 'undefined' }
@@ -68,6 +86,16 @@ function decode(value: unknown): unknown {
   return output
 }
 
+function normalizeHistoryWindow(value: unknown, sessionId?: string): unknown {
+  if (!value || typeof value !== 'object' || (value as { __webRemoteHistoryWindow?: unknown }).__webRemoteHistoryWindow !== true) return value
+  const windowed = value as { messages?: unknown; omittedCount?: number; hasEarlier?: boolean; startIndex?: number }
+  const messages = Array.isArray(windowed.messages) ? windowed.messages : []
+  const metadata = { omittedCount: windowed.omittedCount ?? 0, hasEarlier: windowed.hasEarlier === true, startIndex: windowed.startIndex ?? 0, sessionId }
+  Object.defineProperty(messages, '__webRemoteHistory', { configurable: true, value: metadata })
+  ;(window as Window & { __PROMA_WEB_REMOTE_HISTORY_META?: typeof metadata }).__PROMA_WEB_REMOTE_HISTORY_META = metadata
+  return messages
+}
+
 function notify(channel: string, value: unknown): void {
   const event = { sender: window }
   for (const listener of [...(listeners.get(channel) ?? [])]) listener(event, decode(value))
@@ -101,7 +129,12 @@ function connect(): Promise<WebSocket> {
     next.onmessage = (event) => {
       try {
         lastInboundAt = Date.now()
-        const message = JSON.parse(typeof event.data === 'string' ? event.data : '') as { type?: string; id?: string; ok?: boolean; value?: unknown; error?: unknown; channel?: string }
+        let message = JSON.parse(typeof event.data === 'string' ? event.data : '') as { type?: string; id?: string; requestId?: string; seq?: number; total?: number; data?: string; ok?: boolean; value?: unknown; error?: unknown; channel?: string }
+        if (message.type === 'chunk') {
+          const assembled = consumeChunk(message)
+          if (assembled === null) return
+          message = JSON.parse(assembled) as typeof message
+        }
         if (message.type === 'pong' && message.id) {
           const request = pending.get(message.id)
           if (request) { pending.delete(message.id); window.clearTimeout(request.timer); request.resolve(true) }
@@ -197,11 +230,18 @@ async function invokeWithToken(channel: string, args: unknown[], confirmToken?: 
     const timer = window.setTimeout(() => {
       pending.delete(id)
       reject(new Error(`IPC 请求超时: ${channel}`))
-    }, 35_000)
+    }, RESPONSE_TIMEOUT_MS)
     pending.set(id, { resolve, reject, timer, ws })
     ws.send(payload)
   })
-  return response
+  return channel === 'agent:get-sdk-messages' ? normalizeHistoryWindow(response, typeof args[0] === 'string' ? args[0] : undefined) : response
+}
+
+async function loadEarlierHistory(sessionId: string, endIndex: number): Promise<unknown[]> {
+  const messages = await invokeWithToken('agent:get-sdk-messages', [sessionId, { endIndex, budgetBytes: 2 * 1024 * 1024 }])
+  if (!Array.isArray(messages)) return []
+  window.dispatchEvent(new CustomEvent('proma-web-remote-history-earlier', { detail: { sessionId, messages } }))
+  return messages
 }
 
 function safeDeniedValue(channel: string): unknown {
@@ -299,6 +339,7 @@ async function invokeStrict(channel: string, ...args: unknown[]): Promise<unknow
 
 if (typeof window !== 'undefined') {
   Object.defineProperty(window, '__PROMA_WEB_REMOTE_INVOKE', { configurable: false, enumerable: false, value: invokeStrict })
+  Object.defineProperty(window, '__PROMA_WEB_REMOTE_LOAD_EARLIER', { configurable: false, enumerable: false, value: loadEarlierHistory })
 }
 
 function send(channel: string, ...args: unknown[]): void {

@@ -8,6 +8,7 @@ import type { WebRemoteConfig } from '../web-remote-auth'
 import { decodeWebRemoteValue, encodeWebRemoteValue } from './serialization'
 import { WebRemoteRegistrationTable } from './registration-table'
 import { getWebRemoteChannelPolicy, getDeclaredWebRemoteChannels, type WebRemoteChannelPolicyEntry } from './channel-policy'
+import { selectWebRemoteHistoryWindow } from './sdk-history-window'
 
 const REQUEST_TIMEOUT_MS = 30_000
 const CONFIRM_TTL_MS = 60_000
@@ -348,8 +349,14 @@ export class WebRemoteIpcBridge {
     return null
   }
 
-  private filterResult(channel: string, value: unknown): unknown {
+  private filterResult(channel: string, value: unknown, args: unknown[]): unknown {
     let filtered = channel === 'settings:get' || channel === 'channel:list' ? redactSensitive(value) : channel === 'agent:get-mcp-config' ? redactMcpConfig(value) : value
+    if (channel === 'agent:get-sdk-messages' && Array.isArray(value)) {
+      const paging = args[1] && typeof args[1] === 'object' ? args[1] as { budgetBytes?: unknown; endIndex?: unknown } : {}
+      const budget = typeof paging.budgetBytes === 'number' ? paging.budgetBytes : 2 * 1024 * 1024
+      const endIndex = typeof paging.endIndex === 'number' ? paging.endIndex : value.length
+      filtered = { __webRemoteHistoryWindow: true, ...selectWebRemoteHistoryWindow(value, budget, endIndex) }
+    }
     if (channel === 'agent:get-pending-requests' && filtered && typeof filtered === 'object') {
       const snapshot = filtered as { permissions?: unknown; askUsers?: unknown; exitPlans?: unknown }
       const filterRequests = (items: unknown): unknown => Array.isArray(items)
@@ -428,7 +435,7 @@ export class WebRemoteIpcBridge {
     if (!handler) { this.send(client, { type: 'response', id, ok: false, error: `unknown channel: ${channel}` }); return }
     try {
       const value = await Promise.race([Promise.resolve(handler(fakeEvent(sender), ...args)), new Promise<never>((_, reject) => setTimeout(() => reject(new Error('IPC 请求超时')), REQUEST_TIMEOUT_MS))])
-      this.send(client, { type: 'response', id, ok: true, value: encodeWebRemoteValue(this.filterResult(channel, value)) })
+      this.send(client, { type: 'response', id, ok: true, value: encodeWebRemoteValue(this.filterResult(channel, value, args)) })
     } catch (error) {
       try { this.send(client, { type: 'response', id, ok: false, error: serializeError(error) }) }
       catch (serializationError) { console.error('[Web Remote] 响应序列化失败:', serializationError) }
@@ -436,7 +443,20 @@ export class WebRemoteIpcBridge {
   }
 
   private send(client: IpcClient, message: unknown): void { if (client.ws.readyState === WebSocket.OPEN) this.sendRaw(client.ws, JSON.stringify(message)) }
-  private sendRaw(ws: WebSocket, message: string): void { ;(ws as unknown as { send(data: string): void }).send(message) }
+  private sendRaw(ws: WebSocket, message: string): void {
+    const bytes = Buffer.from(message, 'utf8')
+    const chunkBytes = 180 * 1024
+    if (bytes.byteLength <= 256 * 1024) { (ws as unknown as { send(data: string): void }).send(message); return }
+    let requestId: string | undefined
+    try { requestId = (JSON.parse(message) as { id?: string }).id } catch {}
+    const transferId = randomBytes(12).toString('hex')
+    const total = Math.ceil(bytes.byteLength / chunkBytes)
+    for (let seq = 0; seq < total; seq++) {
+      const data = bytes.subarray(seq * chunkBytes, Math.min((seq + 1) * chunkBytes, bytes.byteLength)).toString('base64')
+      const frame = JSON.stringify({ type: 'chunk', id: transferId, requestId, seq, total, data })
+      ;(ws as unknown as { send(data: string): void }).send(frame)
+    }
+  }
 }
 
 function serializeError(error: unknown): unknown {

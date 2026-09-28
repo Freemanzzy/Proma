@@ -823,3 +823,11 @@
 
 - WebSocketServer 启用 per-message deflate，阈值 16 KB，双端 no-context-takeover，zlib 并发限制 2；扩展仅作用于 WebSocket，不影响桌面 IPC。
 - 更新 `docs/personal/web-remote.md`。验证：Electron typecheck 通过；web-remote-server 定向测试因测试初始化时 Electron mock 导出缺失而失败（0 pass / 2 fail），尚未完成 iOS Safari / Android Chrome 握手核验。
+
+## 2026-09-29: Web Remote 大会话历史分页与分块传输
+
+- 仅对 Web Remote `agent:get-sdk-messages` 响应启用历史裁剪：先将 tool_result 内超 16 KB 文本裁剪并注明原大小，图片块/base64 图片改为含类型与尺寸估算的占位；再按约 2 MiB JSON 序列化预算从尾部选取完整轮次，返回 omittedCount/hasEarlier/startIndex 元数据。轮次扫描将匹配的 tool_use 与 tool_result 作为同轮续接；超预算单轮会整体保留，不从中间截断。桌面 IPC 未改。
+- 手机端由 `mobile-patch` 增加“加载更早（已省略 N 条）”按钮，复用 IPC 传入 endIndex 与预算，以 2 MiB 页前置消息。`AgentView.tsx` 仅新增一行事件监听钩子同步加载结果，符合尽量缩小上游改动面；未新增 IPC 通道，既有 `agent:get-sdk-messages` 继续按 session scope 鉴权。单条原文展开未实现，原因是没有稳定 message ID 与单条 tool_result 读取 API；占位文案提示完整内容请在桌面查看。
+- 大于 256 KB 的 IPC 响应按约 180 KiB UTF-8 切片，分片带请求 ID/序号/总数；shim 重组并在每个进度分片到达时重置 35 秒超时。WebSocket 压缩另见同日上一节提交：threshold 16 KB、双端 no-context-takeover、concurrencyLimit=2。
+- 验证：历史窗口/瘦身、手机 patch 与 Web Remote 分级集成定向测试 **20 pass / 0 fail**（89 assertions）；全量 `bun test` **541 pass / 0 fail / 0 error**（83 files，1222 assertions）；typecheck、build:main、build:renderer、build:web-preload 均通过。Renderer 仍有既有大 chunk 警告。手机回归实跑 8 套，其中 7 套通过（panel-probe、smoke、layout、dead-socket、Android smoke/attachments/dead-socket）；iPhone mobile-polish 因既有侧栏目标会话“回复 pong”不可见失败，未涉及新历史入口，待重跑确认。定向 server 测试仍受现有 Electron mock 导出缺失影响，0 pass / 2 fail。
+- 未完成：未构造/清理 `~/.proma-dev` 30 MB 合成会话，未运行 CDP 300 ms/2–4 Mbps 弱网修复前后对比，未验证 Safari/Chrome 压缩扩展握手；因此无真实大会话首屏耗时与传输字节对比，不把算法测试结果冒充端到端证据。开发实例、8443 与 iPhone 17 Pro 模拟器已启动并保留，供继续验收；未运行安装更新、未退出/重启正式 Proma。
