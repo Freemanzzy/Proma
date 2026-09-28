@@ -677,3 +677,8 @@
 
 - 将 `PERSONAL.md` 收敛为 3,506 字节当前状态页（38 行），保留 `## 与上游的差异` 与 `## 同步规则` 标题；98 节原记录整体迁入 `docs/personal/changelog.md`。对比迁移前 `b3ba74a7` 的 `PERSONAL.md`，从 `## 变更记录` 起历史原文逐字节一致：672 行、133,897 字节。
 - 更新 `CLAUDE.md`、maintenance/fallback/switch runbook、README 中记录位置说明；历史只追加至 changelog，当前基线/同步规则仍以 PERSONAL.md 为准。
+
+## 2026-09-28: 打包时校验手机选择器原文
+
+- `package-personal.sh` 在签名前调用 `check-packaged-mobile-selectors.cjs`，从 ASAR 提取 `dist/main.cjs` 并确认 3 个关键选择器含原始中文/属性值，不含对应转义形式；若不符合即失败中止。
+- 验证：`bash -n scripts/personal/package-personal.sh`、`node --check scripts/personal/check-packaged-mobile-selectors.cjs` 通过；对当前 `apps/electron/dist/main.cjs` 校验通过（3/3）。没有运行完整打包。旧 `out/mac-arm64/Proma.app` 是此前生成的过期产物，尝试检查该旧 ASAR 失败，不能用于判定新脚本结果。
