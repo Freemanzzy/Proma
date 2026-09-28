@@ -93,6 +93,27 @@ tailscale serve --https=8443 off
 - `bash scripts/personal/mobile-preview.sh test [suites...]`：默认运行 iPhone 的 panel-probe/smoke/mobile-polish/layout 与 Android 的 smoke/attachments；每套单独去掉代理变量并受 420 秒外层 watchdog 保护，终端只汇总结果，完整 harness 输出分别保存在 `/tmp/proma-mobile-preview-<ua>-<suite>.log`；结束核查无残留 `proma-mobile-chrome`。
 - `bash scripts/personal/mobile-preview.sh status` 查看服务、模拟器与 harness 进程；`stop` 只按记录 PID 停止开发实例进程树，关闭 8443 并确认 Serve 路由状态。用户需要继续体验时，最后运行 `start` 与 `sim`，保持服务运行，不要执行 `stop`。
 
+### 首屏资源拆分评估（2026-09-28）
+
+使用 `build:renderer` 生成的当前产物按 chunk 大小排序（gzip 为构建日志数据）：
+
+| 产物 | 原始体积 | gzip | 判断 |
+|---|---:|---:|---|
+| `index-DExTehsL.js` | 5,738,122 B | 1,738,120 B | HTML 唯一 module entry，首屏必需；内含代码编辑器/语法高亮等共享 UI，非独立桌面功能，不能直接排除 |
+| `index-DplxyxBx.js` | 1,614,360 B | 492,360 B | 生成的独立 chunk，需调用时加载；现有构建输出未提供 module-level attribution |
+| `emacs-lisp-*.js` | 779,850 B | 196,030 B | 语法语言 chunk，非桌面专用，通常按编辑内容按需加载 |
+| `cynefin-*.js` | 691,030 B | 155,100 B | 图表/可视化 chunk，非桌面专用，交互场景使用 |
+| `cpp-*.js` | 626,080 B | 44,820 B | 语法语言 chunk，按需加载 |
+| `wasm-*.js` | 622,340 B | 230,290 B | 独立 WASM 相关 chunk，生成物未直接识别具体模块；不是桌面专用 |
+| `mermaid.core-*.js` | 592,260 B | 138,360 B | Mermaid 图表核心，非桌面专用，图表场景使用 |
+| `cytoscape.esm-*.js` | 443,720 B | 142,360 B | 图可视化依赖，非桌面专用，视图使用时加载 |
+| `wolfram-*.js` | 262,390 B | 77,140 B | 语法语言 chunk，按需加载 |
+| `vue-vine-*.js` | 190,050 B | 17,980 B | 语法语言 chunk，按需加载 |
+
+当前 chunk 表可判断加载边界，但不能替代 Rollup 模块级可视化；首屏 entry 显示含有编辑器/高亮相关实现，尚未证明其中哪些依赖可延迟加载。1,511,206 B 图片为 `onboarding/hopper-seaside-white-house.png`，由 App 与 onboarding 组件引用；通常会在欢迎/新手引导 UI 中显示，不是已有会话的必要首屏画面，但图片 URL 是静态资源，若组件/浏览器提前请求仍需网络面板确认。
+
+**不实施拆分**：目前没有可复现的安全代码切分方案与首屏提速 ≥30% 的证据；且主 entry 使用范围涉及桌面与手机共享界面，任何改动都需证明桌面行为不变。为遵守阈值，不改 Vite 或上游文件。后续建议先用 Rollup visualizer/sourcemap 确认 entry 内最大模块，再做临时分支验证手机 transfer/ready timing 和桌面回归。
+
 ### 上游改动面（2026-09-28）
 
 - 基线 `v0.19.58..personal` 共 71 个上游已有文件发生修改（非新增）。分类：其他个人版/同步改动 59；桌面模拟器入口与挂载 4（`agent-atoms.ts`、`SidePanel.tsx`、`DiffPanelTabBar.tsx` 等）；浏览器移除及资源清理 8（内置浏览器 Skill 删除、主题预览资源清理等）。本轮未删除既有上游文件改动，因此改前/改后均为 71。

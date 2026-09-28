@@ -748,3 +748,8 @@ python3 scripts/personal/import-proma-backup.py \\
 
 - 对 `git diff --name-status v0.19.58..personal` 去掉新增文件后统计 71 个上游已有文件变更：浏览器/主题资源清理 8、模拟器入口/挂载 4、其他个人版改动 59。`data-web-remote-*` 标记分布在 13 个 renderer 源文件、22 种标记名；因对应节点没有足够稳定且唯一的上游语义定位器，本次保留，避免以易变 class/文案替代造成手机回归。
 - `docs/personal/web-remote.md` 新增“上游改动面”记录，前后上游已有改动文件数仍为 71（未修改标记）。
+
+## 2026-09-28: 首屏资源拆分评估（未实施）
+
+- 本地 renderer 产物 Top 10 chunk 与压缩数据见 `docs/personal/web-remote.md`。HTML 唯一 module entry `index-DExTehsL.js` 为 5,738,122 B（gzip 1,738,120 B）；最大图片 `hopper-seaside-white-house.png` 为 1,511,206 B，属于 onboarding/welcome 展示，不是既有会话的必需内容（浏览器是否提前下载仍需网络面板复核）。语言包大 chunk 按需加载，图表 chunk 由相应 UI 使用。
+- 未能从当前 Vite build 产物精确归因 entry 内的 Top 10 源模块，且没有证明安全拆分可令手机首屏传输或就绪时间下降 ≥30%，也未验证桌面行为不变；按门槛不实施代码改动。建议后续用 Rollup visualizer/sourcemap 分析 entry 内模块后再评估。
