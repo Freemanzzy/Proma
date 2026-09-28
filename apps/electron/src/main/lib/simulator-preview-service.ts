@@ -1,10 +1,13 @@
 import { execFile as execFileCallback, spawn, type ChildProcess } from 'node:child_process'
 import { promisify } from 'node:util'
 import { createServer } from 'node:net'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, readdir, readFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { getAgentSessionWorkspacePath } from './config-paths'
-import type { SimulatorDevice, SimulatorPreviewStatus } from '@proma/shared'
+import { getEffectiveProxyUrl } from './proxy-settings-service'
+import type { SimulatorDevice, SimulatorPreviewStatus, SimulatorPreviewStream } from '@proma/shared'
 
 const execFile = promisify(execFileCallback)
 const SERVE_SIM = 'serve-sim@0.1.47'
@@ -32,7 +35,7 @@ async function portAvailable(port: number): Promise<boolean> {
 
 function commandPath(command: string): string {
   const paths = (process.env.PATH ?? '').split(':')
-  const found = paths.map((path) => join(path, command)).find((path) => require('node:fs').existsSync(path))
+  const found = paths.map((path) => join(path, command)).find((path) => existsSync(path))
   if (!found) throw new Error(`未找到 ${command}。请安装 Node.js 20 或更新版本，并确保其位于登录 shell 的 PATH 中。`)
   return found
 }
@@ -51,7 +54,35 @@ export async function listSimulatorDevices(): Promise<SimulatorDevice[]> {
   return Object.entries(data.devices ?? {}).filter(([runtime]) => /\.iOS-|\.iPadOS-/i.test(runtime)).flatMap(([runtime, devices]) => devices.map(({ udid, name, state }) => ({ udid, name, state, runtime })))
 }
 
-export async function getSimulatorPreviewStatus(): Promise<SimulatorPreviewStatus> { return { ...current } }
+/** serve-sim 在 $TMPDIR/serve-sim/server-<udid>.json 登记每个流；只取本进程拉起的 serve-sim（按 PID 过滤）。 */
+export async function readServeSimStreams(pid: number, dir = join(tmpdir(), 'serve-sim')): Promise<string[]> {
+  let names: string[] = []
+  try { names = await readdir(dir) } catch { return [] }
+  const devices: string[] = []
+  for (const name of names) {
+    if (!/^server-.+\.json$/.test(name)) continue
+    try {
+      const entry = JSON.parse(await readFile(join(dir, name), 'utf8')) as { pid?: number; device?: string }
+      if (entry.pid === pid && typeof entry.device === 'string') devices.push(entry.device)
+    } catch { /* 忽略不完整的状态文件 */ }
+  }
+  return devices
+}
+
+/** 实际显示的设备：优先启动时指定且仍在运行的设备，否则取流中第一个已启动的设备。 */
+export function pickActiveDevice(launched: string | undefined, streams: SimulatorPreviewStream[]): string | undefined {
+  if (launched && streams.some((stream) => stream.udid === launched && stream.booted)) return launched
+  return streams.find((stream) => stream.booted)?.udid ?? launched
+}
+
+export async function getSimulatorPreviewStatus(): Promise<SimulatorPreviewStatus> {
+  if (!current.running || !child?.pid) return { ...current }
+  const devices = await readServeSimStreams(child.pid)
+  if (!devices.length) return { ...current }
+  const booted = new Set((await listSimulatorDevices().catch(() => [])).filter((device) => device.state === 'Booted').map((device) => device.udid))
+  const streams = devices.map((udid) => ({ udid, booted: booted.has(udid) }))
+  return { ...current, udid: pickActiveDevice(currentUdid, streams), streams }
+}
 
 export async function startSimulatorPreview(udid: string): Promise<SimulatorPreviewStatus> {
   if (!/^[A-Fa-f0-9-]{20,}$/.test(udid)) throw new Error('模拟器 UDID 无效。')
@@ -63,7 +94,9 @@ export async function startSimulatorPreview(udid: string): Promise<SimulatorPrev
   if (device.state !== 'Booted') await execFile('/usr/bin/xcrun', ['simctl', 'boot', udid])
   const npx = await verifyNode()
   const port = await choosePort(portAvailable)
-  const proc = spawn(npx, buildServeSimArgs(udid, port), { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] })
+  const env = { ...process.env }
+  if (!env.HTTPS_PROXY && !env.https_proxy) { const proxy = await getEffectiveProxyUrl().catch(() => undefined); if (proxy) { env.HTTPS_PROXY = proxy; env.HTTP_PROXY = env.HTTP_PROXY ?? proxy } }
+  const proc = spawn(npx, buildServeSimArgs(udid, port), { env, stdio: ['ignore', 'pipe', 'pipe'] })
   child = proc
   currentUdid = udid
   const url = `http://127.0.0.1:${port}`
@@ -83,8 +116,11 @@ export async function startSimulatorPreview(udid: string): Promise<SimulatorPrev
 
 export async function stopSimulatorPreview(udid = currentUdid): Promise<void> {
   const ownChild = child
-  if (udid) {
-    try { const npx = await verifyNode(); await execFile(npx, buildKillArgs(udid), { timeout: 15_000 }) } catch { /* PID fallback below */ }
+  // serve-sim 会跟随切换的设备登记多个流（同一 PID）；逐个按 UDID 停止，绝不使用无参 --kill。
+  const targets = new Set<string>(udid ? [udid] : [])
+  if (ownChild?.pid) for (const device of await readServeSimStreams(ownChild.pid)) targets.add(device)
+  if (targets.size) {
+    try { const npx = await verifyNode(); for (const target of targets) await execFile(npx, buildKillArgs(target), { timeout: 15_000 }).catch(() => undefined) } catch { /* PID fallback below */ }
   }
   if (ownChild?.pid && child === ownChild) {
     terminateOwnedChild(ownChild)
@@ -105,6 +141,16 @@ export async function captureSimulatorScreenshot(udid: string, sessionId: string
   const path = join(dir, `simulator-${Date.now()}.png`)
   await execFile('/usr/bin/xcrun', ['simctl', 'io', udid, 'screenshot', path], { timeout: 30_000 })
   return path
+}
+
+/** 关闭模拟器本身（释放内存）；若正在预览该设备，先停止预览。 */
+export async function shutdownSimulator(udid: string): Promise<void> {
+  if (!/^[A-Fa-f0-9-]{20,}$/.test(udid)) throw new Error('模拟器 UDID 无效。')
+  const status = await getSimulatorPreviewStatus()
+  if (status.running && (status.udid === udid || status.streams?.some((stream) => stream.udid === udid))) await stopSimulatorPreview()
+  await execFile('/usr/bin/xcrun', ['simctl', 'shutdown', udid], { timeout: 60_000 }).catch((error: { stderr?: string }) => {
+    if (!/current state: Shutdown/i.test(error?.stderr ?? '')) throw error
+  })
 }
 
 export async function cleanupSimulatorPreview(): Promise<void> { if (child) await stopSimulatorPreview(currentUdid) }

@@ -34,6 +34,7 @@ export const WEB_REMOTE_CHANNEL_POLICY: Readonly<Record<string, WebRemoteChannel
   "simulator:status": { level: "denied", scope: "none", rationale: "读取本机模拟器预览状态，手机端禁止。" },
   "simulator:home": { level: "denied", scope: "none", rationale: "控制本机模拟器硬件按键，手机端禁止。" },
   "simulator:screenshot": { level: "denied", scope: "none", rationale: "保存本机模拟器截屏，手机端禁止。" },
+  "simulator:shutdown": { level: "denied", scope: "none", rationale: "关闭本机模拟器，手机端禁止。" },
   "agent-island:mark-session-viewed": { level: "denied", scope: "none", rationale: "原生窗口、终端、凭据、设置写入或外部副作用，不向手机 renderer 暴露。" },
   "agent:active-sessions-snapshot": { level: "read", scope: "none", rationale: "只读结果或状态事件；列表和设置结果在返回前按允许范围/敏感字段过滤。" },
   "agent:active-worktree-updated": { level: "session", scope: "session", rationale: "参数必须能解析出 sessionId 或 workspaceId/slug，并校验其在远程允许范围内。" },

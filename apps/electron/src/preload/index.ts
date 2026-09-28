@@ -236,6 +236,7 @@ export interface ElectronAPI {
   stopSimulatorPreview: (udid?: string) => Promise<void>
   getSimulatorPreviewStatus: () => Promise<import('@proma/shared').SimulatorPreviewStatus>
   pressSimulatorHome: (udid: string) => Promise<void>
+  shutdownSimulator: (udid: string) => Promise<void>
   captureSimulatorScreenshot: (udid: string, sessionId: string, workspaceSlug: string) => Promise<string>
   getTerminalSnapshot: (terminalId: string) => Promise<TerminalSnapshot>
   acknowledgeTerminalOutput: (input: TerminalOutputAck) => void
@@ -1410,6 +1411,7 @@ const electronAPI = {
   stopSimulatorPreview: (udid?: string) => ipcRenderer.invoke(SIMULATOR_IPC_CHANNELS.STOP, udid),
   getSimulatorPreviewStatus: () => ipcRenderer.invoke(SIMULATOR_IPC_CHANNELS.STATUS),
   pressSimulatorHome: (udid: string) => ipcRenderer.invoke(SIMULATOR_IPC_CHANNELS.HOME, udid),
+  shutdownSimulator: (udid: string) => ipcRenderer.invoke(SIMULATOR_IPC_CHANNELS.SHUTDOWN, udid),
   captureSimulatorScreenshot: (udid: string, sessionId: string, workspaceSlug: string) => ipcRenderer.invoke(SIMULATOR_IPC_CHANNELS.SCREENSHOT, { udid, sessionId, workspaceSlug }),
   getTerminalSnapshot: (terminalId: string) => ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.SNAPSHOT, terminalId),
   acknowledgeTerminalOutput: (input: TerminalOutputAck) => ipcRenderer.send(TERMINAL_IPC_CHANNELS.ACK_OUTPUT, input),

@@ -1,5 +1,8 @@
 import { describe, expect, it, mock } from 'bun:test'
-import { buildKillArgs, buildServeSimArgs, choosePort, terminateOwnedChild } from './simulator-preview-service'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { buildKillArgs, buildServeSimArgs, choosePort, pickActiveDevice, readServeSimStreams, terminateOwnedChild } from './simulator-preview-service'
 
 describe('simulator preview service helpers', () => {
   it('builds a pinned, loopback-only serve-sim command with fit and no panes', () => {
@@ -27,5 +30,23 @@ describe('simulator preview service helpers', () => {
     terminateOwnedChild({ pid: 123, exitCode: 0, kill: exitedKill } as never)
     expect(exitedKill).not.toHaveBeenCalled()
     terminateOwnedChild(null)
+  })
+
+  it('reads only the serve-sim streams owned by our PID', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'proma-serve-sim-state-'))
+    try {
+      writeFileSync(join(dir, 'server-A.json'), JSON.stringify({ pid: 42, device: 'AAAA' }))
+      writeFileSync(join(dir, 'server-B.json'), JSON.stringify({ pid: 42, device: 'BBBB' }))
+      writeFileSync(join(dir, 'server-C.json'), JSON.stringify({ pid: 7, device: 'CCCC' }))
+      writeFileSync(join(dir, 'server-bad.json'), '{')
+      expect((await readServeSimStreams(42, dir)).sort()).toEqual(['AAAA', 'BBBB'])
+      expect(await readServeSimStreams(42, join(dir, 'missing'))).toEqual([])
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('follows the booted device when the launched one was switched away', () => {
+    expect(pickActiveDevice('AIR', [{ udid: 'AIR', booted: false }, { udid: 'P17', booted: true }])).toBe('P17')
+    expect(pickActiveDevice('AIR', [{ udid: 'AIR', booted: true }, { udid: 'P17', booted: true }])).toBe('AIR')
+    expect(pickActiveDevice('AIR', [{ udid: 'AIR', booted: false }])).toBe('AIR')
   })
 })
