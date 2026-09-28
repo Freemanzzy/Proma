@@ -736,3 +736,10 @@ python3 scripts/personal/import-proma-backup.py \\
 - 父会话复核：拆分前后 CSS 规则一致、JS 仅状态写入路径变化；esbuild 产物保留中文选择器（`String.raw` 依赖打包器不转义非 ASCII，后续打包需核对）。用户 2026-09-28 14:27 在模拟器确认。
 - 同步策略决定写入 `docs/personal/maintenance.md` §4.1；周检任务已加入触发条件检查。
 - 与 `a040902d` 模拟器同步修复一并等待打包（用户要求暂缓）。
+
+## 2026-09-28: main.log 诊断信息脱敏与错误分级
+
+- `personal-log-writer.ts` 增加摘要脱敏（用户名路径、URL 查询、Bearer、token/key/secret/password、sk-/gh*_ 令牌、邮箱）、错误名/scope/message 字段、240 字截断与 60 秒同签名限频；限频 Map 上限 500，周期后写入累计 `suppressed=N`。修正此前半成品中正则双重转义及无捕获组 `$1` 的缺陷。
+- `personal-main-log.ts` 记录安全摘要；console.warn 记为 `[WARN]`，console.error 记为 `[ERROR]`，仅 `uncaughtExceptionMonitor` 记为 `[FATAL]`。普通内容含 “fatal” 不提升级别；启动标记保持 `personal main process started`，兼容 `install-update.sh` 健康检查。
+- 验证：定向测试 4 pass / 0 fail / 22 assertions；全量 `bun test` 599 pass / 0 fail（91 files，1331 assertions）；workspace typecheck、`build:main`、`build:renderer`、`build:web-preload` 通过。Renderer 构建有既有大 chunk 提示。
+- 范围：仅主进程日志实现、单测与本记录；未改动既有界面、手机补丁或模拟器功能。
