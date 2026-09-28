@@ -121,3 +121,7 @@ tailscale serve --https=8443 off
 - 可复用的既有稳定特征仍优先使用：右侧 Tab 以 `role="tablist"` + `aria-label="右侧工作区"` 定位；设置按钮按既有 `aria-label` 定位。模拟器菜单/标签本身继续保留显式标记，以避免与其它同类菜单项混淆。
 
 harness 默认整体超时 300 秒（可用 `--timeout-ms` 覆盖），每次页面评估前以 3 秒 CDP 探活；每次运行后自动撤销测试配对设备、删除自建会话、关闭 Chrome 并移除临时 profile。`full-ui/mobile-patch.test.ts` 使用 linkedom 执行注入脚本并多次触发 MutationObserver，验证刷新/面板/菜单/通知图标、标题和 Tab 下拉菜单的 DOM 写入趋于稳定。`layout` 检查文件、改动、Todo、定时任务、MCP/Skills 与项目记忆列表/详情的横向溢出和元素可点性；`panel-probe` 检查页面下拉中的 Tab 可点性；`mobile-polish` 检查刷新和会话单击切换。左侧项目名是展开/折叠分组，不是 `agentWorkspaceId` 切换，勿以此字段判定工作区按钮点击。同步上游后必须运行；安装后另由用户在安装版上用两台手机验收（CLAUDE.md §6 第 7 项）。每周一的版本检查任务会报告上游新增、尚未分级的 IPC 通道。
+
+### WebSocket 压缩（2026-09-29）
+
+Web Remote WebSocket 为超过 16 KB 的消息启用 per-message deflate；服务端与客户端均禁用 context takeover，zlib 并发限制为 2，避免跨消息压缩状态与过量并发占用。浏览器在握手协商扩展；本轮尚未完成 iOS Safari 与 Android Chrome 真机/模拟器握手验证。

@@ -818,3 +818,8 @@
 - `personal-log-writer.ts` 新增 `info` 级别与 `recordPersonalInfo` / `setPersonalInfoSink`（不依赖 electron）；`personal-main-log.ts` 初始化时接入 main.log，写 `[INFO]`。
 - `personal-delegation-wake.ts`：wake / consumed / queued / disabled / stopped / rate-limited / run-completed 等正常流转记 `[INFO]`；只有 run-error / start-error / dependency-error 记 `[WARN]`。
 - install-update.sh 健康检查只判 `[FATAL]`，不受影响。验证：typecheck、全量 611 pass / 0 fail、build:main。待下次打包。
+
+## 2026-09-29: Web Remote WebSocket 保守压缩
+
+- WebSocketServer 启用 per-message deflate，阈值 16 KB，双端 no-context-takeover，zlib 并发限制 2；扩展仅作用于 WebSocket，不影响桌面 IPC。
+- 更新 `docs/personal/web-remote.md`。验证：Electron typecheck 通过；web-remote-server 定向测试因测试初始化时 Electron mock 导出缺失而失败（0 pass / 2 fail），尚未完成 iOS Safari / Android Chrome 握手核验。
