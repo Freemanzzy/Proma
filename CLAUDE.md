@@ -5,7 +5,7 @@
 ## 1. 先读这些（每次开始工作前）
 
 0. `docs/personal/maintenance.md` — 与 Proma 共同维护的分工、交接单与**硬性规则**（双方共用，必读）。
-1. `PERSONAL.md` — 唯一事实来源：基线版本、与上游的差异清单、同步规则、同步记录、变更记录（末尾最新）。
+1. `PERSONAL.md` — 当前状态概览：基线、与上游差异、同步规则、构建/验证入口和待办；完整变更历史见 `docs/personal/changelog.md`（末尾最新）。
 2. `docs/personal/fallback-runbook.md` — 故障诊断、回滚应用、恢复数据、从源码重建。
 3. `docs/personal/switch-runbook.md` — 从官方版切换到个人版的逐步执行手册（切换时的主依据）。
 4. `docs/personal/web-remote.md` — 手机访问功能与排错（涉及手机问题时）。
@@ -57,7 +57,7 @@
 6. 手机回归（开发实例，端口 17889，与安装版 17888 并存）统一使用 `bash scripts/personal/mobile-preview.sh`：`start` 开启临时 8443 Serve 并启动开发实例；`sim [--device <name|udid>]` 在默认 iPhone 17 Pro 模拟器配对并截图验证 `/app/`；`test [suites...]` 去掉代理逐套运行 harness（默认 iPhone panel-probe/smoke/mobile-polish/layout 与 Android smoke/attachments）；`status` 查看状态；验证完成运行 `stop`。需要保留供用户体验时，完成回归后重新 `start` 并运行 `sim`，不运行 `stop`。harness 只对开发实例运行，不对安装版运行；桌面端手机适配在右侧“iOS 模拟器”标签中体验。
 7. **安装版手机验收（每次安装后必做）**：安装脚本通过后，用户用两台手机在**安装版**上打开 `/app/`，确认进入完整界面（不卡“正在启动”、不显示“手机界面暂不可用”）、发一条消息收到实时回复、测试通知可达。开发实例与安装版的运行条件不同（数据目录、环境变量、源文件是否存在），开发实例通过不代表安装版可用（2026-09-26 两处缺陷均只在安装版出现）。
 8. 数据格式：比较上游 diff 中的 `CONFIG_VERSION`、`INDEX_VERSION`、`PLANNING_SCHEMA_VERSION`、`user_version` 等变化，写入报告。
-9. `PERSONAL.md`：更新基线、同步记录表，末尾追加 `## YYYY-MM-DD: ...` 记录。
+9. `PERSONAL.md`：更新当前基线/同步状态；完整历史在 `docs/personal/changelog.md` 末尾追加 `## YYYY-MM-DD: ...` 记录。
 
 ## 7. 文档规则（SSOT）
 

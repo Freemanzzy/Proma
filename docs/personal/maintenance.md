@@ -44,7 +44,7 @@
 - 已知风险与回滚要点：…
 ```
 
-**安装结果** `install-result-YYYY-MM-DD[-N].md`（Claude Code 写）：结论（成功/回滚/未执行）、复核项结果、安装脚本退出码、快照对比、安装版手机验收结果、遗留事项；同时在 `PERSONAL.md` 末尾追加记录并推送。
+**安装结果** `install-result-YYYY-MM-DD[-N].md`（Claude Code 写）：结论（成功/回滚/未执行）、复核项结果、安装脚本退出码、快照对比、安装版手机验收结果、遗留事项；同时在 `docs/personal/changelog.md` 末尾追加记录并推送。
 
 Claude Code 接手安装时只做必要复核：包内 marker commit 等于 `personal` HEAD 且已推送；`codesign --verify --deep --strict` 通过，且签名身份为本机固定证书 `Proma Personal Code Signing`（`codesign -dv` 显示 `Authority=Proma Personal Code Signing`，`codesign -d -r-` 的 designated requirement 含 `certificate leaf`；不得为 adhoc）；包内无 `app-update.yml`；打包日志测试数不超过基线；申请中列出的“需重点验证”项在包内可见（如 asar 内代码、`Contents/Resources` 文件）。任一不符则不安装，写安装结果说明原因。
 
@@ -70,9 +70,9 @@ Claude Code 接手安装时只做必要复核：包内 marker commit 等于 `per
 
 ## 5. 文档规则（SSOT）
 
-- 每类事实只有一个权威位置：基线、与上游差异、同步与变更记录 → `PERSONAL.md`；共同维护规则 → 本文件；Claude Code 的职责细节 → `CLAUDE.md`；操作步骤 → `docs/personal/*-runbook.md`；手机访问 → `docs/personal/web-remote.md`。其他文档引用，不复制。
+- 每类事实只有一个权威位置：当前基线、与上游差异、同步规则 → `PERSONAL.md`；完整变更历史 → `docs/personal/changelog.md`；共同维护规则 → 本文件；Claude Code 的职责细节 → `CLAUDE.md`；操作步骤 → `docs/personal/*-runbook.md`；手机访问 → `docs/personal/web-remote.md`。其他文档引用，不复制。
 - 变更记录只追加（`## YYYY-MM-DD: ...`），不改写历史；旧记录有误用新记录更正并写明更正了什么。
-- 改动影响权威内容时，同一提交内同步更新对应文档，并在变更记录中写明改了哪些文档。
+- 改动影响权威内容时，同一提交内同步更新对应文档，并在 `docs/personal/changelog.md` 追加记录，写明改了哪些文档。
 - 验证、审查、故障处理结果直接写入变更记录，无需询问：方法、实测证据、通过项、缺陷项、待办。
 - 手机端界面适配的桌面体验通过右侧工作区“iOS 模拟器”标签完成；手机 web-remote 不可见该入口，相关 simulator IPC 必须在分级表中标记 denied。
 - 周检报告、日志、对话、交接单都是快照；与 SSOT 冲突时以 SSOT 为准，并修正过时的一方。
