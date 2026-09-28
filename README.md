@@ -20,7 +20,7 @@
 > - 开发与验证：`scripts/personal/dev.sh` 启动开发实例，数据目录 `~/.proma-dev`，与日常数据隔离；加 `PROMA_WEB_REMOTE=1` 启用手机访问（端口与安装版分开）。
 > - 维护：Proma 内 Agent 负责同步、测试、打包与文档，Claude Code 负责安装与故障恢复，规则见 [`docs/personal/maintenance.md`](./docs/personal/maintenance.md)；切换与故障回退：[`switch-runbook.md`](./docs/personal/switch-runbook.md)、[`fallback-runbook.md`](./docs/personal/fallback-runbook.md)。
 >
-> 完整差异与变更记录请见 [`PERSONAL.md`](./PERSONAL.md)。
+> 当前状态与同步规则请见 [`PERSONAL.md`](./PERSONAL.md)，完整变更历史见 [`docs/personal/changelog.md`](./docs/personal/changelog.md)。
 <!-- personal-fork:end -->
 
 # Proma

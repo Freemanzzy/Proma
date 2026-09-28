@@ -6,7 +6,7 @@
 
 ## 0. 前置条件（任一不满足：停止并报告，不绕过、不临时修补）
 
-1. 仓库：`cd ~/Documents/proma-personal && git status -sb` 干净、在 `personal`、与 `origin/personal` 一致；`PERSONAL.md` 末尾有 “切换准备 P1–P3” 与 “复核修复” 记录。
+1. 仓库：`cd ~/Documents/proma-personal && git status -sb` 干净、在 `personal`、与 `origin/personal` 一致；`docs/personal/changelog.md` 末尾有 “切换准备 P1–P3” 与 “复核修复” 记录。
 2. 脚本存在：`scripts/personal/{package-personal.sh,install-update.sh,verify-backup.py,health-snapshot.py}`。
 3. 版本一致：
    ```bash
@@ -112,7 +112,7 @@ bash scripts/personal/install-update.sh apps/electron/out/mac-arm64/Proma.app 2>
    D=~/.proma-switch-backups/updater-caches-$(date +%Y%m%d); mkdir -p "$D"
    for c in com.proma.app.ShipIt cool.proma.app.ShipIt @promaelectron-updater; do [ -e ~/Library/Caches/$c ] && mv ~/Library/Caches/$c "$D/"; done
    ```
-3. `PERSONAL.md` 末尾追加 `## YYYY-MM-DD: 切换为日常主力`：版本、commit、快照对比结果、备份位置、遗留事项；同时把文首“目的 / 路径策略”从并存期描述更新为“已接管 `~/.proma`”。提交并推送（遵守 CLAUDE.md 公开仓库规则）。
+3. `docs/personal/changelog.md` 末尾追加 `## YYYY-MM-DD: 切换为日常主力`：版本、commit、快照对比结果、备份位置、遗留事项；同时将 `PERSONAL.md` 当前状态中的“已接管 `~/.proma`”相关说明保持准确。提交并推送（遵守 CLAUDE.md 公开仓库规则）。
 
 ## 8. 观察期（3–7 天）
 

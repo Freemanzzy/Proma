@@ -2,7 +2,7 @@
 
 > 用途：个人版 Proma 更新后无法启动或无法正常工作时，由 **Claude Code（Claude 桌面版中的 Claude Code，或终端 `claude`）** 按本手册诊断、回退、恢复。Proma 自身此时可能不可用，所以本手册不依赖 Proma。
 >
-> 状态：安装脚本、打包名与备份目录属于“切换计划”的设计，切换完成后以仓库中实际脚本为准。本手册与实际不一致时，先读仓库 `PERSONAL.md` 的最新记录，并在报告中指出差异。
+> 状态：安装脚本、打包名与备份目录属于“切换计划”的设计，切换完成后以仓库中实际脚本为准。本手册与实际不一致时，先读仓库 `PERSONAL.md` 当前状态，再查 `docs/personal/changelog.md` 最新记录，并在报告中指出差异。
 
 ---
 
@@ -189,7 +189,7 @@ python3 scripts/personal/health-snapshot.py --compare /tmp/health-snapshot-befor
 - `scripts/personal/package-personal.sh` 负责安装依赖、typecheck、基线测试、全部 Electron 构建及 arm64 目录包；产物仅写入仓库 `apps/electron/out/`，不启动、不安装。
 - `scripts/personal/install-update.sh NEW_APP` 默认安装到 `/Applications/Proma.app` 并备份 `~/.proma`；安装时先复制到同卷 `.Proma.installing-*`，再原子改名，并用 EXIT/ERR/INT/TERM 恢复原应用。只可在 `/tmp` 用 `--test-mode --apps-dir --data-dir --backup-root` 演练。`--dry-run` 不写数据；`--simulate-health-failure` 与 `--simulate-copy-failure` 可分别演练健康失败回滚和 staging 复制中断。新版失败时会在停止本次跟踪的新版 PID/子进程后保留 `Proma.failed-*.app`（仍留在 `/Applications`）；脚本不自动还原数据或移动官方更新缓存。默认健康观察 60 秒，更新前后快照写在时间戳备份目录的外层，不污染 `proma/` 副本。上一版应用（2026-09-27 起）保存在 `--backup-root` 下的 `previous/Proma.app`（默认即 `~/.proma-switch-backups/previous/Proma.app`，可用 `--previous-dir` 覆盖），不再放进 `/Applications`；替换已存在的上一版时先移入 `$HOME/.Trash`（可自行清空，重名加时间戳后缀，绝不覆盖）；旧版脚本留在 `/Applications/Proma.previous.app` 的上一版会在下次安装开始前自动迁移到新位置。
 - `python3 scripts/personal/verify-backup.py SRC BACKUP` 对比目录或 zip 的文件内容、大小、SHA-256、符号链接目标和权限；可多次传 `--exclude GLOB`。
-- 修复后在 `PERSONAL.md` 末尾追加 `## YYYY-MM-DD: 故障回退记录`（原因、操作、结果）。
+- 修复后在 `docs/personal/changelog.md` 末尾追加 `## YYYY-MM-DD: 故障回退记录`（原因、操作、结果）。
 
 ---
 

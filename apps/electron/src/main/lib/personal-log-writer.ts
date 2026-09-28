@@ -1,17 +1,59 @@
 import { appendFileSync, chmodSync, existsSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
 
-export type PersonalLogEvent = 'startup' | 'error' | 'fatal'
+export type PersonalLogEvent = 'startup' | 'warn' | 'error' | 'fatal'
 const MAX_LOG_BYTES = 5 * 1024 * 1024
 const ROTATED_LOG_COUNT = 3
 const messages: Record<PersonalLogEvent, string> = {
   startup: 'personal main process started',
-  error: 'main-process error recorded; details omitted',
-  fatal: 'fatal main-process event recorded; details omitted',
+  warn: 'main-process warning',
+  error: 'main-process error',
+  fatal: 'fatal main-process error',
 }
 
-export function appendPersonalMainLog(filePath: string, event: PersonalLogEvent, now = new Date(), maxBytes = MAX_LOG_BYTES, rotatedCount = ROTATED_LOG_COUNT): void {
-  const line = `${now.toISOString()} [${event.toUpperCase()}] ${messages[event]}\n`
+export interface PersonalLogErrorDetails {
+  name?: string
+  scope?: string
+  message?: string
+}
+
+const RATE_LIMIT_MS = 60_000
+const MAX_ERROR_SUMMARY_LENGTH = 240
+const MAX_RECENT_ERRORS = 500
+const recentErrors = new Map<string, { lastWrittenAt: number; suppressed: number }>()
+
+export function sanitizePersonalLogSummary(input: string): string {
+  return input
+    .replace(/https?:\/\/[^\s?#]+(?:\?[^\s#]*)?/gi, (url) => url.includes('?') ? `${url.split('?')[0]}?[redacted]` : url)
+    .replace(/\bBearer\s+[^\s,;]+/gi, 'Bearer [redacted]')
+    .replace(/\b(token|key|api[_-]?key|secret|password)\s*[:=]\s*[^\s,;]+/gi, '$1=[redacted]')
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[email]')
+    .replace(/\/(?:Users|home)\/[^/\s]+/g, '/[user]')
+    .replace(/\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_]{8,})\b/gi, '[token]')
+    .replace(/[\r\n\t]+/g, ' ')
+    .trim()
+    .slice(0, MAX_ERROR_SUMMARY_LENGTH)
+}
+
+export function appendPersonalMainLog(filePath: string, event: PersonalLogEvent, now = new Date(), maxBytes = MAX_LOG_BYTES, rotatedCount = ROTATED_LOG_COUNT, details?: PersonalLogErrorDetails): void {
+  let description = messages[event]
+  if (event !== 'startup' && details) {
+    const name = sanitizePersonalLogSummary(details.name || 'Error') || 'Error'
+    const scope = sanitizePersonalLogSummary(details.scope || 'main') || 'main'
+    const message = sanitizePersonalLogSummary(details.message || 'no message') || 'no message'
+    const signature = `${filePath}:${event}:${name}:${scope}:${message}`
+    const previous = recentErrors.get(signature)
+    if (previous && now.getTime() - previous.lastWrittenAt < RATE_LIMIT_MS) {
+      previous.suppressed++
+      return
+    }
+    const suppressed = previous?.suppressed ?? 0
+    recentErrors.delete(signature)
+    recentErrors.set(signature, { lastWrittenAt: now.getTime(), suppressed: 0 })
+    if (recentErrors.size > MAX_RECENT_ERRORS) recentErrors.delete(recentErrors.keys().next().value!)
+    description += ` name=${name} scope=${scope} message=${message}${suppressed ? ` suppressed=${suppressed}` : ''}`
+  }
+  const line = `${now.toISOString()} [${event.toUpperCase()}] ${description}\n`
   try {
     mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 })
     chmodSync(dirname(filePath), 0o700)

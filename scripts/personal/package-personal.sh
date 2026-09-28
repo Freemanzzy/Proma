@@ -61,6 +61,9 @@ if [[ ! -d "$APP" ]]; then
 fi
 [[ -n "$APP" && -d "$APP" ]] || { echo 'ERROR: Proma.app output not found' >&2; exit 1; }
 
+printf '\n== packaged mobile selector integrity ==\n'
+node "$ROOT/scripts/personal/check-packaged-mobile-selectors.cjs" "$APP/Contents/Resources/app.asar"
+
 printf '\n== code signature (%s) ==\n' "$SIGN_IDENTITY"
 codesign --force --deep --sign "$SIGN_IDENTITY" "$APP"
 codesign --verify --deep --strict "$APP"
