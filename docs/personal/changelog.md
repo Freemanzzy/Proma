@@ -687,3 +687,10 @@
 
 - 补齐日志分级边界：`uncaughtExceptionMonitor` 及明确的 `handleBootstrapFailure()` 现在会记录 `[FATAL]`；普通 console.error/warn 中的 fatal 文本仍不升级。健康检查启动标记不变。
 - 验证：typecheck、全量 `bun test`（599 pass / 0 fail / 0 error）、`build:main` 通过。
+
+## 2026-09-28: serve-sim 精确依赖随包分发
+
+- `apps/electron/package.json` 固定运行时依赖 `serve-sim: 0.1.47`，`bun.lock` 已记录 integrity；运行时依赖同步加入 serve-sim 及依赖闭包。服务优先用 Electron 自带 Node（`process.execPath` + `ELECTRON_RUN_AS_NODE=1`）执行包内入口，找不到时保留固定版本 npx 回退。electron-builder 对 `serve-sim/dist/**` 配置 asarUnpack，覆盖 `.node`、universal Mach-O helper 与 dylib。
+- 依赖核验：serve-sim 包内 native addon、simcam/simax/simduo 工具均为 macOS x86_64/arm64 universal；包内含 `serve-sim-native.node`、可执行 helper 与 `libSimCameraInjector.dylib`。runtime-deps 实测同步 138 个包；Electron Node 模式 `--version` 返回 0.1.47、`--list -q` 正常；实际本机流返回 HTTP 200，Home 按钮退出 0，`--kill <UDID>` 停流，测试模拟器 shutdown 后恢复 Booted。
+- 验证：定向服务测试 6 pass / 0 fail；全量测试 599 pass / 0 fail / 0 error；typecheck、build:main、build:renderer、build:web-preload 通过。手机预览全套 iPhone（panel-probe 2/2、smoke 7/7、mobile-polish 2/2、layout 11/11）和 Android（smoke 7/7、attachments）通过，JS exceptions 均 0。
+- 未做完整 app 打包；因此尚未在新 ASAR/签名 app 内实测 native helper 执行。未通过桌面 UI 自动化逐项复测面板设备切换/关机按钮；现有 CLI 的多流/关停路径有独立验证。

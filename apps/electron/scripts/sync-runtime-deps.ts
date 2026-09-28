@@ -52,6 +52,8 @@ export const EXTERNAL_RUNTIME_PACKAGES: readonly string[] = [
   'sharp',
   // 独立 Terminal utility process 通过 require 加载其 native PTY binding。
   'node-pty',
+  // 桌面 iOS 模拟器预览：固定版本，包内含 macOS universal native helpers。
+  'serve-sim',
 ]
 
 const appDir = resolve(import.meta.dir, '..')

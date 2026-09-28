@@ -3,6 +3,7 @@ import { promisify } from 'node:util'
 import { createServer } from 'node:net'
 import { mkdir, readdir, readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { getAgentSessionWorkspacePath } from './config-paths'
@@ -12,6 +13,37 @@ import type { SimulatorDevice, SimulatorPreviewStatus, SimulatorPreviewStream } 
 const execFile = promisify(execFileCallback)
 const SERVE_SIM = 'serve-sim@0.1.47'
 const FIRST_PORT = 3200
+
+interface ServeSimInvocation { command: string; scriptPath?: string; env: NodeJS.ProcessEnv }
+
+function findBundledServeSimScript(): string | undefined {
+  const require = createRequire(__filename)
+  const searchPaths = require.resolve.paths('serve-sim') ?? []
+  const candidates = searchPaths.map((nodeModules) => join(nodeModules, 'serve-sim', 'dist', 'serve-sim.js'))
+  return candidates.find((candidate) => existsSync(candidate))
+}
+
+async function getServeSimInvocation(): Promise<ServeSimInvocation> {
+  const bundledScript = findBundledServeSimScript()
+  if (bundledScript) {
+    return {
+      command: process.execPath,
+      scriptPath: bundledScript,
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    }
+  }
+  return { command: await verifyNode(), env: { ...process.env } }
+}
+
+function invocationArgs(invocation: ServeSimInvocation, args: string[]): string[] {
+  const cliArgs = args[0] === '--yes' && args[1] === SERVE_SIM ? args.slice(2) : args
+  return invocation.scriptPath ? [invocation.scriptPath, ...cliArgs] : args
+}
+
+async function runServeSim(args: string[], timeout = 15_000): Promise<void> {
+  const invocation = await getServeSimInvocation()
+  await execFile(invocation.command, invocationArgs(invocation, args), { env: invocation.env, timeout })
+}
 export function buildServeSimArgs(udid: string, port: number): string[] { return ['--yes', SERVE_SIM, '--host', '127.0.0.1', '--port', String(port), '--fit', '--panes', 'none', '-q', udid] }
 export function buildKillArgs(udid: string): string[] {
   if (!udid) throw new Error('停止 serve-sim 必须指定模拟器 UDID。')
@@ -92,11 +124,11 @@ export async function startSimulatorPreview(udid: string): Promise<SimulatorPrev
   const device = devices.find((item) => item.udid === udid)
   if (!device) throw new Error('找不到该 iOS 模拟器。')
   if (device.state !== 'Booted') await execFile('/usr/bin/xcrun', ['simctl', 'boot', udid])
-  const npx = await verifyNode()
+  const invocation = await getServeSimInvocation()
   const port = await choosePort(portAvailable)
-  const env = { ...process.env }
+  const env = { ...invocation.env }
   if (!env.HTTPS_PROXY && !env.https_proxy) { const proxy = await getEffectiveProxyUrl().catch(() => undefined); if (proxy) { env.HTTPS_PROXY = proxy; env.HTTP_PROXY = env.HTTP_PROXY ?? proxy } }
-  const proc = spawn(npx, buildServeSimArgs(udid, port), { env, stdio: ['ignore', 'pipe', 'pipe'] })
+  const proc = spawn(invocation.command, invocationArgs(invocation, buildServeSimArgs(udid, port)), { env, stdio: ['ignore', 'pipe', 'pipe'] })
   child = proc
   currentUdid = udid
   const url = `http://127.0.0.1:${port}`
@@ -120,7 +152,7 @@ export async function stopSimulatorPreview(udid = currentUdid): Promise<void> {
   const targets = new Set<string>(udid ? [udid] : [])
   if (ownChild?.pid) for (const device of await readServeSimStreams(ownChild.pid)) targets.add(device)
   if (targets.size) {
-    try { const npx = await verifyNode(); for (const target of targets) await execFile(npx, buildKillArgs(target), { timeout: 15_000 }).catch(() => undefined) } catch { /* PID fallback below */ }
+    try { for (const target of targets) await runServeSim(buildKillArgs(target), 15_000).catch(() => undefined) } catch { /* PID fallback below */ }
   }
   if (ownChild?.pid && child === ownChild) {
     terminateOwnedChild(ownChild)
@@ -131,7 +163,7 @@ export async function stopSimulatorPreview(udid = currentUdid): Promise<void> {
 }
 
 export async function pressSimulatorHome(udid: string): Promise<void> {
-  const npx = await verifyNode(); await execFile(npx, ['--yes', SERVE_SIM, 'button', 'home', '--device', udid], { timeout: 15_000 })
+  await runServeSim(['--yes', SERVE_SIM, 'button', 'home', '--device', udid], 15_000)
 }
 
 export async function captureSimulatorScreenshot(udid: string, sessionId: string, workspaceSlug: string): Promise<string> {

@@ -29,7 +29,7 @@
 ## 已知问题与待办
 
 - Renderer 首屏主 bundle 约 5.74 MB（Brotli 约 1.74 MB）；因未证明安全切分能减少首屏 ≥30%，暂不改构建配置，分析见 Web Remote 文档。
-- `serve-sim@0.1.47` 当前由 npx 启动；需评估随 Electron 包分发、缓存复用与开发实例设备切换/关机行为。
+- `serve-sim@0.1.47` 已改为 apps/electron 精确运行时依赖，内置路径使用 Electron 自带 Node，npx 保留为包缺失时回退；待后续正式打包复核 ASAR 签名与安装版行为。
 - 手机适配新增的 `data-web-remote-*` 稳定性标记当前保留；替换前需证明替代定位唯一且全套 iPhone/Android harness 通过。
 - 近期待打包修复和设备同步状态见 [`docs/personal/changelog.md`](./docs/personal/changelog.md) 末尾；打包前按当前主线与工作分支提交核验。
 
