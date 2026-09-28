@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { ExternalLink, Home, Camera, Play, Square, RefreshCw, Power } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import type { SimulatorDevice, SimulatorPreviewStatus } from '@proma/shared'
 
@@ -14,12 +15,12 @@ export function SimulatorPanel({ sessionId, workspaceSlug }: Props): React.React
   const api = window.electronAPI
   const isAvailable = /Mac/.test(navigator.platform) && !(window as Window & { __PROMA_WEB_REMOTE__?: boolean }).__PROMA_WEB_REMOTE__
 
-  const refresh = React.useCallback(async () => {
+  const refresh = React.useCallback(async (clearMessage = true) => {
     try {
       const [list, preview] = await Promise.all([api.listSimulators(), api.getSimulatorPreviewStatus()])
       setDevices(list); setStatus(preview)
       setUdid((current) => preview.udid || current || list.find((device) => device.state === 'Booted')?.udid || list[0]?.udid || '')
-      setMessage('')
+      if (clearMessage) setMessage('')
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)) }
   }, [api])
 
@@ -40,10 +41,10 @@ export function SimulatorPanel({ sessionId, workspaceSlug }: Props): React.React
 
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true); setMessage('')
-    try { const result = await action(); if (result && typeof result === 'object' && 'running' in result) setStatus(result as SimulatorPreviewStatus); else await refresh() }
+    try { const result = await action(); if (result && typeof result === 'object' && 'running' in result) setStatus(result as SimulatorPreviewStatus); else await refresh(false) }
     catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      await refresh()
+      await refresh(false)
       setMessage(message)
     }
     finally { setBusy(false) }
@@ -56,7 +57,7 @@ export function SimulatorPanel({ sessionId, workspaceSlug }: Props): React.React
       </select>
       <Button size="sm" variant="outline" disabled={busy || !udid} onClick={() => void run(() => status.running ? api.stopSimulatorPreview(status.udid ?? udid) : api.startSimulatorPreview(udid))} title={status.running ? '停止预览' : '启动预览'}>{status.running ? <Square className="size-3.5" /> : <Play className="size-3.5" />}</Button>
       <Button size="sm" variant="outline" disabled={busy || !udid} onClick={() => void run(() => api.pressSimulatorHome(target))} title="Home"><Home className="size-3.5" /></Button>
-      <Button size="sm" variant="outline" disabled={busy || !udid} onClick={() => void run(async () => { const path = await api.captureSimulatorScreenshot(target, sessionId, workspaceSlug); setMessage(`截屏已保存：${path}`) })} title="截屏"><Camera className="size-3.5" /></Button>
+      <Button size="sm" variant="outline" disabled={busy || !udid} onClick={() => void run(async () => { let path: string; try { path = await api.captureSimulatorScreenshot(target, sessionId, workspaceSlug) } catch (error) { toast.error('截屏失败', { description: error instanceof Error ? error.message : String(error) }); throw error }; const name = String(path).split('/').pop() || String(path); setMessage(`截屏已保存到会话附件：${name}`); toast.success('截屏已保存到会话附件', { description: name }) })} title="截屏"><Camera className="size-3.5" /></Button>
       <Button size="sm" variant="outline" disabled={busy || !target || devices.find((device) => device.udid === target)?.state !== 'Booted'} onClick={() => void run(async () => { await api.shutdownSimulator(target); setMessage('模拟器已关闭，已释放内存。') })} title="关闭模拟器（释放内存）"><Power className="size-3.5" /></Button>
       <Button size="sm" variant="outline" disabled={!status.url} onClick={() => status.url && void api.openExternal(status.url)} title="在浏览器中打开"><ExternalLink className="size-3.5" /></Button>
       <Button size="sm" variant="ghost" disabled={busy} onClick={() => void refresh()} title="刷新设备列表"><RefreshCw className="size-3.5" /></Button>

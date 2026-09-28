@@ -768,3 +768,17 @@
 
 - 合并 `fix/post-install-2026-09-28`：serve-sim 独立 extraResources 与依赖、打包实跑冒烟、启动失败回退 npx 与状态同步、Web Remote 先于钥匙串相关初始化启动、安装脚本 SecurityAgent 等待与只对主进程回滚、退出清理限时、icon.icns 打包、helper thin arm64 签名、手机失效连接自动恢复。
 - 用户 2026-09-28 20:15 在开发实例确认。
+
+## 2026-09-28: 安装 9aaecb0b（Claude Code）
+
+- 结果：成功，健康检查一次通过，未回滚；`/Applications/Proma.app` = `9aaecb0b`，previous = `f2db00f3`，本机最新备份 `20260928-202002-63617`（BACKUP VERIFY PASS，SNAPSHOT MATCH，会话 910）；较早两份备份已归档到外置硬盘。
+- 验证：main.log 三次启动均有启动标记、无 `[FATAL]`、无 `App icon not found`；模拟器面板从 Finder 启动使用 `Resources/serve-sim`（不走 npx，仅监听 127.0.0.1:3200），切设备、Home、截屏（文件已保存）、关机、停止均通过；退出耗时：面板未运行 0.41 s，面板运行中 serve-sim 0.41 s、主进程 0.69 s（此前 20–60 s）；两台手机切后台约 30 秒后回来发送正常；TCC 未弹窗。
+- **钥匙串观察**：同证书升级仍弹 1 次（SecurityAgent 出现 17 秒，选“始终允许”后两次 Finder 启动未再弹）；弹窗在 60 秒健康检查内处理完，脚本额外等待分支未触发。结论：同证书升级仍会弹 1 次，选“始终允许”后稳定。
+- 遗留（已在后续批次处理）：截屏成功无提示；Node DeprecationWarning 记为 `[ERROR]`；`app.asar.unpacked/node_modules/serve-sim` 多余副本。
+
+## 2026-09-28: 截屏提示、Node 警告分级、去除 serve-sim 重复副本
+
+- `SimulatorPanel.tsx`（个人版文件）：根因是截屏后 `run()` 调用的 `refresh()` 立即清空了“截屏已保存”消息；`refresh` 增加 `clearMessage` 参数，操作后的刷新保留结果消息；截屏成功弹出 toast“截屏已保存到会话附件”（显示文件名），失败弹出“截屏失败”及原因。
+- `personal-log-writer.ts` / `personal-main-log.ts`：经 console.error 输出的 Node 进程警告（`(node:PID) [DEPxxxx] DeprecationWarning:`、`ExperimentalWarning` 等，或 name 以 Warning 结尾的 Error）记为 `[WARN]`；其他文本中提到 Warning 不降级。新增单测；判定函数放在不依赖 electron 的 writer 中，避免测试间 electron 模块污染。
+- `electron-builder.yml`：`files` 排除 `node_modules/serve-sim/**`，运行时只用 `Contents/Resources/serve-sim`。
+- 验证：typecheck、全量 602 pass / 0 fail、build:main / build:renderer。打包层面的副本移除与截屏提示待下次打包/安装验证。

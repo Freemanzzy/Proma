@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { join } from 'node:path'
 import { isPersonalBuild } from './personal-build'
-import { appendPersonalMainLog, type PersonalLogEvent } from './personal-log-writer'
+import { appendPersonalMainLog, isNodeWarningOutput, type PersonalLogEvent } from './personal-log-writer'
 
 let installed = false
 let fatalRecorder: ((error: unknown) => void) | null = null
@@ -27,7 +27,7 @@ export function initializePersonalMainLog(): string | null {
     })
   }
   console.error = (...args: unknown[]) => {
-    record('error', args)
+    record(isNodeWarningOutput(args) ? 'warn' : 'error', args)
     originalError(...args)
   }
   console.warn = (...args: unknown[]) => {

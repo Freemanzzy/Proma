@@ -50,6 +50,8 @@ files:
   # Pi runtime 作为主进程 external 运行。打包前 sync:runtime-deps 会
   # 将 external 依赖闭包同步到 apps/electron/node_modules。
   - node_modules/**/*
+  # serve-sim 运行时只用 Contents/Resources/serve-sim（extraResources）；不在 asar / asar.unpacked 里再放一份。
+  - "!node_modules/serve-sim/**"
   # 排除 workspace 包的 symlink（代码已被 esbuild/Vite 打包到 dist/ 中）
   - "!node_modules/@proma/**"
   # 排除明确只在开发/构建期使用的大体积包。
