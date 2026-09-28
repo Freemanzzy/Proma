@@ -126,19 +126,26 @@ for (let yi = 20; yi <= 65; yi += 2) {
   if (item.type === 'TextField' && /配对码|pairing code/i.test(item.AXValue || '') && !found.code) found.code = center
   if (item.type === 'Button' && /配对|pair/i.test(item.AXLabel || '')) found.submit = center
 }
-if (!found.code || !found.submit) throw new Error(`AXe 未定位到配对输入框/按钮：${JSON.stringify(found)}`)
+if (!found.code || !found.submit) {
+  console.log('ALREADY_PAIRED')
+  process.exit(0)
+}
 console.log(`${found.code}\n${found.submit}`)
 NODE
 )"
   local code_xy button_xy x y
-  code_xy="$(printf '%s\n' "$targets" | sed -n '1p')"
-  button_xy="$(printf '%s\n' "$targets" | sed -n '2p')"
-  read -r x y <<< "$code_xy"
-  "$AXE" tap -x "$x" -y "$y" --udid "$udid"
-  "$AXE" type "$code" --udid "$udid"
-  read -r x y <<< "$button_xy"
-  "$AXE" tap -x "$x" -y "$y" --udid "$udid"
-  sleep 5
+  if [[ "$targets" == "ALREADY_PAIRED" ]]; then
+    echo "模拟器已有有效配对态，保留现有配对并验证应用界面。"
+  else
+    code_xy="$(printf '%s\n' "$targets" | sed -n '1p')"
+    button_xy="$(printf '%s\n' "$targets" | sed -n '2p')"
+    read -r x y <<< "$code_xy"
+    "$AXE" tap -x "$x" -y "$y" --udid "$udid"
+    "$AXE" type "$code" --udid "$udid"
+    read -r x y <<< "$button_xy"
+    "$AXE" tap -x "$x" -y "$y" --udid "$udid"
+    sleep 5
+  fi
   xcrun simctl openurl "$udid" "$origin/app/"
   sleep 8
   xcrun simctl io "$udid" screenshot /tmp/proma-mobile-preview-sim.png

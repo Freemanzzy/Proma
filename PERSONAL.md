@@ -687,3 +687,8 @@ python3 scripts/personal/import-proma-backup.py \\
 - 新增 `scripts/personal/mobile-preview.sh`：`start` 检查 17889/5173 端口、开启 8443 Tailscale Serve、后台运行开发实例并等候启动与分级覆盖率 100%；`sim [--device]` 默认启动 iPhone 17 Pro、打开 Simulator、生成配对码，通过 AXe `describe-ui` 动态定位配对输入框/按钮并配对，再打开 `/app/`、用 `simctl io screenshot` 截图核对；`test` 去除代理变量逐一执行六套默认 harness，单套外层 420 秒超时并检查无残留 Chrome；`stop` 只停止记录 PID 的开发进程树、关闭 8443 并检查 Serve；`status` 汇总监听、路由、模拟器和 harness 进程。
 - 验证：`bash -n` 通过；脚本实测 `start → sim → test → stop → status`。启动日志含“full-ui 分级覆盖率 100%（invoke=377, event=8）”及 `17889`；iPhone 17 Pro Safari 配对成功、进入 `/app/`，截图 `/tmp/proma-mobile-preview-sim.png`。harness：iPhone panel-probe、smoke（7/7）、mobile-polish（2/2）、layout（11/11）；Android smoke（7/7）、attachments（文本/图片/Markdown 验证通过）全部通过，JS exceptions 均为 0，每项配对设备均撤销，Chrome/profile 清理完成，既有会话保持不变。harness 记录首次 `/app/` 传输约 3.23 MB、2.29 s，复载约 1.3–1.5 KB、2.1–2.35 s（供项 D 基线使用）。停止后 17889/5173 均未监听，PID 文件删除，Serve 仅保留安装版 443→17888；iPhone 17 Pro 模拟器仍为 Booted。
 - 文档：`CLAUDE.md` §6 第 5/6 项与 `docs/personal/web-remote.md` 回归说明改为引用统一脚本。运行日志中存在已知通知音效预加载 XHR 错误，但 JS exceptions 为 0，未影响测试。
+
+## 2026-09-28: 手机预览脚本已配对模拟器复用
+
+- 首次模拟器成功配对后再次运行 `mobile-preview.sh sim` 时，Safari 已由现有 Cookie 直接进入应用；原脚本仍试图在根页面按配对表单定位控件。调整为仅在 AXe 点查询发现配对码输入框和“开始配对”按钮时输入新配对码；已配对时保留配对并直接校验 `/app/`，点位仍从 AXe `describe-ui` 返回的控件 frame 推导，不硬编码屏幕坐标。
+- 验证：脚本在已配对 iPhone 17 Pro 上重跑成功，截图 `/tmp/proma-mobile-preview-sim.png`，识别并保留原配对，/app 界面核验通过；`bash -n` 通过。
