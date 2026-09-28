@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { appendPersonalMainLog, sanitizePersonalLogSummary } from './personal-log-writer'
+import { appendPersonalMainLog, isNodeWarningOutput, sanitizePersonalLogSummary } from './personal-log-writer'
 
 describe('personal main-process log', () => {
   test('redacts sensitive values and limits summaries', () => {
@@ -58,6 +58,14 @@ describe('personal main-process log', () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
+  })
+
+  test('classifies Node process warnings printed through console.error as WARN', () => {
+    expect(isNodeWarningOutput(['(node:92978) [DEP0187] DeprecationWarning: Passing invalid argument types to fs.existsSync is deprecated'])).toBe(true)
+    expect(isNodeWarningOutput(['(node:1) ExperimentalWarning: VM Modules is an experimental feature'])).toBe(true)
+    expect(isNodeWarningOutput([Object.assign(new Error('x'), { name: 'DeprecationWarning' })])).toBe(true)
+    expect(isNodeWarningOutput(['[IPC] failed: DeprecationWarning mentioned later'])).toBe(false)
+    expect(isNodeWarningOutput([new TypeError('boom')])).toBe(false)
   })
 
   test('rotates and keeps logs private', () => {

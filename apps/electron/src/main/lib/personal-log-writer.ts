@@ -73,3 +73,10 @@ export function appendPersonalMainLog(filePath: string, event: PersonalLogEvent,
     // Logging must never prevent application startup or replace the original console output.
   }
 }
+
+/** Node 的 process 警告（DeprecationWarning、ExperimentalWarning 等）经 console.error 输出，不应记为 ERROR。 */
+export function isNodeWarningOutput(args: unknown[]): boolean {
+  const first = args.find((value) => typeof value === 'string' || value instanceof Error)
+  if (first instanceof Error) return /Warning$/.test(first.name)
+  return typeof first === 'string' && /^\(node:\d+\) (?:\[[A-Z0-9_]+\] )?[A-Za-z]*Warning:/.test(first)
+}
