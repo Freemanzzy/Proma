@@ -708,3 +708,10 @@ python3 scripts/personal/import-proma-backup.py \\
 - 按全仓实际运行结果处理现存三项失败，没有为通过测试改动产品逻辑：①`agent-session-manager.test.ts` 的 Electron 命名导出 `dialog` 与 `channel-runtime-api-key.test.ts` 的 `shell` 缺失，根因是 Bun `mock.module()` 会跨测试文件持续覆盖全局 `electron` 模块，其他测试的 mock 可能成为最终活跃版本；相关 `electron` mock 统一补齐所需的 `BrowserWindow`、`dialog`、`shell` 等命名导出。②`planning-manager.test.ts` 用 `createRequire('electron')` 取运行文件时可能读到前序测试留下的 mock 对象；改为通过 `createRequire.resolve('electron')` 找包目录，再读取包内 `path.txt` 计算 Electron 二进制真实路径，不受模块 mock 影响。
 - 定向验证：四个相关文件 29 pass / 0 fail；typecheck 通过。全量 `bun test`：592 pass / 0 fail / 0 error（91 files，1305 assertions）。
 - `scripts/personal/package-personal.sh` 的全测门槛改为 0 fail / 0 error；`CLAUDE.md` §6 第 2 项与本文件基线同步更新。历史记录保留原始当时数字，未改写。
+
+## 2026-09-28: Web Remote 手机首屏资源与传输测量
+
+- 本机开发实例 `/app/` 首次 CDP 加载（iPhone UA，18:41 GMT+8）：69 requests、48 responses；计入 `/app/` 的 45 个 200 响应资源，CDP 传输 3,230,010 bytes、资源响应头压缩体合计 3,223,847 bytes；CDP `Network.dataReceived.dataLength` 解码后 7,992,064 bytes，按资源体计算节省约 59.7%。导航到就绪计时 8.58 s；主 bundle 完成于 6.536 s。主要资源：`index-DExTehsL.js` 5,738,122 → 1,363,012 bytes（Brotli）；CSS 259,761 → 36,455 bytes（Brotli）；动态 `/app/` HTML 42,457 → 8,552 bytes（Brotli）；`preload.js` 121,520 → 21,688 bytes（Brotli）。最大图片 1,511,206 bytes 未压缩（编码结果无收益，服务端按规则直接返回原体）。
+- 响应头核验：HTML、JS、CSS、preload 均有 `Content-Encoding: br`、`Vary: Accept-Encoding`；hash 静态资源返回 `Cache-Control: public, max-age=31536000, immutable`，HTML 与 preload 为 `no-cache`，符合动态页面与预加载脚本需要检查更新的要求。WOFF2 与大 PNG 未压缩；多个 MP3 资源的 Brotli 收益很小但服务端仅在编码体更小时返回压缩版本。`web-remote-server.ts` 已实现上述能力，无需源代码修改，因此无压缩前后对比数据。
+- 回归：通过 `mobile-preview.sh start → test iphone:smoke → stop` 实跑；smoke 7/7，JS exceptions 0，测试设备撤销、会话/profile/Chrome 清理完成，停止后 17889/5173 释放、Serve 仅 443。harness 音效预加载 XHR console error 为既有问题，不影响 smoke。
+- 未实施的后续建议（按本项范围不改代码）：评估将 5.74 MB 的主 JS 与桌面专用模块拆分/按需载入；单个约 1.51 MB 图片也可独立评估格式与首屏必要性。
