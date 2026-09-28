@@ -729,3 +729,10 @@ python3 scripts/personal/import-proma-backup.py \\
 - `mobile-preview.sh test` 过去会把每套 harness 的整个 JSON（包含 base64 音频数据 URI）打印到终端，无法快速阅读。改为逐套记录到 `/tmp/proma-mobile-preview-<ua>-<suite>.log`，解析 harness 结果 JSON 后只输出汇总（layout 页数、panel 命中、步骤数、单击比、异常数、配对/Chrome/profile 清理），失败时显示日志尾部。harness 结果完整留在临时日志，不泄漏到对话输出。
 - 验证：`bash -n` 通过；最终 `mobile-preview.sh start → sim → test` 中，start 覆盖率 100% 且端口 17889 启动，iPhone 17 Pro 已配对态 `/app/` 截图通过；test 的 iPhone panel-probe 2/2、smoke 7/7、mobile-polish 单击 2/2、layout 11/11 与 Android smoke 7/7、attachments 全部通过，JS exceptions 0、Chrome/profile 清理完成。状态核对确认 PID 记录有效、17889/5173 监听、Serve 8443→17889 与 443→17888 并存、iPhone 17 Pro Booted。
 - 最终用户体验状态按要求保留：开发实例与 8443 Serve 持续运行，不执行 `stop`。
+
+## 2026-09-28: 稳健性批次合并与同步策略（待打包）
+
+- 合并 `feature/robustness-2026-09-28`：`mobile-preview.sh` 统一预览/验证流程；mobile-patch 拆为 `mobile-patch/mobile-css.ts`、`mobile-js.ts` 并以 `setIfChanged` 收敛 DOM 写入，新增 observer 收敛单测；测试基线归零（596 pass / 0 fail，打包门槛 0/0）；首屏测量（Brotli 与缓存已生效，无需改动）；配对设备 30 天未用自动撤销、撤销 30 天后清除。
+- 父会话复核：拆分前后 CSS 规则一致、JS 仅状态写入路径变化；esbuild 产物保留中文选择器（`String.raw` 依赖打包器不转义非 ASCII，后续打包需核对）。用户 2026-09-28 14:27 在模拟器确认。
+- 同步策略决定写入 `docs/personal/maintenance.md` §4.1；周检任务已加入触发条件检查。
+- 与 `a040902d` 模拟器同步修复一并等待打包（用户要求暂缓）。
