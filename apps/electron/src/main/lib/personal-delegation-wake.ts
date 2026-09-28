@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import type { AgentExternalRunSource, AgentSendInput } from '@proma/shared'
 import { getConfigDir } from './config-paths'
 import { readJsonFileSafe } from './safe-file'
+import { recordPersonalInfo } from './personal-log-writer'
 
 export interface DelegationWakeRecord {
   delegationId: string
@@ -54,7 +55,11 @@ export function createPersonalDelegationWakeController(dependencies: DelegationW
   const pollMs = dependencies.pollMs ?? 1000
   const windowMs = dependencies.windowMs ?? WINDOW_MS
   const maxPerHour = dependencies.maxPerHour ?? MAX_PER_HOUR
-  const logger = dependencies.log ?? ((message: string) => console.warn(`[子任务唤醒] ${message}`))
+  // 正常流转（wake/consumed/queued/run-completed 等）记信息级；只有启动或运行失败记 WARN。
+  const logger = dependencies.log ?? ((message: string) => {
+    if (/^(?:run-error|start-error|dependency-error)\b/.test(message)) console.warn(`[子任务唤醒] ${message}`)
+    else recordPersonalInfo('子任务唤醒', message)
+  })
   const consumed = new Set<string>()
   const pending = new Map<string, {
     records: DelegationWakeRecord[]

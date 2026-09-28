@@ -804,3 +804,17 @@
 
 - 合并 `feature/delegation-auto-wake`（`b12f5038`、`bf9c3e13`）。父会话复核：唤醒轮次为 `triggeredBy: 'external'`、`source: 'bridge'`，父 Agent 可再次委派；全量 610 pass / 0 fail；开发实例端到端唤醒延迟 30.0 秒、已收回结果不重复唤醒。用户 2026-09-28 23:41 在开发实例桌面确认成功。
 - 与截屏提示 / Node 警告分级 / serve-sim 单副本（`c6be1acb`）一起等待打包。
+
+## 2026-09-29: 安装 cb94c897（Claude Code）
+
+- 结果：成功，健康检查通过，未回滚；`/Applications/Proma.app` = `cb94c897`，previous = `9aaecb0b`，本机最新备份 `20260928-235900-30636`（BACKUP VERIFY PASS，SNAPSHOT MATCH）；`20260928-202002-63617` 已归档到外置硬盘。
+- 首次运行 EXIT=3 为 Claude Code 自身进程筛选错误（漏判 Proma 仍在运行），脚本按设计等待后放弃、未改动任何文件；正常退出后重跑成功。
+- 验证：main.log 启动后 `[FATAL]`/`[ERROR]` 均为 0；`DEP0169` 记为 `[WARN]`；自动唤醒桌面实测（`[子任务唤醒] wake count=1` → 父 Agent 读取结果并汇报，只唤醒 1 次）、已收回结果不唤醒（consumed）、手机同步与“运行已完成”推送均通过；截屏提示出现；serve-sim 仅 `Resources/serve-sim` 一份。
+- **钥匙串**：同证书升级再次弹 1 次（17 秒，选“始终允许”）。连续两次安装一致：每次升级弹 1 次，之后稳定。
+- 待办：唤醒正常事件记为 `[WARN]` 易误读（已在下一节处理）；测试会话 `978d1d72`、`7696f5c0` 由用户删除。
+
+## 2026-09-29: 子任务唤醒日志改为信息级
+
+- `personal-log-writer.ts` 新增 `info` 级别与 `recordPersonalInfo` / `setPersonalInfoSink`（不依赖 electron）；`personal-main-log.ts` 初始化时接入 main.log，写 `[INFO]`。
+- `personal-delegation-wake.ts`：wake / consumed / queued / disabled / stopped / rate-limited / run-completed 等正常流转记 `[INFO]`；只有 run-error / start-error / dependency-error 记 `[WARN]`。
+- install-update.sh 健康检查只判 `[FATAL]`，不受影响。验证：typecheck、全量 611 pass / 0 fail、build:main。待下次打包。

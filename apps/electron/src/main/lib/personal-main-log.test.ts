@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { appendPersonalMainLog, isNodeWarningOutput, sanitizePersonalLogSummary } from './personal-log-writer'
+import { appendPersonalMainLog, isNodeWarningOutput, recordPersonalInfo, sanitizePersonalLogSummary, setPersonalInfoSink } from './personal-log-writer'
 
 describe('personal main-process log', () => {
   test('redacts sensitive values and limits summaries', () => {
@@ -66,6 +66,21 @@ describe('personal main-process log', () => {
     expect(isNodeWarningOutput([Object.assign(new Error('x'), { name: 'DeprecationWarning' })])).toBe(true)
     expect(isNodeWarningOutput(['[IPC] failed: DeprecationWarning mentioned later'])).toBe(false)
     expect(isNodeWarningOutput([new TypeError('boom')])).toBe(false)
+  })
+
+  test('writes INFO lines for normal events through the info sink', () => {
+    const root = mkdtempSync(join(tmpdir(), 'proma-main-log-info-'))
+    const path = join(root, 'logs', 'main.log')
+    try {
+      setPersonalInfoSink((scope, message) => appendPersonalMainLog(path, 'info', new Date('2026-09-29T00:00:00.000Z'), undefined, undefined, { name: 'Info', scope, message }))
+      recordPersonalInfo('子任务唤醒', 'wake count=1: parentSessionId=p-1')
+      const text = readFileSync(path, 'utf8')
+      expect(text).toContain('[INFO] main-process info name=Info scope=子任务唤醒 message=wake count=1')
+      expect(text).not.toContain('[WARN]')
+    } finally {
+      setPersonalInfoSink(null)
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   test('rotates and keeps logs private', () => {

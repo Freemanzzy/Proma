@@ -1,11 +1,12 @@
 import { appendFileSync, chmodSync, existsSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
 
-export type PersonalLogEvent = 'startup' | 'warn' | 'error' | 'fatal'
+export type PersonalLogEvent = 'startup' | 'info' | 'warn' | 'error' | 'fatal'
 const MAX_LOG_BYTES = 5 * 1024 * 1024
 const ROTATED_LOG_COUNT = 3
 const messages: Record<PersonalLogEvent, string> = {
   startup: 'personal main process started',
+  info: 'main-process info',
   warn: 'main-process warning',
   error: 'main-process error',
   fatal: 'fatal main-process error',
@@ -79,4 +80,14 @@ export function isNodeWarningOutput(args: unknown[]): boolean {
   const first = args.find((value) => typeof value === 'string' || value instanceof Error)
   if (first instanceof Error) return /Warning$/.test(first.name)
   return typeof first === 'string' && /^\(node:\d+\) (?:\[[A-Z0-9_]+\] )?[A-Za-z]*Warning:/.test(first)
+}
+
+/** 正常事件（非警告）的信息级日志出口；主进程初始化 main.log 后接入，未接入时只输出到控制台。 */
+let personalInfoSink: ((scope: string, message: string) => void) | null = null
+export function setPersonalInfoSink(sink: ((scope: string, message: string) => void) | null): void {
+  personalInfoSink = sink
+}
+export function recordPersonalInfo(scope: string, message: string): void {
+  console.info(`[${scope}] ${message}`)
+  personalInfoSink?.(scope, message)
 }
