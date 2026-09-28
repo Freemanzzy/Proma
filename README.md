@@ -6,17 +6,19 @@
 > **基线**：官方 `v0.19.58`。只跟随官方正式版本（tag），每周自动检查一次。
 >
 > **本 Fork 的改动**
-> - **手机访问（Web Remote）**：经 Tailscale 私有网络，用手机运行与桌面同一套界面，操作 Mac 上的 Proma：实时对话、Skill、附件、提问与计划审批、Todo、定时任务、文件预览、推送通知，可添加到主屏幕（使用 Proma 图标）。IPC 通道显式分级、默认拒绝。说明见 [`docs/personal/web-remote.md`](./docs/personal/web-remote.md)。
+> - **手机访问（Web Remote）**：经 Tailscale 私有网络，用手机运行与桌面同一套界面，操作 Mac 上的 Proma：实时对话、Skill、附件、提问与计划审批、Todo、定时任务、文件预览、推送通知，可添加到主屏幕（使用 Proma 图标）。手机端布局适配：顶栏图标按钮（菜单开/关、通知状态、刷新、文件）、标题下拉切换页面、项目记忆等两栏视图改为“列表 → 详情”、单击切换会话、面板过渡动效，隐藏快捷键徽标等桌面专用控件；桌面布局不变。IPC 通道显式分级、默认拒绝。说明见 [`docs/personal/web-remote.md`](./docs/personal/web-remote.md)。
+> - **iOS 模拟器面板（桌面）**：右侧工作区“+ → 打开 iOS 模拟器”，嵌入 [serve-sim](https://github.com/EvanBacon/serve-sim) 实时画面（仅本机 127.0.0.1），可直接点按/输入，工具条支持选设备、启动/停止、Home、截屏、关闭模拟器；用于在桌面上体验手机端改动。手机端不显示。
 > - **移除内置浏览器**：入口、Agent 工具、提示词、IPC 均已移除，源码保留但不打包；原因是常驻内存且与 ego 重复。
 > - **新增 EgoBrowser 原生工具**：通过 `ego-browser` CLI 操作 ego lite 浏览器，未安装时自动隐藏。
 > - **简化外观**：仅保留浅色、深色、跟随系统；旧的特殊风格自动迁移为跟随系统。
 > - **精简未使用的集成**：隐藏钉钉/Slack 桥接、Copilot 渠道和 Agent Island；保留对应源码与兼容旧数据的运行路径。
-> - **个人版打包与更新**：关闭官方自动更新；包内写入 `personal-build.json` 标记；安装脚本先备份数据、校验，健康检查失败自动回滚应用。脚本位于 `scripts/personal/`。
+> - **个人版打包与更新**：关闭官方自动更新；包内写入 `personal-build.json` 标记；用本机固定自签名证书签名，macOS 文件夹访问与钥匙串授权可跨版本保留；安装脚本先备份数据、校验，健康检查失败自动回滚应用，上一版保存在 `/Applications` 之外，较早的更新前备份自动归档到外置硬盘。脚本位于 `scripts/personal/`。
+> - **修复**：移除内置浏览器时误删的右侧工作区 Tab 切换与 Agent 终端 Tab 同步已恢复。
 >
 > **使用与维护**
 > - 打包：`scripts/personal/package-personal.sh`；安装：`scripts/personal/install-update.sh`（自动备份与回滚）。
 > - 开发与验证：`scripts/personal/dev.sh` 启动开发实例，数据目录 `~/.proma-dev`，与日常数据隔离；加 `PROMA_WEB_REMOTE=1` 启用手机访问（端口与安装版分开）。
-> - 维护分工与规则：[`docs/personal/maintenance.md`](./docs/personal/maintenance.md)；切换与故障回退：[`switch-runbook.md`](./docs/personal/switch-runbook.md)、[`fallback-runbook.md`](./docs/personal/fallback-runbook.md)。
+> - 维护：Proma 内 Agent 负责同步、测试、打包与文档，Claude Code 负责安装与故障恢复，规则见 [`docs/personal/maintenance.md`](./docs/personal/maintenance.md)；切换与故障回退：[`switch-runbook.md`](./docs/personal/switch-runbook.md)、[`fallback-runbook.md`](./docs/personal/fallback-runbook.md)。
 >
 > 完整差异与变更记录请见 [`PERSONAL.md`](./PERSONAL.md)。
 <!-- personal-fork:end -->

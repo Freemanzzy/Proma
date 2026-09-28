@@ -677,3 +677,7 @@ python3 scripts/personal/import-proma-backup.py \\
 - 安装后检查发现：serve-sim 跟随设备切换在同一 PID 下登记多个流（`$TMPDIR/serve-sim/server-<udid>.json`），面板仍记录启动时的设备，Home/截屏可能指向已关机设备。修复（`a040902d`）：状态读取按本进程 PID 过滤的流并结合 `simctl` 实际状态，工具条跟随实际显示设备；停止时逐个 UDID `--kill` 本进程的全部流；新增 ⏻ 关闭模拟器（`simctl shutdown`，`simulator:shutdown` 手机端 denied）；npx 启动时注入应用代理；web-remote-server 测试清理临时目录。
 - 验证：typecheck 通过；模拟器服务测试 6 pass；全量 566 pass / 3 fail（均为既有失败，低于基线）；开发实例分级覆盖率 100%（invoke=377）；用户在开发实例体验通过（12:42）。
 - 用户决定：**暂不打包**，与后续问题一起打包安装。
+
+## 2026-09-28: README 个人版区块更新
+
+- `README.md` / `README.en.md`：补充手机端布局适配、iOS 模拟器面板、固定证书签名、上一版移出 `/Applications` 与备份归档、右侧 Tab 修复、双方共同维护分工。仅文档。
