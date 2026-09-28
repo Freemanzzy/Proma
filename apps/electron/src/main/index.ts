@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, screen, shell } from 'electron'
-import { initializePersonalMainLog } from './lib/personal-main-log'
+import { initializePersonalMainLog, recordPersonalMainFatal } from './lib/personal-main-log'
 import { join } from 'path'
 
 // Personal packaged builds keep a bounded, secret-free main-process health log under app.getPath('logs').
@@ -917,6 +917,7 @@ async function safeAwait(name: string, fn: () => Promise<unknown>): Promise<void
  */
 function handleBootstrapFailure(err: unknown): void {
   console.error('[启动] bootstrap 致命错误，进入降级模式:', err)
+  recordPersonalMainFatal(err)
 
   try {
     const message = err instanceof Error ? (err.stack ?? err.message) : String(err)

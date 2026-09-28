@@ -682,3 +682,8 @@
 
 - `package-personal.sh` 在签名前调用 `check-packaged-mobile-selectors.cjs`，从 ASAR 提取 `dist/main.cjs` 并确认 3 个关键选择器含原始中文/属性值，不含对应转义形式；若不符合即失败中止。
 - 验证：`bash -n scripts/personal/package-personal.sh`、`node --check scripts/personal/check-packaged-mobile-selectors.cjs` 通过；对当前 `apps/electron/dist/main.cjs` 校验通过（3/3）。没有运行完整打包。旧 `out/mac-arm64/Proma.app` 是此前生成的过期产物，尝试检查该旧 ASAR 失败，不能用于判定新脚本结果。
+
+## 2026-09-28: bootstrap 致命路径写入 FATAL
+
+- 补齐日志分级边界：`uncaughtExceptionMonitor` 及明确的 `handleBootstrapFailure()` 现在会记录 `[FATAL]`；普通 console.error/warn 中的 fatal 文本仍不升级。健康检查启动标记不变。
+- 验证：typecheck、全量 `bun test`（599 pass / 0 fail / 0 error）、`build:main` 通过。

@@ -4,6 +4,7 @@ import { isPersonalBuild } from './personal-build'
 import { appendPersonalMainLog, type PersonalLogEvent } from './personal-log-writer'
 
 let installed = false
+let fatalRecorder: ((error: unknown) => void) | null = null
 
 export function initializePersonalMainLog(): string | null {
   if (!isPersonalBuild()) return null
@@ -33,6 +34,12 @@ export function initializePersonalMainLog(): string | null {
     record('warn', args)
     originalWarn(...args)
   }
+  fatalRecorder = (error) => record('fatal', [error])
   process.once('uncaughtExceptionMonitor', (error) => record('fatal', [error]))
   return logPath
+}
+
+/** Explicit fatal path for bootstrap failures handled by the degraded-window fallback. */
+export function recordPersonalMainFatal(error: unknown): void {
+  fatalRecorder?.(error)
 }
