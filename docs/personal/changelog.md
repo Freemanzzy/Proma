@@ -726,3 +726,12 @@
 - 内置 serve-sim 在启动 10 秒内以非零码退出或报告 ESM 模块缺失时，只重试一次 npx；npx 失败会在服务状态中保留 UDID，并报中文错误、退出码和脱敏后的首行输出。模拟器面板启动失败时刷新设备与预览状态，因此先 `simctl boot` 后启动失败也能显示真实 Booted 状态。
 - 空状态和启动提示改为说明默认使用内置 serve-sim，组件不可用时才回退到 npx 下载。
 - 单测覆盖回退条件：内置异常/缺包会回退，npx 失败和正常退出不重试；模拟器服务定向测试 7 pass / 0 fail；typecheck 和 renderer build 通过（仅既有大 chunk 提示）。
+
+## 2026-09-28: 启动期间钥匙串等待的隔离与回滚保护
+
+- 启动顺序调查：`bootstrap()` 原先在 `startAllBridges()`（飞书等 Bridge 读取凭据并可能调用 `safeStorage.decryptString`）之后才 `startWebRemoteIfEnabled()`；Bridge 的 await 会串行阻塞 Web Remote。Web Remote 依赖自己的配置、配对认证和 HTTP server，不读取渠道 API Key/Keychain；已将其启动移到 IPC 注册之后、Bridge 与 dock/settings 初始化之前。若 Keychain 授权仍阻塞主线程，17888 可先独立就绪；Bridge 仍等用户授权后启动。
+- 安装脚本健康检查：初始观察期后若 Web Remote 未由新版监听且存在 `SecurityAgent`，提示用户在钥匙串弹窗授权，最多再等待 10 分钟；主进程不退出时回滚只向明确识别的新版主进程发 SIGTERM，不再向 Helper 发信号，20 秒未退即停自动文件回滚并提示手动退出。
+- Keychain ACL 调研结论（未读取/修改任何钥匙串条目）：Apple TN2206 将 Keychain 授权描述为由应用代码签名 requirement/DR 跟踪；Apple TN3127 说明 ad-hoc 的 DR 与特定版本 cdhash 绑定，更新后不能可靠保持身份。Proma 现有签名报告中的 designated requirement 含固定 certificate leaf，而非单纯 cdhash；无 Team ID 本身并不能证明 Keychain 必然按 cdhash 绑定。故同证书升级后仍弹窗不能仅归因为“缺少 Team ID”，更可能涉及首次授权、访问的实际二进制/Helper 身份不同、条目 ACL 或 Keychain 项目的迁移/创建者身份，需在用户实际授权弹窗时再针对目标 item 的访问方做无密钥诊断。
+- 建议：首次授权可选择“始终允许”，通常意在保存该访问方对当前项目的授权，但不能保证为其他 Helper/签名 requirement 不同的访问者授权，也不能修复不允许变更 ACL 的旧条目；不要自动删除条目或放宽为允许所有应用。若仍重复弹窗，先识别发起访问的进程与其 `codesign -d -r-` requirement，再针对该进程/目标条目让用户手动处理；固定身份与包含证书约束的稳定 DR 应继续保留。
+- 资料：Apple [TN2206](https://developer.apple.com/library/archive/technotes/tn2206/_index.html)；Apple [TN3127](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)。
+- 验证：`bash -n scripts/personal/install-update.sh` 通过；未运行安装脚本、未触碰 Keychain、未停止或重启已安装 Proma。`shellcheck` 本机不可用；安装健康等待与回滚分支尚未在真实安装流程演练，最终验证仍需 Claude Code 在授权安装时执行。

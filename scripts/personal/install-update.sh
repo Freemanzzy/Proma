@@ -283,49 +283,22 @@ process_command_matches() {
   command="${command#\"}"; command="${command%%\"*}"
   [[ "$command" == "$expected_binary" || "$command" == "$expected_binary "* ]]
 }
-process_tree_pids() {
-  python3 - "$@" <<'PY'
-import subprocess,sys
-roots={int(x) for x in sys.argv[1:] if x.isdigit()}
-try: rows=subprocess.check_output(['ps','-axo','pid=,ppid=,command='],text=True,stderr=subprocess.DEVNULL).splitlines()
-except Exception: raise SystemExit(0)
-children={}
-for row in rows:
- parts=row.strip().split(None,2)
- if len(parts)<2: continue
- try: pid,ppid=int(parts[0]),int(parts[1])
- except ValueError: continue
- children.setdefault(ppid,[]).append(pid)
-seen=set()
-def visit(pid):
- for child in children.get(pid,[]):
-  if child not in seen: seen.add(child); visit(child)
-for root in roots: visit(root)
-# signal descendants before their tracked app parent
-for pid in sorted(seen,reverse=True): print(pid)
-for pid in roots: print(pid)
-PY
-}
 stop_new_process_tree() {
-  local expected_binary="$1" roots="$2" pid all_pids="" elapsed=0 current
+  local expected_binary="$1" roots="$2" pid elapsed=0 current
+  # 只通知新版主进程优雅退出；绝不先杀 Helper，避免主窗口/Helper 留下半死状态。
   for pid in $roots; do
-    if process_command_matches "$pid" "$expected_binary"; then all_pids+=" $pid"; fi
+    if process_command_matches "$pid" "$expected_binary"; then kill -TERM "$pid" 2>/dev/null || true; fi
   done
-  [[ -n "$all_pids" ]] || return 0
-  local descendants pid_alive=0
-  descendants="$(process_tree_pids $all_pids)"
-  for pid in $descendants; do kill -TERM "$pid" 2>/dev/null || true; done
   while (( elapsed < 20 )); do
-    pid_alive=0
-    for pid in $descendants; do if kill -0 "$pid" 2>/dev/null; then pid_alive=1; fi; done
     current="$(find_app_pids "$expected_binary")"
-    [[ -z "$current" && "$pid_alive" == 0 ]] && return 0
+    [[ -z "$current" ]] && return 0
     sleep 1; elapsed=$((elapsed + 1))
   done
   current="$(find_app_pids "$expected_binary")"
-  pid_alive=0
-  for pid in $descendants; do if kill -0 "$pid" 2>/dev/null; then pid_alive=1; fi; done
-  if [[ -n "$current" || "$pid_alive" == 1 ]]; then echo "ERROR: SIGTERM 后等待 20 秒仍运行的新包进程/子进程 PID：${current:-$descendants}" >&2; return 1; fi
+  if [[ -n "$current" ]]; then
+    echo "ERROR: SIGTERM 后等待 20 秒主进程仍运行（PID：${current//$'\n'/,}）；未向 Helper 发信号，停止自动文件回滚，请用户手动退出 Proma。" >&2
+    return 1
+  fi
   return 0
 }
 
@@ -472,6 +445,26 @@ else
   grep -q 'personal main process started' "$LOG_FILE" || { echo "健康检查失败：个人版启动标记未写入 $LOG_FILE" >&2; exit 4; }
   echo "个人版主进程日志: $LOG_FILE"
   sleep "$HEALTH_SECONDS"
+  if [[ -n "$REMOTE_PORT" ]]; then
+    remote_owners="$(port_listeners "$REMOTE_PORT")"
+    remote_ready=0
+    for pid in $remote_owners; do
+      if process_command_matches "$pid" "$APP_PATH/Contents/MacOS/Proma"; then remote_ready=1; fi
+    done
+    if (( remote_ready == 0 )) && /usr/bin/pgrep -x SecurityAgent >/dev/null 2>&1; then
+      echo "检测到 Keychain 授权弹窗（SecurityAgent）；请在钥匙串弹窗中授权，健康检查最多额外等待 10 分钟。"
+      keychain_deadline=$((SECONDS + 600))
+      while (( SECONDS < keychain_deadline )); do
+        sleep 2
+        remote_owners="$(port_listeners "$REMOTE_PORT")"
+        for pid in $remote_owners; do
+          if process_command_matches "$pid" "$APP_PATH/Contents/MacOS/Proma"; then remote_ready=1; break; fi
+        done
+        (( remote_ready == 1 )) && break
+        /usr/bin/pgrep -x SecurityAgent >/dev/null 2>&1 || break
+      done
+    fi
+  fi
   if ! process_command_matches "$START_PID" "$APP_PATH/Contents/MacOS/Proma"; then
     echo '健康检查失败：观察期内新版主进程已退出。' >&2; exit 4
   fi

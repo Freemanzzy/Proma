@@ -762,6 +762,9 @@ async function bootstrap(): Promise<void> {
   }, { packaged: app.isPackaged })
   registerIpcHandlers()
   registerWebRemoteAdminIpc()
+  // Web Remote only reads its own configuration/auth data and does not need Keychain secrets.
+  // Start it before dock/settings and Bridge initialization, either of which may trigger a Keychain prompt.
+  await safeAwait('startWebRemoteIfEnabled', startWebRemoteIfEnabled)
   if (fullUiBridge) {
     const counts = fullUiBridge.getRegistrationCounts()
     console.log(`[Web Remote] full-ui 已登记 invoke=${counts.invoke} event=${counts.event}`)
@@ -873,9 +876,6 @@ async function bootstrap(): Promise<void> {
   safeRun('startScheduler', startScheduler)
   safeRun('startPlanningReminderScheduler', startPlanningReminderScheduler)
   safeRun('startPlanningNativeSyncCoordinator', startPlanningNativeSyncCoordinator)
-
-  // 个人版实验功能：仅在 PROMA_WEB_REMOTE=1 且 web-remote/config.json 明确启用时监听回环端口。
-  await safeAwait('startWebRemoteIfEnabled', startWebRemoteIfEnabled)
 
   app.on('activate', () => {
     if (shouldSuppressVoiceDictationActivate()) {
