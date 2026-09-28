@@ -723,3 +723,9 @@ python3 scripts/personal/import-proma-backup.py \\
 - 新增 4 项 auth 单测：旧 lastUsedAt 撤销；lastUsedAt 缺省回退 createdAt；近 30 天 lastUsedAt 覆盖较旧创建时间并保持有效；清除过期撤销记录且保留近期撤销与 tailnet 身份。另验证临时文件清理和写盘结果。
 - 验证：auth 定向测试 16 pass / 0 fail / 51 assertions；workspace typecheck、`build:main`、`build:renderer`、`build:web-preload` 通过；全量 `bun test` 596 pass / 0 fail / 0 error（91 files，1314 assertions）。Renderer 仍显示既有 large chunk warning。所有验证只写临时测试目录；未读取、修改或清理 `~/.proma` 正式数据。
 - 文档：更新 `docs/personal/web-remote.md` 的设备安全与过期说明；本文件当前基线同步为 596/0/0。
+
+## 2026-09-28: 手机预览回归输出收敛
+
+- `mobile-preview.sh test` 过去会把每套 harness 的整个 JSON（包含 base64 音频数据 URI）打印到终端，无法快速阅读。改为逐套记录到 `/tmp/proma-mobile-preview-<ua>-<suite>.log`，解析 harness 结果 JSON 后只输出汇总（layout 页数、panel 命中、步骤数、单击比、异常数、配对/Chrome/profile 清理），失败时显示日志尾部。harness 结果完整留在临时日志，不泄漏到对话输出。
+- 验证：`bash -n` 通过；最终 `mobile-preview.sh start → sim → test` 中，start 覆盖率 100% 且端口 17889 启动，iPhone 17 Pro 已配对态 `/app/` 截图通过；test 的 iPhone panel-probe 2/2、smoke 7/7、mobile-polish 单击 2/2、layout 11/11 与 Android smoke 7/7、attachments 全部通过，JS exceptions 0、Chrome/profile 清理完成。状态核对确认 PID 记录有效、17889/5173 监听、Serve 8443→17889 与 443→17888 并存、iPhone 17 Pro Booted。
+- 最终用户体验状态按要求保留：开发实例与 8443 Serve 持续运行，不执行 `stop`。

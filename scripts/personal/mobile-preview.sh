@@ -166,12 +166,41 @@ run_tests() {
     local ua name
     ua="${suite%%:*}"; name="${suite#*:}"
     [[ "$ua" != "$suite" ]] || { name="$suite"; ua=iphone; }
-    echo "=== $ua / $name ==="
-    if ! (cd "$ROOT" && perl -e 'alarm 420; exec @ARGV' env -u http_proxy -u https_proxy -u all_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u HTTP_ALL_PROXY -u HTTPS_ALL_PROXY bun "$agent" --url "$origin" --suite "$name" --user-agent "$ua"); then
-      echo "FAIL $ua/$name"
+    local test_log="/tmp/proma-mobile-preview-${ua}-${name}.log"
+    echo "=== ${ua} / ${name} ==="
+    if ! (cd "$ROOT" && perl -e 'alarm 420; exec @ARGV' env -u http_proxy -u https_proxy -u all_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u HTTP_ALL_PROXY -u HTTPS_ALL_PROXY bun "$agent" --url "$origin" --suite "$name" --user-agent "$ua") >"$test_log" 2>&1; then
+      echo "FAIL ${ua}/${name}（日志：${test_log}）"
+      tail -n 16 "$test_log" || true
       failed=1
     else
-      echo "PASS $ua/$name"
+      local result_json
+      result_json="$(sed -nE 's/.*"jsonPath": "([^"]+)".*/\1/p' "$test_log" | tail -n 1)"
+      if [[ -z "$result_json" || ! -r "$result_json" ]]; then
+        echo "FAIL ${ua}/${name}（未找到 harness 结果 JSON；日志：${test_log}）" >&2
+        failed=1
+      elif ! node - "$result_json" "$ua" "$name" <<'NODE'
+const fs = require('node:fs')
+const [path, ua, suite] = process.argv.slice(2)
+const result = JSON.parse(fs.readFileSync(path, 'utf8'))
+const badSteps = (result.steps || []).filter((step) => step.ok === false && !step.skipped)
+const checks = []
+if (result.layout) checks.push(`pages=${result.layout.pages.filter((page) => !page.failed).length}/${result.layout.pages.length}`)
+if (result.probe) checks.push(`tabs=${result.probe.filter((item) => item.hitIsTab).length}/${result.probe.length}`)
+if (result.attachments) checks.push(`attachments=${result.attachments.textAssistantReplyContainsFirstLine && result.attachments.imageAssistantIdentifiedRed ? 'pass' : 'fail'}`)
+if (result.singleTapChecks) checks.push(`singleTap=${result.singleTapSuccess}/${result.singleTapChecks}`)
+if (result.steps?.length) checks.push(`steps=${result.steps.filter((step) => step.ok).length}/${result.steps.filter((step) => !step.skipped).length}`)
+checks.push(`exceptions=${result.exceptions?.length ?? 0}`)
+if (result.error || result.revokeError || badSteps.length || result.layout?.passed === false || (result.probe && result.probe.some((item) => !item.hitIsTab)) || (result.singleTapChecks && result.singleTapSuccess !== result.singleTapChecks) || (result.attachments && (!result.attachments.textAssistantReplyContainsFirstLine || !result.attachments.imageAssistantIdentifiedRed)) || !result.revoked || !result.chromeExited || !result.profileRemoved || (result.exceptions?.length ?? 0) > 0) {
+  console.error(`FAIL ${ua}/${suite}: ${checks.join(', ')}${result.error ? `; ${result.error}` : ''}`)
+  process.exit(1)
+}
+console.log(`PASS ${ua}/${suite}: ${checks.join(', ')}`)
+const skipped = (result.steps || []).filter((step) => step.skipped)
+for (const step of skipped) console.log(`SKIP ${step.name}: ${step.skipped}`)
+NODE
+      then
+        failed=1
+      fi
     fi
   done
   chrome_pids="$(ps -axo pid=,command= | awk '/proma-mobile-chrome-/ && /--user-data-dir=/ && !/awk/ {print $1}')"
