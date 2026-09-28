@@ -799,3 +799,8 @@
 - 消费去重端到端：另一父会话先用 `wait_for_delegations` 收回子任务终态并回复 `WAIT_RESULT_COLLECTED`；观察后续 **36.016 秒**无自动运行/通知，开发日志记录 `[子任务唤醒] consumed`。两组 E2E 测试父会话、子会话均通过 IPC 删除；配对设备撤销。
 - 手机回归：`mobile-preview.sh test` 默认 iPhone/Android 套件全过，JS exceptions 0。为修复附件套件中模型对单词 `Red`/`red` 的大小写差异导致的误失败，`scripts/personal/mobile-harness.mjs:waitForAssistantReply` 将期望文本匹配改为大小写不敏感；图像答案仍由后续 `\bred\b/i` 断言实际验证为红色。复跑 `android:attachments` 及完整默认套件均通过。
 - 文档更新：`docs/personal/delegation-auto-wake.md` 补充 identity/source 与事件推送说明；本记录补记修复原因、单测和 E2E 证据。开发实例、8443 Serve 与 iPhone 17 Pro 模拟器保持运行；未运行打包、安装更新或重启正式 Proma。
+
+## 2026-09-28: 子任务自动唤醒合并（待打包）
+
+- 合并 `feature/delegation-auto-wake`（`b12f5038`、`bf9c3e13`）。父会话复核：唤醒轮次为 `triggeredBy: 'external'`、`source: 'bridge'`，父 Agent 可再次委派；全量 610 pass / 0 fail；开发实例端到端唤醒延迟 30.0 秒、已收回结果不重复唤醒。用户 2026-09-28 23:41 在开发实例桌面确认成功。
+- 与截屏提示 / Node 警告分级 / serve-sim 单副本（`c6be1acb`）一起等待打包。
