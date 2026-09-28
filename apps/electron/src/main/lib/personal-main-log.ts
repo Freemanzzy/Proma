@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { join } from 'node:path'
 import { isPersonalBuild } from './personal-build'
-import { appendPersonalMainLog, isNodeWarningOutput, type PersonalLogEvent } from './personal-log-writer'
+import { appendPersonalMainLog, isNodeWarningOutput, setPersonalInfoSink, type PersonalLogEvent } from './personal-log-writer'
 
 let installed = false
 let fatalRecorder: ((error: unknown) => void) | null = null
@@ -35,6 +35,7 @@ export function initializePersonalMainLog(): string | null {
     originalWarn(...args)
   }
   fatalRecorder = (error) => record('fatal', [error])
+  setPersonalInfoSink((scope, message) => appendPersonalMainLog(logPath, 'info', undefined, undefined, undefined, { name: 'Info', scope, message }))
   process.once('uncaughtExceptionMonitor', (error) => record('fatal', [error]))
   return logPath
 }
