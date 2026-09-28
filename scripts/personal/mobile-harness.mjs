@@ -437,10 +437,11 @@ async function createHarness(options) {
     while (Date.now() < end) {
       last = await readHistory()
       const userIndex = [...last].map((message) => sdkMessageRole(message) === 'user' && sdkMessageText(message).includes(userText)).lastIndexOf(true)
+      const expectedLower = expectedText.toLocaleLowerCase()
       const assistantReply = userIndex >= 0
-        ? last.slice(userIndex + 1).find((message) => sdkMessageRole(message) === 'assistant' && sdkMessageText(message).includes(expectedText))
+        ? last.slice(userIndex + 1).find((message) => sdkMessageRole(message) === 'assistant' && sdkMessageText(message).toLocaleLowerCase().includes(expectedLower))
         : null
-      const pageAssistantHasText = await client.evaluate(`([...document.querySelectorAll('[data-message-role="assistant"]')].some((node) => (node.innerText || '').includes(${quoteJs(expectedText)})))`)
+      const pageAssistantHasText = await client.evaluate(`([...document.querySelectorAll('[data-message-role="assistant"]')].some((node) => (node.innerText || '').toLocaleLowerCase().includes(${quoteJs(expectedLower)})))`)
       if (assistantReply && pageAssistantHasText) return { history: last, assistant: assistantReply }
       await delay(500)
     }

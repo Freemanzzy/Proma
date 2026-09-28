@@ -782,3 +782,25 @@
 - `personal-log-writer.ts` / `personal-main-log.ts`：经 console.error 输出的 Node 进程警告（`(node:PID) [DEPxxxx] DeprecationWarning:`、`ExperimentalWarning` 等，或 name 以 Warning 结尾的 Error）记为 `[WARN]`；其他文本中提到 Warning 不降级。新增单测；判定函数放在不依赖 electron 的 writer 中，避免测试间 electron 模块污染。
 - `electron-builder.yml`：`files` 排除 `node_modules/serve-sim/**`，运行时只用 `Contents/Resources/serve-sim`。
 - 验证：typecheck、全量 602 pass / 0 fail、build:main / build:renderer。打包层面的副本移除与截屏提示待下次打包/安装验证。
+
+## 2026-09-28: 协作子 Agent 完成后自动唤醒父会话
+
+- 新增 `apps/electron/src/main/lib/personal-delegation-wake.ts`：默认开启（数据目录 `personal-settings.json` 中 `delegationAutoWake: false` 可关闭，读取失败按开启处理）；在子会话完成、失败或取消后合并父会话 30 秒内的结果，并等待父会话空闲后通过 `runAgentHeadless` 在原会话渠道、模型、工作区与权限模式发起带 `triggeredBy: 'delegation'` 的自动通知轮次。相同父会话每小时最多 10 次；不存在/归档/用户停止、已消费、关闭开关和限频均跳过并记录 `[子任务唤醒]` 原因。
+- 消费判定：`wait_for_delegations` 返回以及 `get_delegation_results` 读取时，将已返回终态的 delegationId 标记为 consumed；未完成状态不标记。唤醒前再次过滤 consumed，父会话忙碌时每秒轮询并重新检查终止/归档/消费条件。子会话运行与 `wait_for_delegations` 行为不变。
+- 最小上游接入：`agent-collaboration-tools.ts` 新增个人模块 import、终态回调一行、wait/get 两处消费标记调用，并在委派记录保留父工作区；未改其他上游文件。
+- 文档：新增 `docs/personal/delegation-auto-wake.md` 开关说明，并更新 `PERSONAL.md` 的个人版差异索引。
+- 验证：`bun run typecheck`、`build:main`、`build:renderer`、`build:web-preload` 通过；全仓 `bun test` 602 pass / 0 fail / 0 error。开发实例 `mobile-preview.sh start`、`sim` 均通过；`mobile-preview.sh test` 全部默认套件通过（iPhone panel-probe/smoke/mobile-polish/layout/dead-socket，Android smoke/attachments/dead-socket，异常数均 0）。尚未完成专用协作子 Agent 发起、消费去重与自动续轮的端到端实测；对应功能单测亦未新增，属于待验证项。开发实例及 8443 保持运行，未停止正式版、未运行安装更新脚本。
+
+## 2026-09-28: 自动唤醒父会话身份修正与验收完成
+
+- 修正上一节实现的身份错误：自动唤醒输入改为 `triggeredBy: 'external'`，headless `source` 使用 `bridge`。父会话因此不再被 `agent-collaboration-tools.ts` 判定为子会话；复核直接依赖 `triggeredBy === 'delegation'` 的委派创建、工作区 MCP/视觉中继与规划策略，以及 renderer 的子会话完成提醒分支，均不会误判唤醒父会话。`agent-service.runAgentHeadless` 仍负责发出完整 stream/`STREAM_COMPLETE`、`external_run_started` 与 `run_completed`；bridge source 走 Web Remote 的普通“运行已完成”推送。完成/失败回调现在有可观测的结束/错误日志，不替代现有事件分发。
+- `personal-delegation-wake.ts` 改为依赖注入控制器，单测不导入真实 Electron；加入 `personal-delegation-wake.test.ts` 的 8 项测试：consumed、stoppedByUser、开关关闭、忙时排队后空闲、合并、每小时 10 次、failed/cancelled 消息状态、external/bridge 身份及原会话参数。全仓 `bun test`：610 pass / 0 fail / 0 error；workspace typecheck 通过。
+- 开发实例真实模型端到端：测试父会话 `6c156e88-d803-4864-ac3f-a55cf629f69d` 首轮只委派“只回复 pong”并直接结束；子会话于 2026-09-28 21:56:41.608 GMT+8 完成，父会话自动轮于 21:57:11.623 GMT+8 开始，延迟 **30.015 秒**。父 Agent 调用 `get_delegation_results` 后成功再次调用 `delegate_agent` 创建第二子任务，未出现“协作子会话不能继续创建”错误；第二子任务结果后也收到后续唤醒。
+- 消费去重端到端：另一父会话先用 `wait_for_delegations` 收回子任务终态并回复 `WAIT_RESULT_COLLECTED`；观察后续 **36.016 秒**无自动运行/通知，开发日志记录 `[子任务唤醒] consumed`。两组 E2E 测试父会话、子会话均通过 IPC 删除；配对设备撤销。
+- 手机回归：`mobile-preview.sh test` 默认 iPhone/Android 套件全过，JS exceptions 0。为修复附件套件中模型对单词 `Red`/`red` 的大小写差异导致的误失败，`scripts/personal/mobile-harness.mjs:waitForAssistantReply` 将期望文本匹配改为大小写不敏感；图像答案仍由后续 `\bred\b/i` 断言实际验证为红色。复跑 `android:attachments` 及完整默认套件均通过。
+- 文档更新：`docs/personal/delegation-auto-wake.md` 补充 identity/source 与事件推送说明；本记录补记修复原因、单测和 E2E 证据。开发实例、8443 Serve 与 iPhone 17 Pro 模拟器保持运行；未运行打包、安装更新或重启正式 Proma。
+
+## 2026-09-28: 子任务自动唤醒合并（待打包）
+
+- 合并 `feature/delegation-auto-wake`（`b12f5038`、`bf9c3e13`）。父会话复核：唤醒轮次为 `triggeredBy: 'external'`、`source: 'bridge'`，父 Agent 可再次委派；全量 610 pass / 0 fail；开发实例端到端唤醒延迟 30.0 秒、已收回结果不重复唤醒。用户 2026-09-28 23:41 在开发实例桌面确认成功。
+- 与截屏提示 / Node 警告分级 / serve-sim 单副本（`c6be1acb`）一起等待打包。
