@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test'
 import { connect } from 'node:net'
 import WebSocket from 'ws'
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WebRemoteAuth } from './web-remote-auth'
@@ -46,11 +46,11 @@ beforeAll(async () => {
   isWebRemoteEnabled = (await import('./web-remote-service')).isWebRemoteEnabled
   isWebRemoteConfigDirAllowed = (await import('./web-remote-service')).isWebRemoteConfigDirAllowed
   const config = { enabled: true, allowedOrigin: 'https://proma.example', allowedWorkspaceIds: ['ws-1'], allowedTailscaleLogins: ['lee@example.com'], trustedTailscaleNodes: ['trusted-phone'] }
-  const auth = new WebRemoteAuth(config, mkdtempSync(join(tmpdir(), 'proma-web-remote-server-')), async () => ({ Node: { ComputedName: 'trusted-phone' }, UserProfile: { LoginName: 'lee@example.com' } }))
+  const auth = new WebRemoteAuth(config, tempDir('proma-web-remote-server-'), async () => ({ Node: { ComputedName: 'trusted-phone' }, UserProfile: { LoginName: 'lee@example.com' } }))
   const code = auth.createPairingCode().code
   const paired = auth.pair(code, 'test')!
   cookie = `proma_web_remote=${paired.token}`
-  rendererDir = mkdtempSync(join(tmpdir(), 'proma-web-remote-renderer-'))
+  rendererDir = tempDir('proma-web-remote-renderer-')
   mkdirSync(join(rendererDir, 'assets'))
   writeFileSync(join(rendererDir, 'index.html'), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module" src="./assets/main-12345678.js"></script></body></html>')
   webPreloadPath = join(rendererDir, '../web-remote/preload.js')
@@ -59,9 +59,9 @@ beforeAll(async () => {
   for (const source of webPreloadSourcePaths) writeFileSync(source, 'source')
   writeFileSync(webPreloadPath, 'window.__PRELOAD__=true;'.repeat(200))
   writeFileSync(join(rendererDir, 'assets', 'main-12345678.js'), 'console.log("cached");'.repeat(200))
-  iconDir = mkdtempSync(join(tmpdir(), 'proma-web-remote-icons-'))
+  iconDir = tempDir('proma-web-remote-icons-')
   for (const [filename, body] of Object.entries(iconFixtures)) writeFileSync(join(iconDir, filename), body)
-  server = new WebRemoteServer({ config, auth, rendererDir, iconDir, pushDataDir: mkdtempSync(join(tmpdir(), 'proma-web-remote-push-server-')), webPreloadPath, webPreloadSourcePaths, buildWebPreload: () => {
+  server = new WebRemoteServer({ config, auth, rendererDir, iconDir, pushDataDir: tempDir('proma-web-remote-push-server-'), webPreloadPath, webPreloadSourcePaths, buildWebPreload: () => {
     if (!allowPreloadRebuild) return { success: false, error: 'test rebuild disabled' }
     writeFileSync(webPreloadPath, 'window.__PRELOAD_RECOVERED__=true;'.repeat(200))
     return { success: true }
@@ -70,7 +70,9 @@ beforeAll(async () => {
   port = (server.httpServer.address() as { port: number }).port
 })
 
-afterAll(async () => { await server.stop() })
+const tempDirs: string[] = []
+const tempDir = (prefix: string): string => { const dir = mkdtempSync(join(tmpdir(), prefix)); tempDirs.push(dir); return dir }
+afterAll(async () => { await server.stop(); for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true }) })
 
 describe('WebRemoteServer loopback integration', () => {
   test('根页面返回随机 nonce 一致的 CSP 与安全头，且无内联事件属性', async () => {
@@ -216,10 +218,10 @@ describe('WebRemoteServer loopback integration', () => {
   })
 
   test('安装包内源文件缺失但产物存在时视为就绪，不触发开发模式重建', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'proma-web-remote-packaged-'))
-    const packagedRendererDir = mkdtempSync(join(tmpdir(), 'proma-web-remote-packaged-renderer-'))
+    const dir = tempDir('proma-web-remote-packaged-')
+    const packagedRendererDir = tempDir('proma-web-remote-packaged-renderer-')
     writeFileSync(join(packagedRendererDir, 'index.html'), '<!doctype html><html><body><div id="root"></div></body></html>')
-    const packagedPreloadDir = mkdtempSync(join(tmpdir(), 'proma-web-remote-packaged-preload-'))
+    const packagedPreloadDir = tempDir('proma-web-remote-packaged-preload-')
     const packagedWebPreloadPath = join(packagedPreloadDir, 'preload.js')
     writeFileSync(packagedWebPreloadPath, 'window.__PRELOAD__=true;')
     const missingSourcePaths = [join(packagedRendererDir, 'missing-preload-source.ts'), join(packagedRendererDir, 'missing-shim-source.ts')]
@@ -240,10 +242,10 @@ describe('WebRemoteServer loopback integration', () => {
   })
 
   test('安装包内源文件与产物均缺失时返回中文错误提示且不触发开发模式重建', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'proma-web-remote-packaged-missing-'))
-    const packagedRendererDir = mkdtempSync(join(tmpdir(), 'proma-web-remote-packaged-missing-renderer-'))
+    const dir = tempDir('proma-web-remote-packaged-missing-')
+    const packagedRendererDir = tempDir('proma-web-remote-packaged-missing-renderer-')
     writeFileSync(join(packagedRendererDir, 'index.html'), '<!doctype html><html><body><div id="root"></div></body></html>')
-    const packagedPreloadDir = mkdtempSync(join(tmpdir(), 'proma-web-remote-packaged-missing-preload-'))
+    const packagedPreloadDir = tempDir('proma-web-remote-packaged-missing-preload-')
     const packagedWebPreloadPath = join(packagedPreloadDir, 'preload.js')
     const missingSourcePaths = [join(packagedRendererDir, 'missing-preload-source.ts'), join(packagedRendererDir, 'missing-shim-source.ts')]
     let buildCalls = 0
@@ -348,11 +350,11 @@ describe('WebRemoteServer loopback integration', () => {
   })
 
   test('iconDir 缺少某个文件时该路由返回 404，不影响其它路由', async () => {
-    const partialIconDir = mkdtempSync(join(tmpdir(), 'proma-web-remote-icons-partial-'))
+    const partialIconDir = tempDir('proma-web-remote-icons-partial-')
     writeFileSync(join(partialIconDir, 'icon-192.png'), iconFixtures['icon-192.png']!)
     // 故意不写入 apple-touch-icon.png，模拟安装缺失场景。
-    const partialAuth = new WebRemoteAuth({ workspaceScope: 'all' }, mkdtempSync(join(tmpdir(), 'proma-web-remote-icons-partial-auth-')))
-    const partialServer = new WebRemoteServer({ config: { workspaceScope: 'all' }, auth: partialAuth, rendererDir, iconDir: partialIconDir, pushDataDir: mkdtempSync(join(tmpdir(), 'proma-web-remote-icons-partial-push-')) })
+    const partialAuth = new WebRemoteAuth({ workspaceScope: 'all' }, tempDir('proma-web-remote-icons-partial-auth-'))
+    const partialServer = new WebRemoteServer({ config: { workspaceScope: 'all' }, auth: partialAuth, rendererDir, iconDir: partialIconDir, pushDataDir: tempDir('proma-web-remote-icons-partial-push-') })
     await partialServer.start(0)
     const partialPort = (partialServer.httpServer.address() as { port: number }).port
     try {
@@ -411,7 +413,7 @@ describe('WebRemoteServer loopback integration', () => {
   })
 
   test('从配置撤销 Tailnet 节点后数秒内关闭既有 WebSocket', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'proma-web-remote-revoke-'))
+    const dir = tempDir('proma-web-remote-revoke-')
     const config = { allowedOrigin: 'https://proma.example', allowedTailscaleLogins: ['lee@example.com'], trustedTailscaleNodes: ['trusted-phone'] }
     writeFileSync(join(dir, 'config.json'), JSON.stringify(config))
     const revokeAuth = new WebRemoteAuth(config, dir, async () => ({ Node: { ComputedName: 'trusted-phone' }, UserProfile: { LoginName: 'lee@example.com' } }))

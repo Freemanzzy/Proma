@@ -215,7 +215,7 @@ import {
 import { extractTextFromAttachment } from './lib/document-parser'
 import { getUserProfile, updateUserProfile } from './lib/user-profile-service'
 import { getSettings, updateSettings } from './lib/settings-service'
-import { listSimulatorDevices, startSimulatorPreview, stopSimulatorPreview, getSimulatorPreviewStatus, pressSimulatorHome, captureSimulatorScreenshot } from './lib/simulator-preview-service'
+import { listSimulatorDevices, startSimulatorPreview, stopSimulatorPreview, getSimulatorPreviewStatus, pressSimulatorHome, captureSimulatorScreenshot, shutdownSimulator } from './lib/simulator-preview-service'
 import { refreshAgentIslandConfiguration, markAgentIslandSessionViewed } from './lib/agent-island-service'
 import { getAgentStatusHoverWindow } from './agent-status-hover-window'
 import { setDockBadgeCount } from './lib/dock-badge-service'
@@ -1401,6 +1401,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(SIMULATOR_IPC_CHANNELS.STOP, (event, udid?: string) => { assertMainSimulatorRenderer(event.sender.id); return stopSimulatorPreview(udid) })
   ipcMain.handle(SIMULATOR_IPC_CHANNELS.STATUS, (event) => { assertMainSimulatorRenderer(event.sender.id); return getSimulatorPreviewStatus() })
   ipcMain.handle(SIMULATOR_IPC_CHANNELS.HOME, (event, udid: string) => { assertMainSimulatorRenderer(event.sender.id); return pressSimulatorHome(udid) })
+  ipcMain.handle(SIMULATOR_IPC_CHANNELS.SHUTDOWN, (event, udid: string) => { assertMainSimulatorRenderer(event.sender.id); return shutdownSimulator(udid) })
   ipcMain.handle(SIMULATOR_IPC_CHANNELS.SCREENSHOT, (event, input: { udid: string; sessionId: string; workspaceSlug: string }) => { assertMainSimulatorRenderer(event.sender.id); return captureSimulatorScreenshot(input.udid, input.sessionId, input.workspaceSlug) })
 
   // ===== 本地终端（仅主 renderer 可操作，不能指定可执行文件） =====
