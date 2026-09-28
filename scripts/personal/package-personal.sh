@@ -23,7 +23,7 @@ printf '\n== bun install ==\n'
 bun install
 printf '\n== typecheck ==\n'
 bun run typecheck
-printf '\n== full tests (baseline limit: 5 failures, 1 error) ==\n'
+printf '\n== full tests (baseline limit: 0 failures, 0 errors) ==\n'
 TEST_LOG="$(mktemp -t proma-personal-tests.XXXXXX)"
 set +e
 bun test --no-color 2>&1 | tee "$TEST_LOG"
@@ -39,8 +39,8 @@ def count(label):
     return int(found[-1]) if found else 0
 failed, errors = count('fail'), count('error')
 print(f'Parsed test result: fail={failed}, error={errors}, exit={rc}')
-if failed > 5 or errors > 1:
-    raise SystemExit('Test regressions exceed the recorded baseline (5 failures, 1 error).')
+if failed > 0 or errors > 0:
+    raise SystemExit('Test regressions exceed the recorded baseline (0 failures, 0 errors).')
 if rc not in (0, 1):
     raise SystemExit(f'Unexpected bun test exit code: {rc}')
 PY

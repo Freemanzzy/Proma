@@ -12,6 +12,7 @@
 - 基线 commit：`f20943edd047ecdc929df67de9412d6e58cd4312`
 - 当前个人主线：`personal`
 - Electron 版本：`0.19.58`
+- 全量测试基线（2026-09-28）：`bun test` 必须达到 0 fail / 0 error；最新全量验证 596 pass / 0 fail / 0 error。
 
 ## 分支策略
 
@@ -681,3 +682,57 @@ python3 scripts/personal/import-proma-backup.py \\
 ## 2026-09-28: README 个人版区块更新
 
 - `README.md` / `README.en.md`：补充手机端布局适配、iOS 模拟器面板、固定证书签名、上一版移出 `/Applications` 与备份归档、右侧 Tab 修复、双方共同维护分工。仅文档。
+
+## 2026-09-28: 手机预览与验证统一脚本
+
+- 新增 `scripts/personal/mobile-preview.sh`：`start` 检查 17889/5173 端口、开启 8443 Tailscale Serve、后台运行开发实例并等候启动与分级覆盖率 100%；`sim [--device]` 默认启动 iPhone 17 Pro、打开 Simulator、生成配对码，通过 AXe `describe-ui` 动态定位配对输入框/按钮并配对，再打开 `/app/`、用 `simctl io screenshot` 截图核对；`test` 去除代理变量逐一执行六套默认 harness，单套外层 420 秒超时并检查无残留 Chrome；`stop` 只停止记录 PID 的开发进程树、关闭 8443 并检查 Serve；`status` 汇总监听、路由、模拟器和 harness 进程。
+- 验证：`bash -n` 通过；脚本实测 `start → sim → test → stop → status`。启动日志含“full-ui 分级覆盖率 100%（invoke=377, event=8）”及 `17889`；iPhone 17 Pro Safari 配对成功、进入 `/app/`，截图 `/tmp/proma-mobile-preview-sim.png`。harness：iPhone panel-probe、smoke（7/7）、mobile-polish（2/2）、layout（11/11）；Android smoke（7/7）、attachments（文本/图片/Markdown 验证通过）全部通过，JS exceptions 均为 0，每项配对设备均撤销，Chrome/profile 清理完成，既有会话保持不变。harness 记录首次 `/app/` 传输约 3.23 MB、2.29 s，复载约 1.3–1.5 KB、2.1–2.35 s（供项 D 基线使用）。停止后 17889/5173 均未监听，PID 文件删除，Serve 仅保留安装版 443→17888；iPhone 17 Pro 模拟器仍为 Booted。
+- 文档：`CLAUDE.md` §6 第 5/6 项与 `docs/personal/web-remote.md` 回归说明改为引用统一脚本。运行日志中存在已知通知音效预加载 XHR 错误，但 JS exceptions 为 0，未影响测试。
+
+## 2026-09-28: 手机预览脚本已配对模拟器复用
+
+- 首次模拟器成功配对后再次运行 `mobile-preview.sh sim` 时，Safari 已由现有 Cookie 直接进入应用；原脚本仍试图在根页面按配对表单定位控件。调整为仅在 AXe 点查询发现配对码输入框和“开始配对”按钮时输入新配对码；已配对时保留配对并直接校验 `/app/`，点位仍从 AXe `describe-ui` 返回的控件 frame 推导，不硬编码屏幕坐标。
+- 验证：脚本在已配对 iPhone 17 Pro 上重跑成功，截图 `/tmp/proma-mobile-preview-sim.png`，识别并保留原配对，/app 界面核验通过；`bash -n` 通过。
+
+## 2026-09-28: mobile-patch 源码拆分与 observer 写入收敛
+
+- 将 `full-ui/mobile-patch.ts` 的 CSS、注入 JS 抽到 `full-ui/mobile-patch/mobile-css.ts` 与 `mobile-js.ts`，`renderWebRemoteMobilePatch()` 对外 API 不变，由 esbuild 正常静态打包；CSS 完整内容与 `4954e7d1` 的原规则逐字节一致（16,491 bytes）。JS 与原脚本的唯一行为逻辑差别为 `setIfChanged` 的状态标记辅助：通知 on/off、侧栏/面板图标、键盘 inset、标题 label、下拉菜单 signature 只在值变化时执行 DOM 写入；其他 JS 行为保持一致。
+- 新增轻量 devDependency `linkedom@0.18.13` 与 `mobile-patch.test.ts`：真实加载拼接后的注入脚本到模拟 DOM，手动重复触发 100 轮 ensure/right-panel/menu MutationObserver；检查刷新按钮、面板图标、菜单图标、通知状态（含异步从 off→on）、标题与 Tab 下拉菜单。重复触发后写入计数不再增长。
+- 等价性与回归：CSS 规则内容 byte-for-byte 相同；JS diff 审查只涉及上述状态 setter 加 guard，无其他行为差异。typecheck、`build:main`、`build:renderer`、`build:web-preload` 通过（renderer 保留既有大 chunk 警告）；定向单测 1 pass / 0 fail / 8 assertions。A 脚本的 iPhone 17 Pro `/app/` 界面检查通过；iPhone 与 Android 的 layout 11/11、smoke 7/7、panel-probe 2/2、mobile-polish 刷新与会话单击 2/2 全部通过，JS exceptions 0；mobile-polish 工作区切换项按既有逻辑标记 skip（该点击是折叠/展开分组，不切换 workspace ID）。所有 harness 配对设备撤销、session/profile/Chrome 清理完成，无 Chrome 残留。
+- 全量 `bun test`：567 pass / 3 fail（570 tests）；3 个失败为既有 Electron `dialog` mock、Electron `shell` mock、planning-manager Electron binary 类型问题，统一由项 C 修复。仅新增 `linkedom` devDependency，未新增运行时依赖。
+- 保留核对：原 CSS、刷新按钮循环防护、触屏 `lastTouchAt` hover 拦截、面板开关/动效/重开 pointer-events、隐藏拖拽条、顶栏图标及状态标记、菜单、通知状态与 toast、标题下拉/模拟器入口隐藏等原逻辑均保留。
+- 文档：更新 `docs/personal/web-remote.md` 标出源文件路径与 observer 单测。
+
+## 2026-09-28: 全量测试基线归零
+
+- 按全仓实际运行结果处理现存三项失败，没有为通过测试改动产品逻辑：①`agent-session-manager.test.ts` 的 Electron 命名导出 `dialog` 与 `channel-runtime-api-key.test.ts` 的 `shell` 缺失，根因是 Bun `mock.module()` 会跨测试文件持续覆盖全局 `electron` 模块，其他测试的 mock 可能成为最终活跃版本；相关 `electron` mock 统一补齐所需的 `BrowserWindow`、`dialog`、`shell` 等命名导出。②`planning-manager.test.ts` 用 `createRequire('electron')` 取运行文件时可能读到前序测试留下的 mock 对象；改为通过 `createRequire.resolve('electron')` 找包目录，再读取包内 `path.txt` 计算 Electron 二进制真实路径，不受模块 mock 影响。
+- 定向验证：四个相关文件 29 pass / 0 fail；typecheck 通过。全量 `bun test`：592 pass / 0 fail / 0 error（91 files，1305 assertions）。
+- `scripts/personal/package-personal.sh` 的全测门槛改为 0 fail / 0 error；`CLAUDE.md` §6 第 2 项与本文件基线同步更新。历史记录保留原始当时数字，未改写。
+
+## 2026-09-28: Web Remote 手机首屏资源与传输测量
+
+- 本机开发实例 `/app/` 首次 CDP 加载（iPhone UA，18:41 GMT+8）：69 requests、48 responses；计入 `/app/` 的 45 个 200 响应资源，CDP 传输 3,230,010 bytes、资源响应头压缩体合计 3,223,847 bytes；CDP `Network.dataReceived.dataLength` 解码后 7,992,064 bytes，按资源体计算节省约 59.7%。导航到就绪计时 8.58 s；主 bundle 完成于 6.536 s。主要资源：`index-DExTehsL.js` 5,738,122 → 1,363,012 bytes（Brotli）；CSS 259,761 → 36,455 bytes（Brotli）；动态 `/app/` HTML 42,457 → 8,552 bytes（Brotli）；`preload.js` 121,520 → 21,688 bytes（Brotli）。最大图片 1,511,206 bytes 未压缩（编码结果无收益，服务端按规则直接返回原体）。
+- 响应头核验：HTML、JS、CSS、preload 均有 `Content-Encoding: br`、`Vary: Accept-Encoding`；hash 静态资源返回 `Cache-Control: public, max-age=31536000, immutable`，HTML 与 preload 为 `no-cache`，符合动态页面与预加载脚本需要检查更新的要求。WOFF2 与大 PNG 未压缩；多个 MP3 资源的 Brotli 收益很小但服务端仅在编码体更小时返回压缩版本。`web-remote-server.ts` 已实现上述能力，无需源代码修改，因此无压缩前后对比数据。
+- 回归：通过 `mobile-preview.sh start → test iphone:smoke → stop` 实跑；smoke 7/7，JS exceptions 0，测试设备撤销、会话/profile/Chrome 清理完成，停止后 17889/5173 释放、Serve 仅 443。harness 音效预加载 XHR console error 为既有问题，不影响 smoke。
+- 未实施的后续建议（按本项范围不改代码）：评估将 5.74 MB 的主 JS 与桌面专用模块拆分/按需载入；单个约 1.51 MB 图片也可独立评估格式与首屏必要性。
+
+## 2026-09-28: 已配对设备 30 天惰性过期
+
+- `WebRemoteAuth.refreshFromDisk(now)`：配对设备按 `lastUsedAt`（无则 `createdAt`）判断；超过 30 天未使用即写入 `revokedAt=now`，超过 30 天的撤销记录从 `devices.json` 移除。`authenticateToken` 与桌面状态 `listDevices()` 均在处理时刷新期限；受信 `tailnet:*` 身份不因不活跃撤销/清理。设备 JSON 的配对创建、最近使用、手动撤销及惰性清理统一通过同目录临时文件 + 原子 rename 持久化（临时及目标权限 0600）。
+- 桌面手机访问设置已有“已配对设备”列表和 `!revokedAt` 过滤；刷新时将 expired 设备从有效列表移除，无需改 UI。
+- 新增 4 项 auth 单测：旧 lastUsedAt 撤销；lastUsedAt 缺省回退 createdAt；近 30 天 lastUsedAt 覆盖较旧创建时间并保持有效；清除过期撤销记录且保留近期撤销与 tailnet 身份。另验证临时文件清理和写盘结果。
+- 验证：auth 定向测试 16 pass / 0 fail / 51 assertions；workspace typecheck、`build:main`、`build:renderer`、`build:web-preload` 通过；全量 `bun test` 596 pass / 0 fail / 0 error（91 files，1314 assertions）。Renderer 仍显示既有 large chunk warning。所有验证只写临时测试目录；未读取、修改或清理 `~/.proma` 正式数据。
+- 文档：更新 `docs/personal/web-remote.md` 的设备安全与过期说明；本文件当前基线同步为 596/0/0。
+
+## 2026-09-28: 手机预览回归输出收敛
+
+- `mobile-preview.sh test` 过去会把每套 harness 的整个 JSON（包含 base64 音频数据 URI）打印到终端，无法快速阅读。改为逐套记录到 `/tmp/proma-mobile-preview-<ua>-<suite>.log`，解析 harness 结果 JSON 后只输出汇总（layout 页数、panel 命中、步骤数、单击比、异常数、配对/Chrome/profile 清理），失败时显示日志尾部。harness 结果完整留在临时日志，不泄漏到对话输出。
+- 验证：`bash -n` 通过；最终 `mobile-preview.sh start → sim → test` 中，start 覆盖率 100% 且端口 17889 启动，iPhone 17 Pro 已配对态 `/app/` 截图通过；test 的 iPhone panel-probe 2/2、smoke 7/7、mobile-polish 单击 2/2、layout 11/11 与 Android smoke 7/7、attachments 全部通过，JS exceptions 0、Chrome/profile 清理完成。状态核对确认 PID 记录有效、17889/5173 监听、Serve 8443→17889 与 443→17888 并存、iPhone 17 Pro Booted。
+- 最终用户体验状态按要求保留：开发实例与 8443 Serve 持续运行，不执行 `stop`。
+
+## 2026-09-28: 稳健性批次合并与同步策略（待打包）
+
+- 合并 `feature/robustness-2026-09-28`：`mobile-preview.sh` 统一预览/验证流程；mobile-patch 拆为 `mobile-patch/mobile-css.ts`、`mobile-js.ts` 并以 `setIfChanged` 收敛 DOM 写入，新增 observer 收敛单测；测试基线归零（596 pass / 0 fail，打包门槛 0/0）；首屏测量（Brotli 与缓存已生效，无需改动）；配对设备 30 天未用自动撤销、撤销 30 天后清除。
+- 父会话复核：拆分前后 CSS 规则一致、JS 仅状态写入路径变化；esbuild 产物保留中文选择器（`String.raw` 依赖打包器不转义非 ASCII，后续打包需核对）。用户 2026-09-28 14:27 在模拟器确认。
+- 同步策略决定写入 `docs/personal/maintenance.md` §4.1；周检任务已加入触发条件检查。
+- 与 `a040902d` 模拟器同步修复一并等待打包（用户要求暂缓）。

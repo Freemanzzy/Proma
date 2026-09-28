@@ -14,6 +14,7 @@ const originalHome = process.env.HOME
 const originalPromaDev = process.env.PROMA_DEV
 
 mock.module('electron', () => ({
+  BrowserWindow: class {},
   app: {
     isPackaged: true,
     getPath: () => join(process.env.HOME ?? tempHome, 'Library', 'Application Support'),
@@ -22,6 +23,10 @@ mock.module('electron', () => ({
     isEncryptionAvailable: () => false,
     encryptString: (value: string) => Buffer.from(value),
     decryptString: (value: Buffer) => value.toString('utf-8'),
+  },
+  dialog: {},
+  shell: {
+    openExternal: async () => undefined,
   },
 }))
 

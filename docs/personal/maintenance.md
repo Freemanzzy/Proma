@@ -62,6 +62,12 @@ Claude Code 接手安装时只做必要复核：包内 marker commit 等于 `per
 - **安装与重启**：安装、替换应用、退出 Proma 只由 Claude Code 在用户在场并同意时执行；Proma 不得运行 `install-update.sh`。
 - **网络**：git 用 `GIT_TERMINAL_PROMPT=0 perl -e 'alarm 120; exec @ARGV' git -c http.proxy=http://127.0.0.1:7897 ...`；其他下载设 `HTTPS_PROXY=http://127.0.0.1:7897`；bun 在 `~/.bun/bin`（先 `export PATH="$HOME/.bun/bin:$PATH"`）；macOS 无 `timeout`，用 `perl -e 'alarm N; exec @ARGV'`。
 
+## 4.1 同步策略（用户 2026-09-28 决定）
+
+- 目前继续完整跟随官方正式 tag（方案 A），同时尽量减少对上游文件的改动面。
+- 触发条件（周检“同步策略”小节自动报告）：最新正式 tag 距今 ≥ 8 周，或冲突试探冲突文件 > 30。任一触发即建议切换为“独立维护、只挑选性引入上游改动”（方案 B），由用户决定。
+- 无论 A/B，`~/.proma` 数据格式保持与开源上游兼容，保留回退官方开源版的可能；不考虑迁往商业版。
+
 ## 5. 文档规则（SSOT）
 
 - 每类事实只有一个权威位置：基线、与上游差异、同步与变更记录 → `PERSONAL.md`；共同维护规则 → 本文件；Claude Code 的职责细节 → `CLAUDE.md`；操作步骤 → `docs/personal/*-runbook.md`；手机访问 → `docs/personal/web-remote.md`。其他文档引用，不复制。

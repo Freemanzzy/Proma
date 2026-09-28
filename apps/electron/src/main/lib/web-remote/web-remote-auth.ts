@@ -1,15 +1,16 @@
 import { execFile } from 'node:child_process'
 import { createHash, randomBytes, randomInt } from 'node:crypto'
 import { isIP } from 'node:net'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { promisify } from 'node:util'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { getConfigDir } from '../config-paths'
 
 export const WEB_REMOTE_COOKIE = 'proma_web_remote'
 export const PAIRING_CODE_TTL_MS = 10 * 60_000
 export const PAIRING_LOCK_MS = 15 * 60_000
 export const MAX_PAIRING_FAILURES = 5
+export const PAIRED_DEVICE_IDLE_TTL_MS = 30 * 24 * 60 * 60_000
 
 export interface WebRemoteConfig {
   enabled?: boolean
@@ -99,9 +100,22 @@ function readJson<T>(path: string, fallback: T): T {
 }
 
 function writeJson(path: string, value: unknown): void {
-  const parent = join(path, '..')
+  const parent = dirname(path)
   if (!existsSync(parent)) mkdirSync(parent, { recursive: true, mode: 0o700 })
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 })
+}
+
+function writeJsonAtomic(path: string, value: unknown): void {
+  const parent = dirname(path)
+  if (!existsSync(parent)) mkdirSync(parent, { recursive: true, mode: 0o700 })
+  const tempPath = join(parent, `.${Date.now()}-${randomBytes(8).toString('hex')}.tmp`)
+  try {
+    writeFileSync(tempPath, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600, flag: 'wx' })
+    renameSync(tempPath, path)
+  } catch (error) {
+    try { unlinkSync(tempPath) } catch {}
+    throw error
+  }
 }
 
 export function getWebRemoteDataDir(): string {
@@ -167,11 +181,36 @@ export class WebRemoteAuth {
     return this.config
   }
 
-  refreshFromDisk(): void {
+  refreshFromDisk(now = Date.now()): void {
     this.pairing = readJson<PairingState | null>(join(this.dataDir, 'pairing.json'), this.pairing)
     this.devices = readJson<DeviceFile>(join(this.dataDir, 'devices.json'), this.devices)
+    const retained: DeviceRecord[] = []
+    let devicesChanged = false
+    for (const device of this.devices.devices) {
+      if (device.id.startsWith('tailnet:')) {
+        retained.push(device)
+        continue
+      }
+      if (typeof device.revokedAt === 'number' && Number.isFinite(device.revokedAt)) {
+        if (now - device.revokedAt <= PAIRED_DEVICE_IDLE_TTL_MS) retained.push(device)
+        else devicesChanged = true
+        continue
+      }
+      const lastActivityAt = Number.isFinite(device.lastUsedAt) ? device.lastUsedAt! : device.createdAt
+      if (!Number.isFinite(lastActivityAt) || now - lastActivityAt > PAIRED_DEVICE_IDLE_TTL_MS) {
+        device.revokedAt = now
+        devicesChanged = true
+      }
+      retained.push(device)
+    }
+    this.devices.devices = retained
+    if (devicesChanged) this.persistDevices()
     const configPath = join(this.dataDir, 'config.json')
     if (existsSync(configPath)) this.config = readJson<WebRemoteConfig>(configPath, this.config)
+  }
+
+  private persistDevices(): void {
+    writeJsonAtomic(join(this.dataDir, 'devices.json'), this.devices)
   }
 
   async authenticateTrustedTailscale(login: string | undefined, forwardedFor: string | undefined): Promise<DeviceRecord | null> {
@@ -189,7 +228,7 @@ export class WebRemoteAuth {
   }
 
   getRevokedDeviceIds(): string[] {
-    return this.devices.devices.filter((device) => device.revokedAt).map((device) => device.id)
+    return this.devices.devices.filter((device) => typeof device.revokedAt === 'number').map((device) => device.id)
   }
 
   createPairingCode(now = Date.now()): { code: string; expiresAt: number } {
@@ -225,19 +264,19 @@ export class WebRemoteAuth {
     this.devices.devices.push({ id: deviceId, tokenHash: sha256(token), label: label.slice(0, 80), createdAt: now })
     this.pairing = null
     writeJson(join(this.dataDir, 'pairing.json'), null)
-    writeJson(join(this.dataDir, 'devices.json'), this.devices)
+    this.persistDevices()
     return { token, deviceId }
   }
 
   authenticateToken(token: string | undefined, now = Date.now()): DeviceRecord | null {
     if (!token) return null
-    this.refreshFromDisk()
+    this.refreshFromDisk(now)
     const tokenHash = sha256(token)
     const device = this.devices.devices.find((candidate) => candidate.tokenHash === tokenHash && !candidate.revokedAt)
     if (!device) return null
     if (now - this.lastPersistedAt >= 60_000) {
       device.lastUsedAt = now
-      writeJson(join(this.dataDir, 'devices.json'), this.devices)
+      this.persistDevices()
       this.lastPersistedAt = now
     }
     return { ...device }
@@ -248,11 +287,12 @@ export class WebRemoteAuth {
     const device = this.devices.devices.find((candidate) => candidate.id === deviceId && !candidate.revokedAt)
     if (!device) return false
     device.revokedAt = Date.now()
-    writeJson(join(this.dataDir, 'devices.json'), this.devices)
+    this.persistDevices()
     return true
   }
 
-  listDevices(): Array<Omit<DeviceRecord, 'tokenHash'>> {
+  listDevices(now = Date.now()): Array<Omit<DeviceRecord, 'tokenHash'>> {
+    this.refreshFromDisk(now)
     return this.devices.devices.map(({ tokenHash: _tokenHash, ...device }) => ({ ...device }))
   }
 
