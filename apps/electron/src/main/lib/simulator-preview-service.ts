@@ -20,9 +20,13 @@ function findBundledServeSimScript(): string | undefined {
   const require = createRequire(__filename)
   const searchPaths = require.resolve.paths('serve-sim') ?? []
   const candidates = searchPaths.map((nodeModules) => join(nodeModules, 'serve-sim', 'dist', 'serve-sim.js'))
-  // 打包后 serve-sim/dist 被 asarUnpack；优先用 app.asar.unpacked 下的真实路径，让其原生 helper 按真实目录解析。
+  const packagedResource = process.resourcesPath
+    ? join(process.resourcesPath, 'serve-sim', 'node_modules', 'serve-sim', 'dist', 'serve-sim.js')
+    : undefined
+  // Packaged ESM dependencies live together under Resources/serve-sim, outside ASAR.
+  // The standard app/node_modules candidates remain for development builds.
   const unpacked = candidates.map((candidate) => candidate.replace(/app\.asar([\\/])/, 'app.asar.unpacked$1'))
-  return [...unpacked, ...candidates].find((candidate) => existsSync(candidate))
+  return [packagedResource, ...unpacked, ...candidates].find((candidate): candidate is string => Boolean(candidate && existsSync(candidate)))
 }
 
 async function getServeSimInvocation(): Promise<ServeSimInvocation> {

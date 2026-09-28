@@ -707,3 +707,10 @@
 - **模拟器面板不可用**：`asarUnpack` 只解包 `serve-sim/dist/**`，其依赖 `ws`、`inspect-webkit`、`sonner` 留在 asar 内，从 `app.asar.unpacked` 以 ESM 运行时 `ERR_MODULE_NOT_FOUND`；打包自检只跑 `--help` 未加载 middleware，故未发现；内置包崩溃时不回退 npx；启动失败后面板显示“已关机”而设备实为 Booted。
 - 其他发现：退出迟滞（quit/SIGTERM 20–60 秒不退出）；`icon.icns` 未打入包（启动 `[WARN]`）；随包 helper 的 x86_64 切片未签名（arm64 通过）；钥匙串在同证书升级后仍弹窗。
 - 待办转入修复批次：见 install-result-2026-09-28-2 “给 Proma 的待办” 1–7。
+
+## 2026-09-28: serve-sim 运行时依赖独立随包
+
+- 采用 `extraResources` 独立资源目录方案：`sync-runtime-deps.ts` 在运行时同步时扫描 serve-sim 的编译 JS 外部导入并构建 `resources/serve-sim/node_modules`，electron-builder 将其复制到 `Contents/Resources/serve-sim`。服务解析优先使用该资源路径，开发模式仍使用常规 `node_modules` 搜索路径。相比仅解包 serve-sim 文件或维护手写 `asarUnpack` 依赖名单，该方式确保 ESM 包与真实运行依赖从磁盘同目录解析，依赖升级后会按 bundle 编译产物中的外部导入自动调整。
+- `sonner` 在 serve-sim 的 package.json 声明为依赖，但在发布的 `dist` JS 中没有运行时导入；扫描后未打包。`ws` 被编译产物实际引用并以嵌套 `node_modules` 方式随资源分发；`inspect-webkit` 的实现已被 serve-sim 编译产物内嵌，没有外部包导入，不重复打包。
+- 验证：`bun run sync:runtime-deps` 同步 138 个运行依赖；独立资源目录中只包含 serve-sim 与实际外部依赖 `ws`；Node ESM 实际导入 `dist/middleware.js` 通过，serve-sim 主入口 `--help` 通过；typecheck、`build:main`、模拟器服务单测 6 pass / 0 fail、`bash -n scripts/personal/package-personal.sh` 通过。尚未完整打包验证。
+- 文件：`apps/electron/scripts/sync-runtime-deps.ts`、`apps/electron/electron-builder.yml`、`apps/electron/src/main/lib/simulator-preview-service.ts`、`scripts/personal/package-personal.sh`（打包后检查）；对应验证与后续打包结果将继续补录。
