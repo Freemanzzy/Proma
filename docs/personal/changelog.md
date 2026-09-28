@@ -719,7 +719,7 @@
 
 - `package-personal.sh` 签名后使用打包产物 `Contents/MacOS/Proma` 在 `ELECTRON_RUN_AS_NODE=1` 下执行 serve-sim 入口帮助路径，并实际 `import()` 独立资源目录中的 `dist/middleware.js`；任一模块加载失败即中止打包。
 - 若本机存在 Booted 模拟器，脚本在 127.0.0.1 临时端口启动随包 serve-sim，最多等待 10 秒检查 HTTP 200，持续 5 秒后用设备 UDID 执行 `--kill` 并清理测试进程；没有 Booted 设备则提示跳过，不阻断打包。
-- 验证：`bash -n scripts/personal/package-personal.sh`、typecheck、`build:main` 通过；对生成的独立资源目录用 Node ESM `import()` middleware 通过、入口 `--help` 通过。完整修复前/修复后打包证据和最终包结果待全批次结束时记录。
+- 验证：`bash -n scripts/personal/package-personal.sh`、typecheck、`build:main` 通过；对生成的独立资源目录用 Node ESM `import()` middleware 通过、入口 `--help` 通过。原安装包的 `ERR_MODULE_NOT_FOUND: Cannot find package 'ws'` 复现证据见本机 `install-result-2026-09-28-2.md`；隔离的 ESM 模块树缺少依赖时实际测试确认 import 失败（exit 1 / `ERR_MODULE_NOT_FOUND`）。修复后 `package-personal.sh` 实际完成一次完整打包：600 pass / 0 fail / 0 error；用 Electron Node 模式加载包内 middleware 与 CLI 入口通过；Booted iPhone 17 Pro 上随包服务返回 HTTP 200，运行 5 秒后按 UDID 关闭。最终包核验：见本记录末尾最终打包节；包未启动、未安装。
 
 ## 2026-09-28: serve-sim 启动回退与设备状态同步
 
@@ -739,7 +739,7 @@
 ## 2026-09-28: 随包包含主进程使用的 macOS ICNS
 
 - electron-builder 的 `files` 规则原先排除整个 `dist/resources/**`，只重新纳入 PNG；`index.ts:getIconPath()` 与 `workspace-memory-window.ts` 都从 `dist/resources` 查找 `icon.icns`，因此包内资源缺失并触发 `[WARN] App icon not found`。在排除规则后显式纳入 `dist/resources/icon.icns`，让 ASAR 路径与两处现有查找路径一致。
-- 验证：源码 `dist/resources/icon.icns` 存在（116,454 bytes）；最终包中的 ASAR 文件存在性及两处路径命中将在最终打包后核对。
+- 验证：源码 `dist/resources/icon.icns` 存在（116,454 bytes）；完整 ASAR 清单含 `/dist/resources/icon.icns`（116,454 bytes），与 `index.ts:getIconPath()` 和 workspace-memory window 的现有路径一致。
 
 ## 2026-09-28: 限制模拟器预览退出清理耗时
 
@@ -749,4 +749,11 @@
 ## 2026-09-28: 个人版打包前收窄并签名 serve-sim helpers
 
 - `package-personal.sh` 在 app 签名之前检查随包 3 个原生 helper（AX settings、Duo renderer、camera injector dylib）包含 arm64；若为 universal 则先 `lipo -thin arm64`，再由现有固定证书对 app 深度签名。签名后逐个 `codesign --verify --strict`，并继续验证整个 app。
-- 验证：本机源资源 3 个文件均为 x86_64+arm64 universal；打包脚本语法和实际 app/helper 签名核验将在最终打包时确认。
+- 验证：源资源 3 个文件均为 x86_64+arm64 universal；实际打包后 lipo 检查均只含 arm64；三项 helper 的 `codesign --verify --strict` 与整个 app 的 `codesign --verify --deep --strict` 均通过。
+
+## 2026-09-28: 安装后修复批次全量验证与打包
+
+- 基于本轮代码提交 `e1ac4446` 完成完整 `scripts/personal/package-personal.sh`：typecheck 通过；全量 Bun 测试 **600 pass / 0 fail / 0 error**；main、agent runtime、terminal runtime、preload、renderer、web-preload、CLI 与 native helpers 构建通过；personal build marker 的 version `0.19.58`、commit `e1ac4446`，无 `app-update.yml`。
+- 打包后自检通过：serve-sim middleware ESM import、入口 `--help`、随包 serve-sim 在 Booted iPhone 17 Pro 上 127.0.0.1 临时端口 HTTP 200 冒烟（运行 5 秒并按 UDID 停止）；ASAR 含 `dist/resources/icon.icns`；App Authority `Proma Personal Code Signing`，designated requirement 包含固定 certificate leaf，app deep strict 签名通过。3 个原生 helper 已 thin 到 arm64，并分别 strict 验签。
+- 产物：`apps/electron/out/mac-arm64/Proma.app`。脚本明示“包未启动”；未运行 `install-update.sh`、未安装、未退出/重启已安装 Proma。
+- 本节文档提交后 HEAD 将前移；最终交付前会再跑同一打包脚本一次，使 `personal-build.json.commit` 与分支最终 HEAD 精确一致。该复跑仅包含本文档差异，不再变更应用代码。
