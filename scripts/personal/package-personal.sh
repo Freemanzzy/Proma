@@ -64,11 +64,29 @@ fi
 printf '\n== packaged mobile selector integrity ==\n'
 node "$ROOT/scripts/personal/check-packaged-mobile-selectors.cjs" "$APP/Contents/Resources/app.asar"
 
+printf '\n== thin bundled serve-sim helpers to arm64 ==\n'
+SERVE_SIM_RESOURCE="$APP/Contents/Resources/serve-sim/node_modules/serve-sim/dist"
+SERVE_SIM_HELPERS=(
+  "$SERVE_SIM_RESOURCE/simax/serve-sim-ax-settings"
+  "$SERVE_SIM_RESOURCE/simduo/serve-sim-duo-render"
+  "$SERVE_SIM_RESOURCE/simcam/libSimCameraInjector.dylib"
+)
+for helper in "${SERVE_SIM_HELPERS[@]}"; do
+  [[ -f "$helper" ]] || { echo "ERROR: bundled serve-sim helper missing: ${helper##*/}" >&2; exit 1; }
+  helper_archs="$(lipo -archs "$helper")"
+  grep -qw arm64 <<<"$helper_archs" || { echo "ERROR: serve-sim helper lacks arm64 slice: ${helper##*/}" >&2; exit 1; }
+  if grep -qw x86_64 <<<"$helper_archs"; then
+    lipo -thin arm64 "$helper" -output "$helper.arm64"
+    mv "$helper.arm64" "$helper"
+  fi
+done
+
 printf '\n== code signature (%s) ==\n' "$SIGN_IDENTITY"
 codesign --force --deep --sign "$SIGN_IDENTITY" "$APP"
 codesign --verify --deep --strict "$APP"
+for helper in "${SERVE_SIM_HELPERS[@]}"; do codesign --verify --strict "$helper"; done
 
-printf '\\n== packaged serve-sim ESM dependency check ==\\n'
+printf '\n== packaged serve-sim ESM dependency check ==\n'
 PACKAGED_ELECTRON="$APP/Contents/MacOS/Proma"
 SERVE_SIM_ROOT="$APP/Contents/Resources/serve-sim/node_modules/serve-sim/dist"
 [[ -x "$PACKAGED_ELECTRON" && -f "$SERVE_SIM_ROOT/serve-sim.js" && -f "$SERVE_SIM_ROOT/middleware.js" ]] || {
@@ -77,7 +95,7 @@ SERVE_SIM_ROOT="$APP/Contents/Resources/serve-sim/node_modules/serve-sim/dist"
 ELECTRON_RUN_AS_NODE=1 "$PACKAGED_ELECTRON" --input-type=module -e 'await import(process.argv[1]); console.log("serve-sim middleware import OK")' "$(python3 -c 'import pathlib,sys;print(pathlib.Path(sys.argv[1]).resolve().as_uri())' "$SERVE_SIM_ROOT/middleware.js")"
 # Exercise the real CLI entry via its non-mutating --help path, which loads its static ESM dependency graph.
 ELECTRON_RUN_AS_NODE=1 "$PACKAGED_ELECTRON" "$SERVE_SIM_ROOT/serve-sim.js" --help >/dev/null
-printf 'serve-sim entry and middleware ESM imports passed\\n'
+printf 'serve-sim entry and middleware ESM imports passed\n'
 
 BOOTED_UDID="$(/usr/bin/xcrun simctl list devices available -j | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next((d["udid"] for group in data.get("devices",{}).values() for d in group if d.get("state")=="Booted" and d.get("udid")), ""))')"
 if [[ -n "$BOOTED_UDID" ]]; then
@@ -108,9 +126,9 @@ if [[ -n "$BOOTED_UDID" ]]; then
   sleep 5
   cleanup_serve_sim_smoke
   trap - EXIT
-  printf 'serve-sim simulator smoke passed: HTTP 200; ran 5 seconds; stopped by UDID\\n'
+  printf 'serve-sim simulator smoke passed: HTTP 200; ran 5 seconds; stopped by UDID\n'
 else
-  printf 'serve-sim simulator smoke skipped: no Booted simulator found\\n'
+  printf 'serve-sim simulator smoke skipped: no Booted simulator found\n'
 fi
 
 if codesign -dv "$APP" 2>&1 | grep -q '^Signature=adhoc'; then
