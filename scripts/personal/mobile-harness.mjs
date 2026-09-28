@@ -539,6 +539,19 @@ async function createHarness(options) {
   return { client, chrome, profile, pair, navigate, installInteractionStreamAudit, loadMetrics, openDrawer, clickSidebarText, clickText, openSession, createHarnessSession, setPermissionMode, inputAndSend, waitText, readHistory, waitForUserSubmission, waitForAssistantReply, waitForRunning, waitForAbortedAssistant, resolveVisibleAskUserA, resolveVisiblePlanApproval, getInteractionStreamEvents, getActiveSessionId: () => activeSessionId, getCreatedSessionIds: () => new Set(createdSessionIds), invokeApi, invokeRaw, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, readSessionManifest, close }
 }
 
+async function runDeadSocket(harness, options, result) {
+  // 模拟 iOS 切后台后“看似 OPEN 实已断开”的 IPC 连接：当前 /api/ipc 连接双向静默（发出的帧丢弃、收到的帧不再派发）。
+  await harness.navigate('/app/')
+  await harness.client.evaluate(`(() => {const orig=WebSocket.prototype.send;const seen=new Set();window.__deadSocketStats={sockets:0,dropped:0};WebSocket.prototype.send=function(data){if(String(this.url).includes('/api/ipc')){if(!seen.has(this)){seen.add(this);window.__deadSocketStats.sockets++}window.__ipcSocket=this}if(this.__dead){window.__deadSocketStats.dropped++;return}return orig.call(this,data)};return true})()`)
+  await harness.client.evaluate(`window.__PROMA_WEB_REMOTE_INVOKE('agent:count-archived-sessions').then(()=>true)`)
+  const killed = await harness.client.evaluate(`(() => {const ws=window.__ipcSocket;if(!ws)return false;ws.__dead=true;ws.onmessage=null;return true})()`)
+  if (!killed) throw new Error('未捕获到 /api/ipc 连接')
+  await delay(11_000)
+  const outcome = await harness.client.evaluate(`(async () => {const started=Date.now();try{await window.__PROMA_WEB_REMOTE_INVOKE('agent:count-archived-sessions');return {ok:true,ms:Date.now()-started,stats:window.__deadSocketStats}}catch(error){return {ok:false,ms:Date.now()-started,error:String(error&&error.message||error),stats:window.__deadSocketStats}}})()`)
+  result.deadSocket = outcome
+  if (!outcome.ok || outcome.ms > 8_000 || outcome.stats.dropped < 1 || outcome.stats.sockets < 2) throw new Error(`失效连接未自动恢复：${JSON.stringify(outcome)}`)
+}
+
 async function runRecovery(harness, options, result) {
   await harness.openSession(options.session)
   const before = await harness.client.evaluate('({timeOrigin: performance.timeOrigin, navigationType: performance.getEntriesByType("navigation")[0]?.type ?? "unknown"})')
@@ -1058,6 +1071,7 @@ async function main() {
     else if (options.suite === 'panel-probe') await runPanelProbe(harness, options, result)
     else if (options.suite === 'layout') await runLayout(harness, options, result)
     else if (options.suite === 'push') await runPush(harness, options, result)
+    else if (options.suite === 'dead-socket') await runDeadSocket(harness, options, result)
     else if (options.suite === 'recovery') await runRecovery(harness, options, result)
     else if (options.suite === 'interactions') await runInteractions(harness, options, result)
     else if (options.suite === 'abort') await runAbort(harness, options, result)

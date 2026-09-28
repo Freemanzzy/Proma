@@ -25,7 +25,12 @@ let reconnectDelay = 250
 let hasConnectedOnce = false
 let nextId = 0
 let loggedSendSync = false
-const pending = new Map<string, { resolve(value: unknown): void; reject(error: unknown): void; timer: number }>()
+let lastInboundAt = 0
+let livenessCheck: Promise<WebSocket> | null = null
+/** 连接空闲超过该时长后，发请求前先 ping 确认连接仍活着（iOS 切后台后常出现“看似 OPEN 实已断开”的连接）。 */
+const LIVENESS_IDLE_MS = 10_000
+const PING_TIMEOUT_MS = 3_000
+const pending = new Map<string, { resolve(value: unknown): void; reject(error: unknown): void; timer: number; ws?: WebSocket }>()
 
 function encode(value: unknown): unknown {
   if (value === undefined) return { [TYPE_KEY]: 'undefined' }
@@ -88,14 +93,19 @@ function connect(): Promise<WebSocket> {
     socket = next
     next.onopen = () => {
       reconnectDelay = 250
+      lastInboundAt = Date.now()
       if (hasConnectedOnce) window.dispatchEvent(new CustomEvent('proma-web-remote-reconnected'))
       hasConnectedOnce = true
       resolve(next)
     }
     next.onmessage = (event) => {
       try {
+        lastInboundAt = Date.now()
         const message = JSON.parse(typeof event.data === 'string' ? event.data : '') as { type?: string; id?: string; ok?: boolean; value?: unknown; error?: unknown; channel?: string }
-        if (message.type === 'response' && message.id) {
+        if (message.type === 'pong' && message.id) {
+          const request = pending.get(message.id)
+          if (request) { pending.delete(message.id); window.clearTimeout(request.timer); request.resolve(true) }
+        } else if (message.type === 'response' && message.id) {
           const request = pending.get(message.id)
           if (!request) return
           pending.delete(message.id)
@@ -110,18 +120,77 @@ function connect(): Promise<WebSocket> {
       }
     }
     next.onclose = () => {
-      if (socket === next) socket = null
-      socketPromise = null
-      scheduleReconnect()
-      if (pending.size === 0) return
+      // 只处理仍是当前连接的关闭；已被 liveSocket 主动替换的旧连接不影响新连接及其请求。
+      if (socket === next) {
+        socket = null
+        socketPromise = null
+        scheduleReconnect()
+      }
+      // 连接断开时立即让该连接上的在途请求失败，而不是等 35 秒超时。
+      for (const [id, request] of [...pending]) {
+        if (request.ws !== next) continue
+        pending.delete(id)
+        window.clearTimeout(request.timer)
+        request.reject(new Error('与 Mac 的连接已断开'))
+      }
     }
     next.onerror = () => { reject(new Error('IPC WebSocket 连接失败')) }
   })
   return socketPromise
 }
 
+function dropSocket(ws: WebSocket): void {
+  if (socket === ws) socket = null
+  socketPromise = null
+  try { ws.close() } catch { /* already closed */ }
+}
+
+async function pingSocket(ws: WebSocket): Promise<boolean> {
+  const id = `ping-${Date.now()}-${nextId++}`
+  return new Promise<boolean>((resolve) => {
+    const timer = window.setTimeout(() => { pending.delete(id); resolve(false) }, PING_TIMEOUT_MS)
+    pending.set(id, { resolve: () => resolve(true), reject: () => resolve(false), timer, ws })
+    try { ws.send(JSON.stringify({ type: 'ping', id })) } catch { window.clearTimeout(timer); pending.delete(id); resolve(false) }
+  })
+}
+
+/** 返回一个确认存活的连接：空闲过久先 ping，无响应则丢弃并重连。 */
+function liveSocket(force = false): Promise<WebSocket> {
+  if (livenessCheck) return livenessCheck
+  livenessCheck = (async () => {
+    const ws = await connect()
+    if (!force && Date.now() - lastInboundAt < LIVENESS_IDLE_MS) return ws
+    if (await pingSocket(ws)) return ws
+    console.warn('[Web Remote full-ui] 连接无响应，正在重连')
+    dropSocket(ws)
+    return connect()
+  })().finally(() => { livenessCheck = null })
+  return livenessCheck
+}
+
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+  const revalidate = () => { if (document.visibilityState === 'visible' && hasConnectedOnce) void liveSocket(true).catch(() => undefined) }
+  document.addEventListener('visibilitychange', revalidate)
+  window.addEventListener('pageshow', revalidate)
+  window.addEventListener('online', revalidate)
+}
+
+function showSendFailedToast(): void {
+  if (typeof document === 'undefined' || !document.body) return
+  const existing = document.querySelector('[data-web-remote-send-failed]')
+  if (existing) existing.remove()
+  const toast = document.createElement('div')
+  toast.setAttribute('data-web-remote-send-failed', 'true')
+  toast.setAttribute('role', 'alert')
+  toast.textContent = '消息未送达 Mac，请检查连接后重新发送（刷新页面可查看实际记录）'
+  toast.style.cssText = 'position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top) + 64px);z-index:2147483647;padding:12px 14px;border-radius:12px;background:#b42318;color:#fff;font-size:14px;line-height:1.4;box-shadow:0 6px 20px rgba(0,0,0,.25)'
+  toast.addEventListener('click', () => toast.remove())
+  document.body.appendChild(toast)
+  window.setTimeout(() => toast.remove(), 8_000)
+}
+
 async function invokeWithToken(channel: string, args: unknown[], confirmToken?: string): Promise<unknown> {
-  const ws = await connect()
+  const ws = await liveSocket()
   const id = `${Date.now()}-${nextId++}`
   const payload = JSON.stringify({ type: 'invoke', id, channel, args: args.map(encode), ...(confirmToken ? { confirmToken } : {}) })
   const response = await new Promise<unknown>((resolve, reject) => {
@@ -129,7 +198,7 @@ async function invokeWithToken(channel: string, args: unknown[], confirmToken?: 
       pending.delete(id)
       reject(new Error(`IPC 请求超时: ${channel}`))
     }, 35_000)
-    pending.set(id, { resolve, reject, timer })
+    pending.set(id, { resolve, reject, timer, ws })
     ws.send(payload)
   })
   return response
@@ -211,6 +280,7 @@ async function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
     return await invokeWithToken(channel, args)
   } catch (error) {
     const access = error as { denied?: boolean; needsConfirm?: boolean; summary?: string; token?: string }
+    if (channel === 'agent:send-message' && !access?.denied && !access?.needsConfirm) showSendFailedToast()
     if (access?.denied) {
       console.warn(`[Web Remote full-ui] 已安全忽略不可用通道: ${channel}`)
       return safeDeniedValue(channel)

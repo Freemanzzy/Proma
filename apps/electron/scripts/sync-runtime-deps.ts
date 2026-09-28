@@ -8,6 +8,7 @@
  */
 
 import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, realpathSync, rmSync } from 'node:fs'
+import { builtinModules } from 'node:module'
 import { basename, dirname, join, resolve } from 'node:path'
 
 interface PackageManifest {
@@ -235,6 +236,69 @@ function prepareTargetNodeModules(sourceNodeModules: string, targetNodeModules: 
   mkdirSync(target, { recursive: true })
 }
 
+const NODE_BUILTINS = new Set(builtinModules.flatMap((name) => [name, `node:${name}`]))
+
+function isNodeBuiltin(name: string): boolean {
+  return NODE_BUILTINS.has(name)
+}
+
+/**
+ * Build an independent ESM-resolvable serve-sim tree for extraResources.
+ * Its bundled JS files are inspected for external imports, so non-runtime package
+ * dependencies (notably serve-sim's unused sonner declaration) are not shipped.
+ */
+function stageServeSimRuntime(ctx: SyncContext): void {
+  const stageRoot = join(appDir, 'resources', 'serve-sim')
+  const stageNodeModules = join(stageRoot, 'node_modules')
+  rmSync(stageRoot, { recursive: true, force: true })
+  mkdirSync(stageNodeModules, { recursive: true })
+
+  const seen = new Set<string>()
+  const stagePackage = (name: string, sourceDir: string): void => {
+    const key = `${name}:${sourceDir}`
+    if (seen.has(key)) return
+    seen.add(key)
+    const targetDir = getPackageDir(stageNodeModules, name)
+    mkdirSync(dirname(targetDir), { recursive: true })
+    cpSync(sourceDir, targetDir, { recursive: true, dereference: true, force: true, preserveTimestamps: true })
+    const manifest = readPackageManifest(sourceDir)
+    const jsFiles: string[] = []
+    const collect = (dir: string): void => {
+      if (!existsSync(dir)) return
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const file = join(dir, entry.name)
+        if (entry.isDirectory()) collect(file)
+        else if (entry.isFile() && /\.(?:m?js|cjs)$/.test(entry.name)) jsFiles.push(file)
+      }
+    }
+    collect(join(sourceDir, 'dist'))
+    for (const dependency of listRuntimeDependencies(manifest)) {
+      if (isNodeBuiltin(dependency.name)) continue
+      const referenced = jsFiles.some((file) => {
+        const text = readFileSync(file, 'utf8')
+        return [
+          `from\"${dependency.name}\"`, `from \"${dependency.name}\"`,
+          `from'${dependency.name}'`, `from '${dependency.name}'`,
+          `import(\"${dependency.name}\")`, `import(\"${dependency.name}/`,
+          `import('${dependency.name}')`, `import('${dependency.name}/`,
+          `require(\"${dependency.name}\")`, `require('${dependency.name}')`,
+        ].some((pattern) => text.includes(pattern))
+      })
+      if (!referenced) continue
+      const resolved = resolvePackageSourceDir(ctx, dependency.name, sourceDir)
+      if (!resolved) {
+        if (dependency.optional) continue
+        throw new Error(`serve-sim 缺少运行时依赖: ${dependency.name}`)
+      }
+      stagePackage(dependency.name, resolved)
+    }
+  }
+
+  const serveSimDir = resolvePackageSourceDir(ctx, 'serve-sim')
+  if (!serveSimDir) throw new Error('serve-sim 未同步，无法准备独立运行时资源')
+  stagePackage('serve-sim', serveSimDir)
+}
+
 export function syncRuntimeDeps(options: SyncRuntimeDepsOptions = {}): SyncRuntimeDepsResult {
   const ctx: SyncContext = {
     sourceNodeModules: options.sourceNodeModules ?? defaultSourceNodeModules,
@@ -262,6 +326,7 @@ export function syncRuntimeDeps(options: SyncRuntimeDepsOptions = {}): SyncRunti
   for (const packageName of externalRuntimePackages) {
     copyPackage(ctx, packageName)
   }
+  if (externalRuntimePackages.includes('serve-sim')) stageServeSimRuntime(ctx)
 
   assertNoAbsoluteSymlinks(ctx.targetNodeModules)
 

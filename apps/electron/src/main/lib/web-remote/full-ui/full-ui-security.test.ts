@@ -42,6 +42,14 @@ describe('Web Remote full-ui security policy', () => {
     listWorkspaces: () => [{ id: 'ws-1', slug: 'one' }, { id: 'ws-2', slug: 'two' }],
   }
 
+  test('ping 帧立即返回 pong，不经过通道分级', async () => {
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
+    const ws = client(bridge)
+    ws.emit('message', Buffer.from(JSON.stringify({ type: 'ping', id: 'ping-1' })))
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    expect(ws.sent.map((item) => JSON.parse(item))).toContainEqual({ type: 'pong', id: 'ping-1' })
+  })
+
   test('登记通道 100% 有分级，未知通道不在白名单', () => {
     expect(getDeclaredWebRemoteChannels().every((channel) => !!getWebRemoteChannelPolicy(channel))).toBe(true)
     expect(getWebRemoteChannelPolicy('not-registered')).toBeUndefined()

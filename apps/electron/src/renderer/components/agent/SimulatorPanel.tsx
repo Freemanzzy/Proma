@@ -41,7 +41,11 @@ export function SimulatorPanel({ sessionId, workspaceSlug }: Props): React.React
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true); setMessage('')
     try { const result = await action(); if (result && typeof result === 'object' && 'running' in result) setStatus(result as SimulatorPreviewStatus); else await refresh() }
-    catch (error) { setMessage(error instanceof Error ? error.message : String(error)) }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      await refresh()
+      setMessage(message)
+    }
     finally { setBusy(false) }
   }
 
@@ -57,8 +61,8 @@ export function SimulatorPanel({ sessionId, workspaceSlug }: Props): React.React
       <Button size="sm" variant="outline" disabled={!status.url} onClick={() => status.url && void api.openExternal(status.url)} title="在浏览器中打开"><ExternalLink className="size-3.5" /></Button>
       <Button size="sm" variant="ghost" disabled={busy} onClick={() => void refresh()} title="刷新设备列表"><RefreshCw className="size-3.5" /></Button>
     </header>
-    {(message || busy) && <div className="border-b px-3 py-2 text-xs text-muted-foreground" role="status">{message || '正在启动模拟器预览；首次启动会下载 serve-sim，请稍候…'}</div>}
+    {(message || busy) && <div className="border-b px-3 py-2 text-xs text-muted-foreground" role="status">{message || '正在启动模拟器预览；使用内置 serve-sim，组件不可用时会自动改用 npx 下载…'}</div>}
     {status.error && <div className="border-b px-3 py-2 text-xs text-destructive" role="alert">{status.error}</div>}
-    {status.url ? <iframe title="iOS 模拟器预览" src={status.url} sandbox="allow-scripts allow-same-origin" className="min-h-0 flex-1 border-0 bg-black" /> : <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-5 text-center text-sm text-muted-foreground"><p>选择一台 iOS 模拟器并启动预览。首次启动可能需要下载 serve-sim。</p><Button disabled={busy || !udid} onClick={() => void run(() => api.startSimulatorPreview(udid))}><Play className="mr-2 size-4" />启动模拟器</Button>{!devices.length && <Button variant="ghost" onClick={() => void refresh()}>重新检查</Button>}</div>}
+    {status.url ? <iframe title="iOS 模拟器预览" src={status.url} sandbox="allow-scripts allow-same-origin" className="min-h-0 flex-1 border-0 bg-black" /> : <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-5 text-center text-sm text-muted-foreground"><p>选择一台 iOS 模拟器并启动预览。使用内置 serve-sim；若内置组件不可用会自动改用 npx 下载。</p><Button disabled={busy || !udid} onClick={() => void run(() => api.startSimulatorPreview(udid))}><Play className="mr-2 size-4" />启动模拟器</Button>{!devices.length && <Button variant="ghost" onClick={() => void refresh()}>重新检查</Button>}</div>}
   </section>
 }

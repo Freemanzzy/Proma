@@ -20,9 +20,13 @@ function findBundledServeSimScript(): string | undefined {
   const require = createRequire(__filename)
   const searchPaths = require.resolve.paths('serve-sim') ?? []
   const candidates = searchPaths.map((nodeModules) => join(nodeModules, 'serve-sim', 'dist', 'serve-sim.js'))
-  // 打包后 serve-sim/dist 被 asarUnpack；优先用 app.asar.unpacked 下的真实路径，让其原生 helper 按真实目录解析。
+  const packagedResource = process.resourcesPath
+    ? join(process.resourcesPath, 'serve-sim', 'node_modules', 'serve-sim', 'dist', 'serve-sim.js')
+    : undefined
+  // Packaged ESM dependencies live together under Resources/serve-sim, outside ASAR.
+  // The standard app/node_modules candidates remain for development builds.
   const unpacked = candidates.map((candidate) => candidate.replace(/app\.asar([\\/])/, 'app.asar.unpacked$1'))
-  return [...unpacked, ...candidates].find((candidate) => existsSync(candidate))
+  return [packagedResource, ...unpacked, ...candidates].find((candidate): candidate is string => Boolean(candidate && existsSync(candidate)))
 }
 
 async function getServeSimInvocation(): Promise<ServeSimInvocation> {
@@ -56,6 +60,7 @@ export function terminateOwnedChild(proc: Pick<ChildProcess, 'pid' | 'exitCode' 
   proc.kill('SIGTERM')
 }
 let child: ChildProcess | null = null
+let currentInvocation: ServeSimInvocation | null = null
 let current: SimulatorPreviewStatus = { running: false }
 let currentUdid: string | undefined
 
@@ -118,6 +123,15 @@ export async function getSimulatorPreviewStatus(): Promise<SimulatorPreviewStatu
   return { ...current, udid: pickActiveDevice(currentUdid, streams), streams }
 }
 
+export function shouldRetryBundledServeSim(isBundled: boolean, exitCode: number | null, output: string): boolean {
+  return isBundled && (exitCode !== 0 || /ERR_MODULE_NOT_FOUND|Cannot find package/i.test(output))
+}
+
+function firstSafeErrorLine(output: string): string {
+  const line = output.split(/\r?\n/).find((value) => value.trim())?.trim() || '未提供错误详情'
+  return line.replace(/\/Users\/[^/\s]+/g, '[用户路径]').slice(0, 240)
+}
+
 export async function startSimulatorPreview(udid: string): Promise<SimulatorPreviewStatus> {
   if (!/^[A-Fa-f0-9-]{20,}$/.test(udid)) throw new Error('模拟器 UDID 无效。')
   if (child && current.running && current.udid === udid) return { ...current }
@@ -126,42 +140,88 @@ export async function startSimulatorPreview(udid: string): Promise<SimulatorPrev
   const device = devices.find((item) => item.udid === udid)
   if (!device) throw new Error('找不到该 iOS 模拟器。')
   if (device.state !== 'Booted') await execFile('/usr/bin/xcrun', ['simctl', 'boot', udid])
-  const invocation = await getServeSimInvocation()
+  const bundledInvocation = await getServeSimInvocation()
   const port = await choosePort(portAvailable)
-  const env = { ...invocation.env }
+  const env = { ...bundledInvocation.env }
   if (!env.HTTPS_PROXY && !env.https_proxy) { const proxy = await getEffectiveProxyUrl().catch(() => undefined); if (proxy) { env.HTTPS_PROXY = proxy; env.HTTP_PROXY = env.HTTP_PROXY ?? proxy } }
-  const proc = spawn(invocation.command, invocationArgs(invocation, buildServeSimArgs(udid, port)), { env, stdio: ['ignore', 'pipe', 'pipe'] })
-  child = proc
-  currentUdid = udid
   const url = `http://127.0.0.1:${port}`
+  let invocation = bundledInvocation
+  let isBundled = Boolean(bundledInvocation.scriptPath)
+  let retried = false
   let output = ''
-  proc.stdout?.on('data', (chunk: Buffer) => { output += chunk.toString() })
-  proc.stderr?.on('data', (chunk: Buffer) => { output += chunk.toString() })
-  proc.once('exit', (code) => { if (child === proc) { child = null; current = { running: false, error: `serve-sim 已退出（${code ?? '未知'}）：${output.trim().slice(-500)}` } } })
+  let exitCode: number | null = null
+  let launchAt = Date.now()
+  let proc: ChildProcess
+  const launch = (next: ServeSimInvocation): ChildProcess => {
+    launchAt = Date.now()
+    output = ''
+    exitCode = null
+    const launched = spawn(next.command, invocationArgs(next, buildServeSimArgs(udid, port)), { env: next.env, stdio: ['ignore', 'pipe', 'pipe'] })
+    child = launched
+    currentInvocation = next
+    launched.stdout?.on('data', (chunk: Buffer) => { output += chunk.toString() })
+    launched.stderr?.on('data', (chunk: Buffer) => { output += chunk.toString() })
+    launched.once('exit', (code) => {
+      exitCode = code
+      if (child === launched) {
+        child = null
+        current = { running: false, udid, error: `serve-sim 启动失败（退出码 ${code ?? '未知'}）：${firstSafeErrorLine(output)}` }
+      }
+    })
+    return launched
+  }
+  proc = launch(invocation)
+  currentUdid = udid
   const deadline = Date.now() + 120_000
   while (Date.now() < deadline) {
-    if (child !== proc) throw new Error(current.error || 'serve-sim 启动失败。')
+    if (child !== proc) {
+      if (!retried && Date.now() - launchAt <= 10_000 && shouldRetryBundledServeSim(isBundled, exitCode, output)) {
+        retried = true
+        isBundled = false
+        try { invocation = { command: await verifyNode(), env: { ...env } } }
+        catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          current = { running: false, udid, error: `内置 serve-sim 启动失败，且无法启用 npx 回退（退出码 ${exitCode ?? '未知'}）：${firstSafeErrorLine(output || message)}` }
+          throw new Error(current.error)
+        }
+        proc = launch(invocation)
+        continue
+      }
+      const error = `serve-sim 启动失败（退出码 ${exitCode ?? '未知'}）：${firstSafeErrorLine(output)}`
+      current = { running: false, udid, error }
+      throw new Error(error)
+    }
     try { const response = await fetch(url); if (response.ok) { current = { running: true, udid, url }; return { ...current } } } catch { /* wait for server */ }
     await new Promise((resolve) => setTimeout(resolve, 500))
   }
   await stopSimulatorPreview()
-  throw new Error(`serve-sim 启动超时。${output.trim().slice(-500)}`)
+  const error = `serve-sim 启动超时（120 秒）：${firstSafeErrorLine(output)}`
+  current = { running: false, udid, error }
+  throw new Error(error)
 }
 
 export async function stopSimulatorPreview(udid = currentUdid): Promise<void> {
   const ownChild = child
-  // serve-sim 会跟随切换的设备登记多个流（同一 PID）；逐个按 UDID 停止，绝不使用无参 --kill。
+  const invocation = currentInvocation
+  // 只对本进程拥有的流按 UDID 清理；退出路径不调用 npx，且多个设备并发清理、总等候上限 1.5 秒。
   const targets = new Set<string>(udid ? [udid] : [])
   if (ownChild?.pid) for (const device of await readServeSimStreams(ownChild.pid)) targets.add(device)
-  if (targets.size) {
-    try { for (const target of targets) await runServeSim(buildKillArgs(target), 15_000).catch(() => undefined) } catch { /* PID fallback below */ }
+  if (invocation?.scriptPath && targets.size) {
+    const cleanup = Promise.all([...targets].map((target) => execFile(
+      invocation.command,
+      invocationArgs(invocation, buildKillArgs(target)),
+      { env: invocation.env, timeout: 1_500 },
+    ).catch(() => undefined)))
+    let cleanupTimer: NodeJS.Timeout | undefined
+    await Promise.race([cleanup, new Promise((resolve) => { cleanupTimer = setTimeout(resolve, 1_500) })])
+    if (cleanupTimer) clearTimeout(cleanupTimer)
   }
   if (ownChild?.pid && child === ownChild) {
     terminateOwnedChild(ownChild)
-    await new Promise((resolve) => setTimeout(resolve, 800))
+    await new Promise((resolve) => setTimeout(resolve, 400))
     if (ownChild.exitCode === null && ownChild.pid) ownChild.kill('SIGKILL')
   }
-  child = null; currentUdid = undefined; current = { running: false }
+  child = null; currentInvocation = null; currentUdid = undefined; current = { running: false }
 }
 
 export async function pressSimulatorHome(udid: string): Promise<void> {

@@ -2,7 +2,7 @@ import { describe, expect, it, mock } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { buildKillArgs, buildServeSimArgs, choosePort, pickActiveDevice, readServeSimStreams, terminateOwnedChild } from './simulator-preview-service'
+import { buildKillArgs, buildServeSimArgs, choosePort, pickActiveDevice, readServeSimStreams, shouldRetryBundledServeSim, terminateOwnedChild } from './simulator-preview-service'
 
 describe('simulator preview service helpers', () => {
   it('builds a pinned, loopback-only serve-sim command with fit and no panes', () => {
@@ -20,6 +20,13 @@ describe('simulator preview service helpers', () => {
     const isAvailable = mock(async (port: number) => port === 3202)
     expect(await choosePort(isAvailable, 3200)).toBe(3202)
     expect(isAvailable.mock.calls.map(([port]) => port)).toEqual([3200, 3201, 3202])
+  })
+
+  it('retries a failed bundled serve-sim but never retries npx or a clean exit', () => {
+    expect(shouldRetryBundledServeSim(true, 1, 'ERR_MODULE_NOT_FOUND: Cannot find package ws')).toBe(true)
+    expect(shouldRetryBundledServeSim(true, 0, 'Cannot find package inspect-webkit')).toBe(true)
+    expect(shouldRetryBundledServeSim(false, 1, 'Cannot find package ws')).toBe(false)
+    expect(shouldRetryBundledServeSim(true, 0, '')).toBe(false)
   })
 
   it('falls back only by terminating the owned child PID', () => {

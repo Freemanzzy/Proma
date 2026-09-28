@@ -707,3 +707,64 @@
 - **模拟器面板不可用**：`asarUnpack` 只解包 `serve-sim/dist/**`，其依赖 `ws`、`inspect-webkit`、`sonner` 留在 asar 内，从 `app.asar.unpacked` 以 ESM 运行时 `ERR_MODULE_NOT_FOUND`；打包自检只跑 `--help` 未加载 middleware，故未发现；内置包崩溃时不回退 npx；启动失败后面板显示“已关机”而设备实为 Booted。
 - 其他发现：退出迟滞（quit/SIGTERM 20–60 秒不退出）；`icon.icns` 未打入包（启动 `[WARN]`）；随包 helper 的 x86_64 切片未签名（arm64 通过）；钥匙串在同证书升级后仍弹窗。
 - 待办转入修复批次：见 install-result-2026-09-28-2 “给 Proma 的待办” 1–7。
+
+## 2026-09-28: serve-sim 运行时依赖独立随包
+
+- 采用 `extraResources` 独立资源目录方案：`sync-runtime-deps.ts` 在运行时同步时扫描 serve-sim 的编译 JS 外部导入并构建 `resources/serve-sim/node_modules`，electron-builder 将其复制到 `Contents/Resources/serve-sim`。服务解析优先使用该资源路径，开发模式仍使用常规 `node_modules` 搜索路径。相比仅解包 serve-sim 文件或维护手写 `asarUnpack` 依赖名单，该方式确保 ESM 包与真实运行依赖从磁盘同目录解析，依赖升级后会按 bundle 编译产物中的外部导入自动调整。
+- `sonner` 在 serve-sim 的 package.json 声明为依赖，但在发布的 `dist` JS 中没有运行时导入；扫描后未打包。`ws` 被编译产物实际引用并以嵌套 `node_modules` 方式随资源分发；`inspect-webkit` 的实现已被 serve-sim 编译产物内嵌，没有外部包导入，不重复打包。
+- 验证：`bun run sync:runtime-deps` 同步 138 个运行依赖；独立资源目录中只包含 serve-sim 与实际外部依赖 `ws`；Node ESM 实际导入 `dist/middleware.js` 通过，serve-sim 主入口 `--help` 通过；typecheck、`build:main`、模拟器服务单测 6 pass / 0 fail、`bash -n scripts/personal/package-personal.sh` 通过。尚未完整打包验证。
+- 文件：`apps/electron/scripts/sync-runtime-deps.ts`、`apps/electron/electron-builder.yml`、`apps/electron/src/main/lib/simulator-preview-service.ts`、`scripts/personal/package-personal.sh`（打包后检查）；对应验证与后续打包结果将继续补录。
+
+## 2026-09-28: 打包后验证 serve-sim ESM 加载与预览服务
+
+- `package-personal.sh` 签名后使用打包产物 `Contents/MacOS/Proma` 在 `ELECTRON_RUN_AS_NODE=1` 下执行 serve-sim 入口帮助路径，并实际 `import()` 独立资源目录中的 `dist/middleware.js`；任一模块加载失败即中止打包。
+- 若本机存在 Booted 模拟器，脚本在 127.0.0.1 临时端口启动随包 serve-sim，最多等待 10 秒检查 HTTP 200，持续 5 秒后用设备 UDID 执行 `--kill` 并清理测试进程；没有 Booted 设备则提示跳过，不阻断打包。
+- 验证：`bash -n scripts/personal/package-personal.sh`、typecheck、`build:main` 通过；对生成的独立资源目录用 Node ESM `import()` middleware 通过、入口 `--help` 通过。原安装包的 `ERR_MODULE_NOT_FOUND: Cannot find package 'ws'` 复现证据见本机 `install-result-2026-09-28-2.md`；隔离的 ESM 模块树缺少依赖时实际测试确认 import 失败（exit 1 / `ERR_MODULE_NOT_FOUND`）。修复后 `package-personal.sh` 实际完成一次完整打包：600 pass / 0 fail / 0 error；用 Electron Node 模式加载包内 middleware 与 CLI 入口通过；Booted iPhone 17 Pro 上随包服务返回 HTTP 200，运行 5 秒后按 UDID 关闭。最终包核验：见本记录末尾最终打包节；包未启动、未安装。
+
+## 2026-09-28: serve-sim 启动回退与设备状态同步
+
+- 内置 serve-sim 在启动 10 秒内以非零码退出或报告 ESM 模块缺失时，只重试一次 npx；npx 失败会在服务状态中保留 UDID，并报中文错误、退出码和脱敏后的首行输出。模拟器面板启动失败时刷新设备与预览状态，因此先 `simctl boot` 后启动失败也能显示真实 Booted 状态。
+- 空状态和启动提示改为说明默认使用内置 serve-sim，组件不可用时才回退到 npx 下载。
+- 单测覆盖回退条件：内置异常/缺包会回退，npx 失败和正常退出不重试；模拟器服务定向测试 7 pass / 0 fail；typecheck 和 renderer build 通过（仅既有大 chunk 提示）。
+
+## 2026-09-28: 启动期间钥匙串等待的隔离与回滚保护
+
+- 启动顺序调查：`bootstrap()` 原先在 `startAllBridges()`（飞书等 Bridge 读取凭据并可能调用 `safeStorage.decryptString`）之后才 `startWebRemoteIfEnabled()`；Bridge 的 await 会串行阻塞 Web Remote。Web Remote 依赖自己的配置、配对认证和 HTTP server，不读取渠道 API Key/Keychain；已将其启动移到 IPC 注册之后、Bridge 与 dock/settings 初始化之前。若 Keychain 授权仍阻塞主线程，17888 可先独立就绪；Bridge 仍等用户授权后启动。
+- 安装脚本健康检查：初始观察期后若 Web Remote 未由新版监听且存在 `SecurityAgent`，提示用户在钥匙串弹窗授权，最多再等待 10 分钟；主进程不退出时回滚只向明确识别的新版主进程发 SIGTERM，不再向 Helper 发信号，20 秒未退即停自动文件回滚并提示手动退出。
+- Keychain ACL 调研结论（未读取/修改任何钥匙串条目）：Apple TN2206 将 Keychain 授权描述为由应用代码签名 requirement/DR 跟踪；Apple TN3127 说明 ad-hoc 的 DR 与特定版本 cdhash 绑定，更新后不能可靠保持身份。Proma 现有签名报告中的 designated requirement 含固定 certificate leaf，而非单纯 cdhash；无 Team ID 本身并不能证明 Keychain 必然按 cdhash 绑定。故同证书升级后仍弹窗不能仅归因为“缺少 Team ID”，更可能涉及首次授权、访问的实际二进制/Helper 身份不同、条目 ACL 或 Keychain 项目的迁移/创建者身份，需在用户实际授权弹窗时再针对目标 item 的访问方做无密钥诊断。
+- 建议：首次授权可选择“始终允许”，通常意在保存该访问方对当前项目的授权，但不能保证为其他 Helper/签名 requirement 不同的访问者授权，也不能修复不允许变更 ACL 的旧条目；不要自动删除条目或放宽为允许所有应用。若仍重复弹窗，先识别发起访问的进程与其 `codesign -d -r-` requirement，再针对该进程/目标条目让用户手动处理；固定身份与包含证书约束的稳定 DR 应继续保留。
+- 资料：Apple [TN2206](https://developer.apple.com/library/archive/technotes/tn2206/_index.html)；Apple [TN3127](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)。
+- 验证：`bash -n scripts/personal/install-update.sh`、typecheck、`build:main` 通过；静态断言确认 Web Remote 启动位于 Bridge 初始化之前，安装等待/主进程独立回滚分支文本有效。未运行安装脚本、未触碰 Keychain、未停止或重启已安装 Proma。`shellcheck` 本机不可用；安装健康等待与回滚分支尚未在真实安装流程演练，最终验证仍需 Claude Code 在授权安装时执行。
+
+## 2026-09-28: 随包包含主进程使用的 macOS ICNS
+
+- electron-builder 的 `files` 规则原先排除整个 `dist/resources/**`，只重新纳入 PNG；`index.ts:getIconPath()` 与 `workspace-memory-window.ts` 都从 `dist/resources` 查找 `icon.icns`，因此包内资源缺失并触发 `[WARN] App icon not found`。在排除规则后显式纳入 `dist/resources/icon.icns`，让 ASAR 路径与两处现有查找路径一致。
+- 验证：源码 `dist/resources/icon.icns` 存在（116,454 bytes）；完整 ASAR 清单含 `/dist/resources/icon.icns`（116,454 bytes），与 `index.ts:getIconPath()` 和 workspace-memory window 的现有路径一致。
+
+## 2026-09-28: 限制模拟器预览退出清理耗时
+
+- 退出清理复用当前已选择的 serve-sim invocation；只对随包入口并发按本进程拥有的 UDID 发 `--kill`，单轮最多等待 1.5 秒，npx 回退路径不再在退出时运行可能下载包的 npx。随后只终止 Agent 自己记录的 serve-sim 子进程 PID，等待 400 ms 后仍不退则 SIGKILL；避免按设备串行等待 15 秒。
+- 验证：typecheck、`build:main`、模拟器服务定向单测 7 pass / 0 fail 通过。先前安装/退出报告仅提供既有 20–60 秒延迟观察，尚未在开发实例完成修复前后实测；当前开发实例未运行，按要求仍需后续启动并进行桌面预览退出实测。
+
+## 2026-09-28: 个人版打包前收窄并签名 serve-sim helpers
+
+- `package-personal.sh` 在 app 签名之前检查随包 3 个原生 helper（AX settings、Duo renderer、camera injector dylib）包含 arm64；若为 universal 则先 `lipo -thin arm64`，再由现有固定证书对 app 深度签名。签名后逐个 `codesign --verify --strict`，并继续验证整个 app。
+- 验证：源资源 3 个文件均为 x86_64+arm64 universal；实际打包后 lipo 检查均只含 arm64；三项 helper 的 `codesign --verify --strict` 与整个 app 的 `codesign --verify --deep --strict` 均通过。
+
+## 2026-09-28: 安装后修复批次全量验证与打包
+
+- 基于本轮代码提交 `e1ac4446` 完成完整 `scripts/personal/package-personal.sh`：typecheck 通过；全量 Bun 测试 **600 pass / 0 fail / 0 error**；main、agent runtime、terminal runtime、preload、renderer、web-preload、CLI 与 native helpers 构建通过；personal build marker 的 version `0.19.58`、commit `e1ac4446`，无 `app-update.yml`。
+- 打包后自检通过：serve-sim middleware ESM import、入口 `--help`、随包 serve-sim 在 Booted iPhone 17 Pro 上 127.0.0.1 临时端口 HTTP 200 冒烟（运行 5 秒并按 UDID 停止）；ASAR 含 `dist/resources/icon.icns`；App Authority `Proma Personal Code Signing`，designated requirement 包含固定 certificate leaf，app deep strict 签名通过。3 个原生 helper 已 thin 到 arm64，并分别 strict 验签。
+- 产物：`apps/electron/out/mac-arm64/Proma.app`。脚本明示“包未启动”；未运行 `install-update.sh`、未安装、未退出/重启已安装 Proma。
+- 最终 marker 对齐：本节文档变更提交后再次运行同一完整打包脚本；包内 `personal-build.json.commit` 与该次最终分支 HEAD 完全一致。此次重打包只包含本文档差异，没有新的应用代码变更。
+
+## 2026-09-28: 手机端失效连接自动恢复
+
+- 问题：19:33 手机发送的消息未到达 Mac（会话记录、运行时、main.log 均无痕迹），界面停在 “Agent Running”。推断：iOS 切后台再回到前台后，页面沿用“看似 OPEN 实已断开”的 IPC WebSocket，`ws.send` 静默丢失，35 秒后才超时，且上游发送失败时只停止运行状态、消息仍显示为已发送。
+- 修复（`web-electron-shim.ts` / `web-remote-ipc.ts`，均为个人版文件）：服务端支持 `ping` → `pong`；客户端空闲超过 10 秒时先 ping（3 秒无响应即丢弃旧连接并重连）再发请求；页面回到前台 / `pageshow` / `online` 时强制校验连接；连接关闭时立即让该连接上的在途请求失败（按连接区分，不误伤新连接）；`agent:send-message` 失败时显示红色提示“消息未送达 Mac”。
+- 验证：新增 harness 套件 `dead-socket`（让当前 `/api/ipc` 连接双向静默 11 秒后发请求），iPhone / Android 均在约 3.0 秒内重连并成功（修复前会挂起 35 秒）；首版实现中旧连接关闭误伤新连接请求，由该套件发现并修正。`mobile-preview.sh test` 默认 8 套全过；全量 601 pass / 0 fail；新增 ping/pong 单测。发送失败提示未做端到端验证。
+
+## 2026-09-28: 安装后修复批次合并（待安装）
+
+- 合并 `fix/post-install-2026-09-28`：serve-sim 独立 extraResources 与依赖、打包实跑冒烟、启动失败回退 npx 与状态同步、Web Remote 先于钥匙串相关初始化启动、安装脚本 SecurityAgent 等待与只对主进程回滚、退出清理限时、icon.icns 打包、helper thin arm64 签名、手机失效连接自动恢复。
+- 用户 2026-09-28 20:15 在开发实例确认。
