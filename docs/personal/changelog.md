@@ -694,3 +694,8 @@
 - 依赖核验：serve-sim 包内 native addon、simcam/simax/simduo 工具均为 macOS x86_64/arm64 universal；包内含 `serve-sim-native.node`、可执行 helper 与 `libSimCameraInjector.dylib`。runtime-deps 实测同步 138 个包；Electron Node 模式 `--version` 返回 0.1.47、`--list -q` 正常；实际本机流返回 HTTP 200，Home 按钮退出 0，`--kill <UDID>` 停流，测试模拟器 shutdown 后恢复 Booted。
 - 验证：定向服务测试 6 pass / 0 fail；全量测试 599 pass / 0 fail / 0 error；typecheck、build:main、build:renderer、build:web-preload 通过。手机预览全套 iPhone（panel-probe 2/2、smoke 7/7、mobile-polish 2/2、layout 11/11）和 Android（smoke 7/7、attachments）通过，JS exceptions 均 0。
 - 未做完整 app 打包；因此尚未在新 ASAR/签名 app 内实测 native helper 执行。未通过桌面 UI 自动化逐项复测面板设备切换/关机按钮；现有 CLI 的多流/关停路径有独立验证。
+
+## 2026-09-28: 清单收尾批次合并（待安装）
+
+- 父会话补充 `dca3e775`：打包后 serve-sim 优先从 `app.asar.unpacked` 运行，使原生 helper 按真实目录解析。
+- 父会话复核：全量 599 pass / 0 fail；手机回归 6 套全过；上游改动面未缩减（71→72，新增 `sync-runtime-deps.ts`），标记替换另立任务。用户 2026-09-28 16:42 确认并同意打包。
