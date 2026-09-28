@@ -60,6 +60,7 @@ export function terminateOwnedChild(proc: Pick<ChildProcess, 'pid' | 'exitCode' 
   proc.kill('SIGTERM')
 }
 let child: ChildProcess | null = null
+let currentInvocation: ServeSimInvocation | null = null
 let current: SimulatorPreviewStatus = { running: false }
 let currentUdid: string | undefined
 
@@ -157,6 +158,7 @@ export async function startSimulatorPreview(udid: string): Promise<SimulatorPrev
     exitCode = null
     const launched = spawn(next.command, invocationArgs(next, buildServeSimArgs(udid, port)), { env: next.env, stdio: ['ignore', 'pipe', 'pipe'] })
     child = launched
+    currentInvocation = next
     launched.stdout?.on('data', (chunk: Buffer) => { output += chunk.toString() })
     launched.stderr?.on('data', (chunk: Buffer) => { output += chunk.toString() })
     launched.once('exit', (code) => {
@@ -200,18 +202,26 @@ export async function startSimulatorPreview(udid: string): Promise<SimulatorPrev
 
 export async function stopSimulatorPreview(udid = currentUdid): Promise<void> {
   const ownChild = child
-  // serve-sim 会跟随切换的设备登记多个流（同一 PID）；逐个按 UDID 停止，绝不使用无参 --kill。
+  const invocation = currentInvocation
+  // 只对本进程拥有的流按 UDID 清理；退出路径不调用 npx，且多个设备并发清理、总等候上限 1.5 秒。
   const targets = new Set<string>(udid ? [udid] : [])
   if (ownChild?.pid) for (const device of await readServeSimStreams(ownChild.pid)) targets.add(device)
-  if (targets.size) {
-    try { for (const target of targets) await runServeSim(buildKillArgs(target), 15_000).catch(() => undefined) } catch { /* PID fallback below */ }
+  if (invocation?.scriptPath && targets.size) {
+    const cleanup = Promise.all([...targets].map((target) => execFile(
+      invocation.command,
+      invocationArgs(invocation, buildKillArgs(target)),
+      { env: invocation.env, timeout: 1_500 },
+    ).catch(() => undefined)))
+    let cleanupTimer: NodeJS.Timeout | undefined
+    await Promise.race([cleanup, new Promise((resolve) => { cleanupTimer = setTimeout(resolve, 1_500) })])
+    if (cleanupTimer) clearTimeout(cleanupTimer)
   }
   if (ownChild?.pid && child === ownChild) {
     terminateOwnedChild(ownChild)
-    await new Promise((resolve) => setTimeout(resolve, 800))
+    await new Promise((resolve) => setTimeout(resolve, 400))
     if (ownChild.exitCode === null && ownChild.pid) ownChild.kill('SIGKILL')
   }
-  child = null; currentUdid = undefined; current = { running: false }
+  child = null; currentInvocation = null; currentUdid = undefined; current = { running: false }
 }
 
 export async function pressSimulatorHome(udid: string): Promise<void> {

@@ -740,3 +740,8 @@
 
 - electron-builder 的 `files` 规则原先排除整个 `dist/resources/**`，只重新纳入 PNG；`index.ts:getIconPath()` 与 `workspace-memory-window.ts` 都从 `dist/resources` 查找 `icon.icns`，因此包内资源缺失并触发 `[WARN] App icon not found`。在排除规则后显式纳入 `dist/resources/icon.icns`，让 ASAR 路径与两处现有查找路径一致。
 - 验证：源码 `dist/resources/icon.icns` 存在（116,454 bytes）；最终包中的 ASAR 文件存在性及两处路径命中将在最终打包后核对。
+
+## 2026-09-28: 限制模拟器预览退出清理耗时
+
+- 退出清理复用当前已选择的 serve-sim invocation；只对随包入口并发按本进程拥有的 UDID 发 `--kill`，单轮最多等待 1.5 秒，npx 回退路径不再在退出时运行可能下载包的 npx。随后只终止 Agent 自己记录的 serve-sim 子进程 PID，等待 400 ms 后仍不退则 SIGKILL；避免按设备串行等待 15 秒。
+- 验证：typecheck、模拟器服务定向单测（当前 7 pass / 0 fail）待本项复核。先前安装/退出报告仅提供既有 20–60 秒延迟观察，尚未在开发实例完成修复前后实测；当前开发实例未运行，按要求仍需后续启动并进行桌面预览退出实测。
