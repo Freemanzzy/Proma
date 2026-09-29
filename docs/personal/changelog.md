@@ -896,3 +896,9 @@
 - `PROMA_WEB_REMOTE_HEAVY_SESSION_BASELINE=1` 环境对照在相同 50 ms / 0.5 Mbps 下等待 40.4 秒未显示历史，并有 WebSocket/renderer 连接中断；支持“旧式无历史窗口策略在弱网超时”的基线结论。baseline 对照在 IPC 中断后 harness teardown 无法完成，随后已通过独立的 harness 清理步骤移除自建会话与 JSONL；核实开发会话清单恢复原有条目，未触碰其它会话。为使启动脚本支持该试验，`mobile-preview.sh start` 现在透传该可选环境变量。
 - 首屏资源方面没有完成“更新后清缓存”与“静态资源缓存关闭”两组 under-throttle 对照；未证明完整 `/app/` 框架时间下降。旧 9.66 MB 的各项实际贡献仍不能由本次历史通道样本反推；新的 0.5 Mbps 套件只在会话数据阶段启用节流。
 - 上述计量/弱网回归与 build/typecheck 结果见上一节；`mobile-preview.sh start` 与 `sim` 在最终检查阶段保持运行（sim 状态待最终记录）。
+
+## 2026-09-29: 父会话复核蜂窝降载批次
+
+- 复核 `097b4e74`/`84ef7aae`/`189446ad`：无上游文件改动；会话列表对手机去掉 `delegationGoal`/`piSessionFile`、`piEntryBindings` 值改 true（合成 900 会话 3.16 MB → 0.29 MB）；并发同参列表请求合并；省流量模式（256 KiB 历史、图片全部点按）；0.5 Mbps 已缓存资源下历史首屏 4.75 s。全量 629 pass。
+- 父会话修复：`/api/dev/metrics` 原以 `NODE_ENV !== 'production'` 判定开发环境，打包主进程未必设置该变量，可能在安装版暴露；改为仅在配置目录为 `.proma-dev` 时提供。
+- 说明：蜂窝慢的根因确认为运营商对直连 UDP 限速（用户确认），降载只是辅助；根治方案（国内自建 DERP + Mac 侧阻断外网直连 UDP）另行推进。

@@ -225,7 +225,7 @@ export class WebRemoteServer {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
     const path = url.pathname
 
-    if (method === 'GET' && path === '/api/dev/metrics' && process.env.NODE_ENV !== 'production') {
+    if (method === 'GET' && path === '/api/dev/metrics' && getConfigDirName() === '.proma-dev') {
       const identity = await this.authenticate(req, false)
       if (!identity) { json(res, 401, { error: 'unauthorized' }); return }
       json(res, 200, { generatedAt: new Date().toISOString(), deviceId: identity.deviceId, ipc: this.options.ipcBridge?.getMetricsSnapshot() ?? { devices: {} }, static: this.staticMetrics.get(identity.deviceId) ?? null })
