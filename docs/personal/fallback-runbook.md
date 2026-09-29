@@ -160,6 +160,11 @@ sqlite3 ~/.proma/planning.db "PRAGMA integrity_check;"
 
 ---
 
+### 手机蜂窝访问异常（自建中继 / pf 规则）
+
+- 现象：手机蜂窝下打不开或极慢，Wi-Fi 正常。先 `tailscale ping <手机节点>` 看路径；中继服务器宕机时 Tailscale 会自动回落官方中继（慢但可用）。
+- 需要恢复直连（例如更换 Tailscale 端口导致规则失效、或中继长期不可用）：执行 `docs/personal/web-remote.md`“蜂窝网络”一节的回退命令，删除 pf 规则即可，不影响应用与数据。
+
 ## 6. 从源码重建已知可用版本
 
 ```bash

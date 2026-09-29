@@ -148,3 +148,13 @@ Web Remote WebSocket 为超过 16 KB 的消息启用 per-message deflate；服�
 - 端到端弱网验收：在 `~/.proma-dev` 创建 33,408,055 B 全合成 JSONL，会话覆盖 user/assistant/tool_use/tool_result 与 base64 图片。iPhone UA、300 ms 延迟、下行 3 Mbps、上行 1 Mbps 下，当前实现 7,911 ms 首次显示历史；点按“加载更早”后 DOM 消息数 242→484；工具结果截断副本与图片占位副本均确认，0 JS exceptions。临时 session 与 JSONL 已清理。CDP 观测到 2,831,569 B 解压后的 WebSocket payload、最大解压帧 245,870 B；这些是 payload 统计，不是线缆字节。
 - 修复前对照使用开发版专用 `PROMA_WEB_REMOTE_HEAVY_SESSION_BASELINE=1`（仅 `NODE_ENV !== 'production'` 生效），关闭历史窗口/瘦身及分片传输，保留 WebSocket 压缩。相同 33 MB 测试在 40,420 ms 内仍未显示历史，随后 Web Remote IPC 连接断开；对照记录到 117,103 B 已解压帧，未获得编码线缆字节。由于页面断开，harness 无法经 UI 清理；仅删除其精确标记的两个 `~/.proma-dev` 合成会话索引项与合成文件，其他条目不变。详细证据见 `docs/personal/changelog.md`。
 - 压缩握手为 iPhone/Android Chromium UA 验证，不代表 iOS Safari 真机验收；CDP 当前不暴露 WebSocket 压缩后的线上 payload 字节。
+
+### 蜂窝网络：自建 DERP 中继 + Mac 侧阻断外网直连 UDP（2026-09-29）
+
+- **根因**：国内移动蜂窝网络对个人设备之间的直连 UDP（WireGuard）限速，实测 Mac→手机约 0.5 Mbps；Wi-Fi 同局域网不受影响。Tailscale 只要直连可达就一直走直连，不按速度选路（上游 issue #2270/#3579 未实现），所以需要“让外网直连失败”。
+- **中继**：国内云服务器（腾讯云轻量，3 Mbps 固定带宽）运行 `derper`（版本与服务器上的 tailscale 一致），IP + 自签证书，`-a :<DERP 端口> -http-port -1 -stun -stun-port 3478 -certmode manual -verify-clients`，systemd 服务 `derper.service` 开机自启；服务器以 `derp-gz` 加入 tailnet（后台已关闭密钥过期），供 `--verify-clients` 校验。防火墙只放行 DERP 的 TCP 端口与 UDP 3478。
+- **Tailscale 后台 Access controls**：`derpMap` 新增 900 号区域（HostName/IPv4 为服务器 IP、DERPPort、STUNPort、`CertName: sha256-raw:<指纹>`），`OmitDefaultRegions: false` 保留官方中继作后备。
+- **Mac 侧 pf 规则**：`/etc/pf.anchors/proma-derp`（挂在系统自带的 `com.apple/*` 锚点下，不改 `/etc/pf.conf`），只作用于 Tailscale 本地 UDP 端口 41641：放行到局域网/私有地址与中继 STUN，其余丢弃；由 `/Library/LaunchDaemons/com.proma.derp-pf.plist` 开机加载（最多重试 12 次，日志 `/var/log/proma-derp-pf.log`）。效果：手机用蜂窝时经中继（TCP/TLS），同一 Wi-Fi 下仍直连。
+- **核对**：`tailscale netcheck` 最近 DERP 为自建区域；`tailscale ping <手机节点>` 显示 `via DERP(<区域代码>)`；`sudo pfctl -a com.apple/proma-derp -s rules` 列出 3 条规则。
+- **回退**：`sudo launchctl bootout system /Library/LaunchDaemons/com.proma.derp-pf.plist; sudo pfctl -a com.apple/proma-derp -F all; sudo rm /Library/LaunchDaemons/com.proma.derp-pf.plist /etc/pf.anchors/proma-derp`（恢复直连）；中继故障时 Tailscale 自动回落官方中继。服务器地址、SSH 密钥与证书指纹只记在本机，不写入仓库。
+- **成本与到期**：服务器首年特惠，续费按日常价；到期前比价，迁移只需重建 derper 并更新 `derpMap`。
