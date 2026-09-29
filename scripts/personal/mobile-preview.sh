@@ -43,7 +43,7 @@ start_preview() {
 
   "$TAILSCALE" serve --bg --https=8443 http://127.0.0.1:17889
   cd "$ROOT"
-  ( PROMA_WEB_REMOTE=1 bash scripts/personal/dev.sh ) >"$LOG_FILE" 2>&1 &
+  ( PROMA_WEB_REMOTE=1 PROMA_WEB_REMOTE_HEAVY_SESSION_BASELINE="${PROMA_WEB_REMOTE_HEAVY_SESSION_BASELINE:-}" bash scripts/personal/dev.sh ) >"$LOG_FILE" 2>&1 &
   local dev_pid=$! start_time=$SECONDS
   printf 'DEV_PID=%q\nLOG_FILE=%q\nSTARTED_AT=%q\n' "$dev_pid" "$LOG_FILE" "$(date -u +%FT%TZ)" > "$PID_FILE"
   chmod 600 "$PID_FILE"

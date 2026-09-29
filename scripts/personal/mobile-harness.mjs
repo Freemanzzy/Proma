@@ -1079,7 +1079,11 @@ async function runHeavySession(harness, options, result, onSyntheticFileCreated)
   if (syntheticBytes < 30 * 1024 * 1024) throw new Error(`合成大会话不足 30 MiB：${syntheticBytes}`)
   // Move away from the just-created empty snapshot, then reopen it after network throttling is active.
   await harness.createHarnessSession(awayTitle)
-  await harness.client.command('Network.emulateNetworkConditions', { offline: false, latency: 300, downloadThroughput: 3 * 1024 * 1024 / 8, uploadThroughput: 1 * 1024 * 1024 / 8, connectionType: 'cellular3g' })
+  const cellularProfile = options.suite === 'cellular'
+    ? { latency: 50, downloadThroughput: 0.5 * 1024 * 1024 / 8, uploadThroughput: 1 * 1024 * 1024 / 8, connectionType: 'cellular2g' }
+    : { latency: 300, downloadThroughput: 3 * 1024 * 1024 / 8, uploadThroughput: 1 * 1024 * 1024 / 8, connectionType: 'cellular3g' }
+  await harness.client.command('Network.emulateNetworkConditions', { offline: false, ...cellularProfile })
+  if (options.suite === 'cellular') await harness.client.evaluate("localStorage.removeItem('proma-web-remote-data-saver');document.querySelector('[data-web-remote-data-saver]')?.click()")
   const firstFrameIndex = harness.websocketFramesReceived.length
   const firstNetworkIndex = harness.websocketDataReceived.length
   const exceptionStart = harness.exceptions.length
@@ -1101,7 +1105,7 @@ async function runHeavySession(harness, options, result, onSyntheticFileCreated)
     syntheticSessionId: heavy.id,
     syntheticJsonlBytes: syntheticBytes,
     baselineMode,
-    network: { latencyMs: 300, downloadBitsPerSecond: 3 * 1024 * 1024, uploadBitsPerSecond: 1 * 1024 * 1024 },
+    network: { latencyMs: cellularProfile.latency, downloadBitsPerSecond: cellularProfile.downloadThroughput * 8, uploadBitsPerSecond: cellularProfile.uploadThroughput * 8 },
     firstHistoryMs,
     observedThroughMs: Date.now() - startedAt,
     historyVisible,
@@ -1118,7 +1122,13 @@ async function runHeavySession(harness, options, result, onSyntheticFileCreated)
     if (historyVisible && firstHistoryMs !== null && firstHistoryMs < 20_000) throw new Error(`基线对照意外在 20 秒内加载完成：${firstHistoryMs} ms`)
     return
   }
-  if (!historyVisible || firstHistoryMs === null || firstHistoryMs >= 20_000) throw new Error(`大会话首屏历史未在 20 秒内出现：${JSON.stringify(result.heavySession)}`)
+  if (!historyVisible || firstHistoryMs === null || firstHistoryMs >= (options.suite === 'cellular' ? 30_000 : 20_000)) throw new Error(`大会话首屏历史超出预算：${JSON.stringify(result.heavySession)}`)
+  if (options.suite === 'cellular') result.devMetrics = await harness.client.evaluate("fetch('/api/dev/metrics',{credentials:'include'}).then(r=>r.ok?r.json():{status:r.status})")
+  // “加载更早”只在消息列表滚到顶部附近时显示，避免遮挡正文。
+  await harness.client.evaluate(`(() => {const m=document.querySelector('[data-message-role]');for(let n=m&&m.parentElement;n&&n!==document.body;n=n.parentElement){const s=getComputedStyle(n);if(/(auto|scroll)/.test(s.overflowY)&&n.scrollHeight>n.clientHeight+4){n.scrollTop=0;n.dispatchEvent(new Event('scroll'));return true}}return false})()`)
+  await waitUntil(harness.client, `!!document.querySelector('[data-web-remote-history-bar]:not([hidden]) [data-web-remote-load-earlier]:not([hidden])')`, 10_000).catch(() => undefined)
+  result.heavySession.historyBar = await harness.client.evaluate(`(() => {const bar=document.querySelector('[data-web-remote-history-bar]');const b=bar&&bar.getBoundingClientRect();const top=document.querySelector('[data-web-remote-mobile-topbar]')?.getBoundingClientRect();return bar?{hidden:bar.hidden,top:Math.round(b.top),height:Math.round(b.height),width:Math.round(b.width),topbarBottom:top?Math.round(top.bottom):null,text:bar.innerText}:null})()`)
+  if (result.heavySession.historyBar && result.heavySession.historyBar.topbarBottom !== null && result.heavySession.historyBar.top < result.heavySession.historyBar.topbarBottom) throw new Error(`加载更早条与顶栏重叠：${JSON.stringify(result.heavySession.historyBar)}`)
   const hasEarlier = await harness.client.evaluate(`!!document.querySelector('[data-web-remote-load-earlier]:not([hidden])')`)
   if (!hasEarlier) throw new Error('大会话历史顶部未出现“加载更早”按钮')
   const visibleMessagesBefore = await harness.client.evaluate(`document.querySelectorAll('[data-message-id][data-message-role]').length`)
@@ -1158,8 +1168,14 @@ async function runHeavySession(harness, options, result, onSyntheticFileCreated)
   const imagePlaceholderVisible = copyProof.mediaMarkerCount > 0 && await harness.client.evaluate(`[...document.querySelectorAll('button')].some(node=>(node.innerText||'').includes('图片 ·')&&(node.innerText||'').includes('点按加载'))`)
   if (!imagePlaceholderVisible) throw new Error(`大会话页面未显示图片按需加载卡片：${JSON.stringify(copyProof)}`)
   const inlineImage = await harness.client.evaluate(`(() => {const image=[...document.querySelectorAll('[data-message-id][data-message-role] img[data-web-remote-inline-image]')].find(node=>node.naturalWidth>0);if(!image)return null;image.scrollIntoView({block:'center'});return {naturalWidth:image.naturalWidth,naturalHeight:image.naturalHeight}})()`)
-  if (!inlineImage || inlineImage.naturalWidth <= 0) throw new Error('小图未以内联 <img> 正常显示')
-  result.heavySession.inlineImage = inlineImage
+  if (options.suite === 'cellular') {
+    const saverState = await harness.client.evaluate(`({enabled:localStorage.getItem('proma-web-remote-data-saver')==='on',label:document.querySelector('[data-web-remote-data-saver]')?.innerText||''})`)
+    if (!saverState.enabled || copyProof.inlineMediaCount !== 0 || !saverState.label.includes('开')) throw new Error(`省流量模式未禁用所有图片内联：${JSON.stringify({ saverState, copyProof })}`)
+    result.heavySession.inlineImage = { skipped: 'cellular mode must not inline images', saverState }
+  } else {
+    if (!inlineImage || inlineImage.naturalWidth <= 0) throw new Error('小图未以内联 <img> 正常显示')
+    result.heavySession.inlineImage = inlineImage
+  }
   const imageButton = await harness.client.evaluate(`(() => {const node=[...document.querySelectorAll('button')].find(item=>(item.innerText||'').includes('图片 ·')&&(item.innerText||'').includes('点按加载'));if(!node)return null;node.scrollIntoView({block:'center'});const r=node.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`)
   if (!imageButton) throw new Error('无法定位大图按需加载卡片')
   await touchAt(harness.client, imageButton.x, imageButton.y)
@@ -1296,7 +1312,7 @@ async function main() {
     result.sessionManifestBefore = await harness.readSessionManifest()
     if (options.suite === 'smoke') await runSmoke(harness, options, result)
     else if (options.suite === 'mobile-polish') await runMobilePolishChecks(harness, options, result)
-    else if (options.suite === 'heavy-session') await runHeavySession(harness, options, result, (path) => { syntheticFileCleanupPath = path })
+    else if (options.suite === 'heavy-session' || options.suite === 'cellular') await runHeavySession(harness, options, result, (path) => { syntheticFileCleanupPath = path })
     else if (options.suite === 'media-demo') await runMediaDemo(harness, result)
     else if (options.suite === 'cleanup-synthetic') await runCleanupSynthetic(harness, result)
     else if (options.suite === 'panel-probe') await runPanelProbe(harness, options, result)

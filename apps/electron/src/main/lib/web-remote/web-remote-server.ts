@@ -11,6 +11,7 @@ import { getAgentSessionMeta, getAgentSessionSDKMessages, listAgentSessions } fr
 import { listAgentWorkspaces } from '../agent-workspace-manager'
 import { permissionService } from '../agent-permission-service'
 import { redactSensitiveLogValue } from '../bridge-log-redaction'
+import { recordPersonalInfo } from '../personal-log-writer'
 import type { PermissionRequest } from '@proma/shared'
 import { WebRemoteAuth, expectedWebRemoteOrigin, makeAuthCookie, parseCookieHeader, type WebRemoteConfig } from './web-remote-auth'
 import { WebRemoteEventHub } from './web-remote-events'
@@ -124,6 +125,8 @@ export class WebRemoteServer {
   private readonly pushStore: WebRemotePushStore
   private readonly unsubscribePush: () => void
   private readonly failedRuns = new Map<string, number>()
+  private readonly staticMetrics = new Map<string, { count: number; originalBytes: number; sentBytes: number; estimatedCompressedBytes: number; elapsedMs: number; paths: Record<string, number> }>()
+  private staticMetricsTimer?: ReturnType<typeof setInterval>
 
   constructor(private readonly options: WebRemoteServerOptions) {
     this.auth = options.auth
@@ -167,6 +170,8 @@ export class WebRemoteServer {
       this.httpServer.once('listening', onListening)
       this.httpServer.listen(port, host)
     })
+    this.staticMetricsTimer = setInterval(() => this.flushStaticMetrics(), 30_000)
+    this.staticMetricsTimer.unref?.()
     this.revokeTimer = setInterval(() => {
       this.auth.refreshFromDisk()
       for (const deviceId of this.auth.getRevokedDeviceIds()) { this.eventHub.disconnectDevice(deviceId); this.pushStore.remove(deviceId) }
@@ -186,6 +191,9 @@ export class WebRemoteServer {
     this.unsubscribePush()
     if (this.revokeTimer) clearInterval(this.revokeTimer)
     this.revokeTimer = undefined
+    if (this.staticMetricsTimer) clearInterval(this.staticMetricsTimer)
+    this.staticMetricsTimer = undefined
+    this.flushStaticMetrics()
     for (const ws of this.connections.keys()) ws.close(1001, 'server stopping')
     this.connections.clear()
     if (!this.listening) return
@@ -216,6 +224,13 @@ export class WebRemoteServer {
     const method = req.method ?? 'GET'
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
     const path = url.pathname
+
+    if (method === 'GET' && path === '/api/dev/metrics' && getConfigDirName() === '.proma-dev') {
+      const identity = await this.authenticate(req, false)
+      if (!identity) { json(res, 401, { error: 'unauthorized' }); return }
+      json(res, 200, { generatedAt: new Date().toISOString(), deviceId: identity.deviceId, ipc: this.options.ipcBridge?.getMetricsSnapshot() ?? { devices: {} }, static: this.staticMetrics.get(identity.deviceId) ?? null })
+      return
+    }
 
     // Public, data-free service worker. Its scope is limited to /app/ and it never caches API/WS or authenticated HTML.
     if (method === 'GET' && path === '/app/sw.js') {
@@ -398,13 +413,33 @@ export class WebRemoteServer {
     json(res, 404, { error: 'not found' })
   }
 
+  private recordStaticMetric(deviceId: string, path: string, originalBytes: number, sentBytes: number, estimatedCompressedBytes: number, elapsedMs: number): void {
+    const metric = this.staticMetrics.get(deviceId) ?? { count: 0, originalBytes: 0, sentBytes: 0, estimatedCompressedBytes: 0, elapsedMs: 0, paths: {} }
+    metric.count++
+    metric.originalBytes += originalBytes
+    metric.sentBytes += sentBytes
+    metric.estimatedCompressedBytes += estimatedCompressedBytes
+    metric.elapsedMs += elapsedMs
+    metric.paths[path] = (metric.paths[path] ?? 0) + 1
+    this.staticMetrics.set(deviceId, metric)
+  }
+
+  private flushStaticMetrics(): void {
+    for (const [deviceId, metrics] of this.staticMetrics) {
+      recordPersonalInfo('Web Remote 计量', JSON.stringify({ deviceId, channel: 'http-static', ...metrics }))
+    }
+    this.staticMetrics.clear()
+  }
+
   private async handleAppRequest(req: IncomingMessage, res: ServerResponse, path: string): Promise<void> {
     if (req.method !== 'GET') { json(res, 405, { error: 'method not allowed' }); return }
-    if (!await this.authenticate(req, false)) {
+    const identity = await this.authenticate(req, false)
+    if (!identity) {
       res.writeHead(302, { Location: '/' })
       res.end()
       return
     }
+    const requestStartedAt = Date.now()
     const root = this.options.rendererDir ?? join(__dirname, 'renderer')
     const relativePath = path === '/app' || path === '/app/' ? 'index.html' : decodeURIComponent(path.slice('/app/'.length))
     const safePath = normalize(relativePath).replace(/^([.][.][/\\])+/, '')
@@ -442,6 +477,7 @@ export class WebRemoteServer {
     if (!isHtml && conditionalMatch) {
       res.writeHead(304, headers)
       res.end()
+      this.recordStaticMetric(identity.deviceId, safePath, sourceStat.size, 0, 0, Date.now() - requestStartedAt)
       return
     }
 
@@ -468,6 +504,8 @@ export class WebRemoteServer {
     }
     res.writeHead(200, headers)
     res.end(representation.body)
+    const estimate = representation.encoding ? representation.body.byteLength : body.byteLength >= 16 * 1024 ? brotliCompressSync(body).byteLength : body.byteLength
+    this.recordStaticMetric(identity.deviceId, safePath, body.byteLength, representation.body.byteLength, estimate, Date.now() - requestStartedAt)
   }
 
   private async handlePushEvent(sessionId: string, payload: { kind?: string; event?: Record<string, unknown> }): Promise<void> {

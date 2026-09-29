@@ -1,4 +1,6 @@
 /* Browser substitute for the small Electron surface imported by preload/index.ts. */
+import { coalesceRequest } from './ipc-request-dedupe'
+import { isWebRemoteDataSaverEnabled, webRemoteHistoryBudgets } from './mobile-budget'
 const TYPE_KEY = '__proma_web_remote_type'
 if (typeof window !== 'undefined') {
   const remoteWindow = window as Window & { __PROMA_WEB_REMOTE__?: boolean }
@@ -32,7 +34,19 @@ const LIVENESS_IDLE_MS = 10_000
 const PING_TIMEOUT_MS = 3_000
 const pending = new Map<string, { resolve(value: unknown): void; reject(error: unknown): void; timer: number; ws?: WebSocket }>()
 const responseChunks = new Map<string, { requestId?: string; total: number; parts: string[]; received: number }>()
+const inFlightReadRequests = new Map<string, Promise<unknown>>()
 const RESPONSE_TIMEOUT_MS = 35_000
+
+function dataSaverEnabled(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    const override = window.localStorage.getItem('proma-web-remote-data-saver')
+    if (override === 'on') return true
+    if (override === 'off') return false
+  } catch {}
+  const connection = (navigator as Navigator & { connection?: { effectiveType?: string; downlink?: number } }).connection
+  return isWebRemoteDataSaverEnabled(null, connection)
+}
 
 function consumeChunk(message: { id?: string; requestId?: string; seq?: number; total?: number; data?: string }): string | null {
   if (!message.id || !Number.isInteger(message.seq) || !Number.isInteger(message.total) || typeof message.data !== 'string' || !message.total || message.total > 4096 || message.seq! < 0 || message.seq! >= message.total) return null
@@ -225,7 +239,10 @@ function showSendFailedToast(): void {
 async function invokeWithToken(channel: string, args: unknown[], confirmToken?: string): Promise<unknown> {
   const ws = await liveSocket()
   const id = `${Date.now()}-${nextId++}`
-  const payload = JSON.stringify({ type: 'invoke', id, channel, args: args.map(encode), ...(confirmToken ? { confirmToken } : {}) })
+  const requestArgs = channel === 'agent:get-sdk-messages' && dataSaverEnabled()
+    ? [args[0], { ...(args[1] && typeof args[1] === 'object' ? args[1] as Record<string, unknown> : {}), budgetBytes: webRemoteHistoryBudgets(true).historyBytes, inlineImageBudgetBytes: webRemoteHistoryBudgets(true).inlineImageBytes }]
+    : args
+  const payload = JSON.stringify({ type: 'invoke', id, channel, args: requestArgs.map(encode), ...(confirmToken ? { confirmToken } : {}) })
   const response = await new Promise<unknown>((resolve, reject) => {
     const timer = window.setTimeout(() => {
       pending.delete(id)
@@ -316,6 +333,7 @@ async function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
       throw error
     }
   }
+  if (channel === 'agent:list-sessions') return coalesceRequest(inFlightReadRequests, JSON.stringify([channel, args]), () => invokeWithToken(channel, args), 3_000)
   try {
     return await invokeWithToken(channel, args)
   } catch (error) {

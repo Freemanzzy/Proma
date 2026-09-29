@@ -10,7 +10,7 @@ mock.module('../../main-window-store', () => ({
   getMainWindow: () => fakeMainWindow,
 }))
 
-const { WebRemoteIpcBridge } = await import('./web-remote-ipc')
+const { WebRemoteIpcBridge, getWebRemoteMetricsSnapshot, slimWebRemoteSessionMeta } = await import('./web-remote-ipc')
 
 class FakeWebSocket extends EventEmitter {
   readyState = 1
@@ -150,6 +150,32 @@ describe('Web Remote full-ui security policy', () => {
     expect(response.value.messages.map((message: { type: string }) => message.type)).toEqual(['user', 'assistant'])
     expect(response.value.hasEarlier).toBe(true)
     expect((await invoke(ws, 'agent:get-sdk-messages', ['s-2'])).error.denied).toBe(true)
+  })
+
+  test('手机会话 meta 剔除大字段并将 piEntryBindings 收敛为键到 true', () => {
+    const synthetic = Array.from({ length: 900 }, (_, index) => ({ id: `session-${index}`, title: `title-${index}`, workspaceId: 'ws-1', delegationGoal: 'g'.repeat(300), piSessionFile: `/tmp/${'p'.repeat(60)}`, piEntryBindings: Object.fromEntries(Array.from({ length: 5 }, (_, key) => [`${index}-${'k'.repeat(34)}-${key}`, 'v'.repeat(560)])) }))
+    const slim = slimWebRemoteSessionMeta(synthetic) as Array<Record<string, unknown>>
+    const before = Buffer.byteLength(JSON.stringify(synthetic))
+    const after = Buffer.byteLength(JSON.stringify(slim))
+    expect(before).toBeGreaterThan(2_700_000)
+    expect(after).toBeLessThan(300_000)
+    expect(slim[0]).not.toHaveProperty('delegationGoal')
+    expect(slim[0]).not.toHaveProperty('piSessionFile')
+    expect(slim[0]?.piEntryBindings).toEqual(Object.fromEntries(Object.keys(synthetic[0]!.piEntryBindings).map((key) => [key, true])))
+  })
+
+  test('IPC metrics aggregate response bytes/count without retaining payload content', async () => {
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
+    bridge.registerInvoke('agent:list-sessions', async () => [{ id: 's-1', workspaceId: 'ws-1', delegationGoal: 'private text', piSessionFile: '/private/path', piEntryBindings: { 'message-1': 'entry-value' } }])
+    const ws = client(bridge)
+    const response = await invoke(ws, 'agent:list-sessions')
+    expect(response.value[0]).not.toHaveProperty('delegationGoal')
+    expect(response.value[0]).not.toHaveProperty('piSessionFile')
+    expect(response.value[0].piEntryBindings).toEqual({ 'message-1': true })
+    const metric = getWebRemoteMetricsSnapshot().devices['device-1']?.byChannel['agent:list-sessions']
+    expect(metric).toMatchObject({ calls: 1 })
+    expect(metric?.rawBytes).toBeGreaterThan(0)
+    expect(JSON.stringify(getWebRemoteMetricsSnapshot())).not.toContain('private text')
   })
 
   test('列表返回按工作区过滤，设置/渠道列表不泄露密钥字段', async () => {

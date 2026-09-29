@@ -877,3 +877,39 @@
 - 验证：main.log `[FATAL]`/`[ERROR]` 为 0，DEP0180 为 `[WARN]`；桌面“Proma personal”历史完整；两台手机在 **Wi-Fi** 下打开该 36 MB 会话十秒级、加载更早 / 小图 / 大图点按 / 截断展开 / 发送 / 通知均通过。`[子任务唤醒]` 的 `[INFO]` 分级待长期观察。
 - **蜂窝网络不可用（未解决）**：对照实验（15:50–15:57，OPPO 蜂窝，官方 Tailscale App）——16 KB 图标秒出；`/app/` 约 1 分钟出框架、内容 2 分钟以上未完成。路径直连（33 ms），官方 Tailscale 与代理内置 Tailscale 无差别；服务端采样 Mac→手机平均 62 KB/s（约 0.5 Mbps），回环 Send-Q 最高约 475 KB（应用数据已就绪，瓶颈在链路）；窗口内下发 9.66 MB。已知体量：会话索引 `agent-sessions.json` 3.85 MB、前端资源 brotli 约 5.3 MB（更新后首次需重下）、历史尾部 ≤ 2 MiB。推断运营商对直连 UDP 限速（未证实）。
 - 处理：`CLAUDE.md` §6 第 7 项加入“更新后先在 Wi-Fi 下打开一次 `/app/`”；应用侧降载（会话列表精简、服务端计量、蜂窝首屏预算）另立批次。
+## 2026-09-29: 蜂窝弱网降载实现（待开发实例端到端验收）
+
+- Web Remote IPC 计量按 device/channel 汇总响应 JSON 原始字节、应用层发送字节、`deflateRawSync` 压缩估算、调用数、耗时、分片数与发送队列 `bufferedAmount` 峰值；WebSocket 关闭单独记录 close code/reason。静态 HTTP 汇总设备、相对资源路径、原始/实际发送字节、估算压缩字节、耗时及请求次数。均通过 `recordPersonalInfo('Web Remote 计量', ...)` 每 30 秒或连接关闭写 `[INFO]`，正文不保存；开发模式已认证端点 `GET /api/dev/metrics` 返回内存 JSON，生产关闭。`ws` 无法直接读取 permessage-deflate 线缆字节，估算字段不代表线上实测；HTTP Content-Length 为实际发送编码字节。
+- 仅 Web Remote 的 `agent:list-sessions` meta 转换删除 `delegationGoal`、`piSessionFile`，`piEntryBindings` 保留 message key 并将 value 替换为 `true`。桌面 IPC 不经过此转换。renderer 仅使用 `AgentHistorySelectionLayer.tsx` 的 `parentSession?.piEntryBindings?.[messageId]` truthy 判断，因此当前/历史分叉可见性语义保留；未发现 renderer/preload 对前两字段有读取。
+- 仿照字段统计的合成 900 会话索引：瘦身前 3,163,631 B，瘦身后 289,031 B（减少 90.9%，低于 300 KB，无需分页）。合成数据只包含字段形状与重复填充内容，不复制正式会话正文。删除字段清单：`delegationGoal`、`piSessionFile`；`piEntryBindings` 的 value 替换为 boolean。
+- Web Remote shim 对并发且参数相同的 `agent:list-sessions` 合并为单请求，完成后清除缓存项，后续调用仍可重新获取；不会改变桌面请求行为。请求次数的实际手机冷启动统计需开发实例 harness 实测。
+- 手机 shim 根据 `navigator.connection` 的 `slow-2g`/`2g` 或 downlink < 1 Mbps 自动启用省流量模式；顶部开关将 on/off 记入 localStorage，手动选择覆盖自动判断。模式开启时历史预算 256 KiB、内联图片预算 0；关闭时为原 2 MiB/1 MiB。图片统一改为点按加载。
+- 新增 `cellular` harness suite：CDP 下行 0.5 Mbps、50 ms RTT，打开合成大会话，记录 WebSocket 接收 payload 与开发计量 JSON；目标首屏 30 秒。尚未执行 cellular suite、更新后清缓存/已缓存两组、baseline 对照及全默认 mobile-preview 回归；因此未得出首屏新旧实测耗时或完成对 9.66 MB 的通道拆账。合成 900 索引通过单测验证瘦身数字。
+- Service Worker 仅处理 push/通知，不缓存导航、静态文件、API 或 WebSocket。Wi-Fi 后台预取可以通过 install/activate 预缓存静态 hash 资源实现，但需先取得资源清单并处理版本激活、存储配额、过期资源清理与并发更新；若错误地 `cache.addAll` 大资源可能耗流量、占空间或延迟新版本使用。本批评估后未实现。
+- 验证：专项 28 pass；全量 `bun test` 629 pass / 0 fail；`bun run typecheck` 通过；`build:main`、`build:renderer`、`build:web-preload` 通过。`build:renderer` 仍报告既有大 chunk 警告；未修改 Vite 上游拆包配置。
+- 未运行安装、更新脚本、打包或 push；未触碰正式 `~/.proma` 与已安装 Proma 进程。开发实例 start/sim 与 cellular/mobile-preview 测试待本轮结束时执行。
+
+## 2026-09-29: 蜂窝降载开发实例验证补记
+
+- `mobile-preview.sh test` 默认套件通过：iPhone panel-probe/smoke/mobile-polish/layout/dead-socket/heavy-session，Android smoke/attachments/dead-socket；大会话首屏 8,028 ms，2.83 MB 解压 payload，0 JS exceptions。另 `iphone:cellular` 通过：CDP 50 ms / 下行 0.5 Mbps / 合成 32 MiB JSONL，弱网模式首屏历史 **4,754 ms**，WebSocket 解压 payload 共 276,617 B（最大帧 249,328 B），0 exceptions；省流量模式标识开启、所有图像均未内联，点按大图成功；加载更早消息 28→56。该测试进入会话时 app 静态资源已在 harness 前置加载，属于已缓存资源 + 低速历史 IPC 验证，不代表更新后清缓存的完整 `/app/` 冷启动耗时。
+- 冷启动 IPC 计量摘要中 `agent:list-sessions` 1 次 / 9,447 B（当前开发数据）；同时 harness 多步骤及周期活动产生的后续采样中 `agent:list-sessions` 6–7 次、总 56,942–64,261 B。后续重复调用有移动端存活/显示周期等来源；shim 已做并发合并但不缓存串行轮询。HTTP 静态计量跨 harness 连接汇总的一次记录：60 次、原始 8,224,870 B、实际发送 3,245,958 B；不是单次冷启动口径。`agent:get-sdk-messages` 的 `sentBytes` 是应用层序列化/分片帧估计，不是 WebSocket 压缩线缆字节；这轮 CDP `encodedDataLength` 对 IPC WebSocket 为 0。
+- `PROMA_WEB_REMOTE_HEAVY_SESSION_BASELINE=1` 环境对照在相同 50 ms / 0.5 Mbps 下等待 40.4 秒未显示历史，并有 WebSocket/renderer 连接中断；支持“旧式无历史窗口策略在弱网超时”的基线结论。baseline 对照在 IPC 中断后 harness teardown 无法完成，随后已通过独立的 harness 清理步骤移除自建会话与 JSONL；核实开发会话清单恢复原有条目，未触碰其它会话。为使启动脚本支持该试验，`mobile-preview.sh start` 现在透传该可选环境变量。
+- 首屏资源方面没有完成“更新后清缓存”与“静态资源缓存关闭”两组 under-throttle 对照；未证明完整 `/app/` 框架时间下降。旧 9.66 MB 的各项实际贡献仍不能由本次历史通道样本反推；新的 0.5 Mbps 套件只在会话数据阶段启用节流。
+- 上述计量/弱网回归与 build/typecheck 结果见上一节；`mobile-preview.sh start` 与 `sim` 在最终检查阶段保持运行（sim 状态待最终记录）。
+
+## 2026-09-29: 父会话复核蜂窝降载批次
+
+- 复核 `097b4e74`/`84ef7aae`/`189446ad`：无上游文件改动；会话列表对手机去掉 `delegationGoal`/`piSessionFile`、`piEntryBindings` 值改 true（合成 900 会话 3.16 MB → 0.29 MB）；并发同参列表请求合并；省流量模式（256 KiB 历史、图片全部点按）；0.5 Mbps 已缓存资源下历史首屏 4.75 s。全量 629 pass。
+- 父会话修复：`/api/dev/metrics` 原以 `NODE_ENV !== 'production'` 判定开发环境，打包主进程未必设置该变量，可能在安装版暴露；改为仅在配置目录为 `.proma-dev` 时提供。
+- 说明：蜂窝慢的根因确认为运营商对直连 UDP 限速（用户确认），降载只是辅助；根治方案（国内自建 DERP + Mac 侧阻断外网直连 UDP）另行推进。
+
+## 2026-09-29: “加载更早”改为顶部小条 + 会话列表 3 秒短缓存
+
+- 用户反馈（OPPO 截图）：“加载更早（已省略 N 条）”固定悬浮在顶栏下方居中，文字折行、遮挡会话标题与正文。
+- 修复（`mobile-js.ts` / `mobile-css.ts`，个人版文件）：改为紧凑单行小条 `[data-web-remote-history-bar]`（“↑ 加载更早 · N 条” + “省流量 开/关”），定位在消息滚动区顶部下方 8 px，**只在消息列表滚到顶部附近（≤ 80 px）时显示**，阅读中不再遮挡；省流量开关从顶栏移入该小条（顶栏保持 4 个图标，避免挤压标题）。点“加载更早”直接用历史元数据中的会话 ID，不再为此拉取整份会话列表。滚动监听用 WeakSet 去重，DOM 写入经 `setIfChanged`。
+- `ipc-request-dedupe.ts`：`agent:list-sessions` 在并发合并之外增加 3 秒成功结果复用（失败不缓存），减少弱网下启动与交互中的重复下载。
+- 验证：全量 630 pass / 0 fail；harness heavy-session（小条 top 112 px 位于顶栏 56 px 之下，宽 223 px 单行）、cellular（0.5 Mbps 首屏 4.3 s）、android smoke、iphone layout 11/11 通过。用户同意跳过开发实例体验，直接随蜂窝批次打包。
+
+## 2026-09-29: 蜂窝批次合并（待安装）
+
+- 合并 `fix/mobile-cellular`：Web Remote 计量（dev 端点仅开发实例）、手机会话列表瘦身（约 −91%）、列表请求并发合并 + 3 秒复用、省流量模式、加载更早小条、蜂窝回归套件；并记录自建 DERP 中继与 Mac pf 规则（运维配置，非应用代码）。用户 2026-09-29 17:38 同意跳过开发实例体验直接打包。

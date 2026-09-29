@@ -47,12 +47,12 @@ function shortenText(text: string, meta: { sessionId: string; uuid?: string; ind
   return `${text.slice(0, end)}\n\n${token}[内容已截断，点按查看完整内容（原文 ${(bytes / 1024).toFixed(1)} KB）]`
 }
 
-interface SlimContext { sessionId: string; index: number; uuid?: string; messageHash: string; budget: { inlineBytes: number; enabled: boolean }; path: Array<string | number>; inToolResult: boolean }
+interface SlimContext { sessionId: string; index: number; uuid?: string; messageHash: string; budget: { inlineBytes: number; enabled: boolean; inlineLimit: number }; path: Array<string | number>; inToolResult: boolean }
 function slimValue(value: unknown, context: SlimContext): unknown {
   if (typeof value === 'string') {
     const image = dataImage(value)
     if (image) {
-      const canInline = context.budget.enabled && image.bytes <= INLINE_IMAGE_MAX_BYTES && context.budget.inlineBytes + image.bytes <= INLINE_IMAGE_PAGE_BUDGET_BYTES
+      const canInline = context.budget.enabled && image.bytes <= INLINE_IMAGE_MAX_BYTES && context.budget.inlineBytes + image.bytes <= context.budget.inlineLimit
       if (canInline) context.budget.inlineBytes += image.bytes
       return marker('media', { sessionId: context.sessionId, uuid: context.uuid, index: context.index, messageHash: context.messageHash, path: context.path, mime: image.mime, bytes: image.bytes, ...(canInline ? { inlineData: image.data } : {}) })
     }
@@ -67,7 +67,7 @@ function slimValue(value: unknown, context: SlimContext): unknown {
     const mime = typeof source.media_type === 'string' ? source.media_type : typeof block.mimeType === 'string' ? block.mimeType : 'image/*'
     const data = typeof source.data === 'string' ? source.data : typeof block.data === 'string' ? block.data : ''
     const bytes = Buffer.from(data, 'base64').byteLength
-    const canInline = context.budget.enabled && bytes > 0 && bytes <= INLINE_IMAGE_MAX_BYTES && context.budget.inlineBytes + bytes <= INLINE_IMAGE_PAGE_BUDGET_BYTES
+    const canInline = context.budget.enabled && bytes > 0 && bytes <= INLINE_IMAGE_MAX_BYTES && context.budget.inlineBytes + bytes <= context.budget.inlineLimit
     if (canInline) context.budget.inlineBytes += bytes
     const token = marker('media', { sessionId: context.sessionId, uuid: context.uuid, index: context.index, messageHash: context.messageHash, path: context.path, mime, bytes, ...(canInline ? { inlineData: data } : {}) })
     return { type: 'text', text: canInline ? `${token}[图片 · ${(bytes / 1024).toFixed(1)} KB]` : `${token}[图片 · ${(bytes / 1024).toFixed(1)} KB · 点按加载]` }
@@ -82,9 +82,9 @@ function slimValue(value: unknown, context: SlimContext): unknown {
   return output
 }
 
-export function slimWebRemoteHistory<T>(messages: T[], sessionId = '', startIndex = 0, inlineImages = true): T[] {
+export function slimWebRemoteHistory<T>(messages: T[], sessionId = '', startIndex = 0, inlineImages = true, inlineImageBudgetBytes = INLINE_IMAGE_PAGE_BUDGET_BYTES): T[] {
   const output = new Array<T>(messages.length)
-  const budget = { inlineBytes: 0, enabled: inlineImages }
+  const budget = { inlineBytes: 0, enabled: inlineImages, inlineLimit: Math.max(0, inlineImageBudgetBytes) }
   for (let offset = messages.length - 1; offset >= 0; offset--) {
     const message = messages[offset]!
     const index = startIndex + offset
@@ -158,7 +158,7 @@ function toolIds(value: unknown, blockType: 'tool_use' | 'tool_result'): string[
 }
 
 /** Select complete user-to-user turns from the tail; a single oversized turn remains intact. */
-export function selectWebRemoteHistoryWindow<T>(messages: T[], budgetBytes = DEFAULT_HISTORY_BUDGET_BYTES, endIndex = messages.length, sessionId = ''): WebRemoteHistoryWindow<T> {
+export function selectWebRemoteHistoryWindow<T>(messages: T[], budgetBytes = DEFAULT_HISTORY_BUDGET_BYTES, endIndex = messages.length, sessionId = '', inlineImageBudgetBytes = INLINE_IMAGE_PAGE_BUDGET_BYTES): WebRemoteHistoryWindow<T> {
   const safeBudget = Number.isFinite(budgetBytes) ? Math.max(1, Math.floor(budgetBytes)) : DEFAULT_HISTORY_BUDGET_BYTES
   const slimmed = slimWebRemoteHistory(messages, '', 0, false)
   const boundedEnd = Math.min(slimmed.length, Math.max(0, Math.floor(endIndex)))
@@ -189,7 +189,7 @@ export function selectWebRemoteHistoryWindow<T>(messages: T[], budgetBytes = DEF
     startIndex = candidateStart
     if (bytes >= safeBudget) break
   }
-  let selected = slimWebRemoteHistory(messages.slice(startIndex, boundedEnd), sessionId, startIndex, true)
+  let selected = slimWebRemoteHistory(messages.slice(startIndex, boundedEnd), sessionId, startIndex, true, inlineImageBudgetBytes)
   if (starts.length > 1 && utf8Bytes(selected) > safeBudget) {
     let low = starts.indexOf(startIndex) + 1
     let high = starts.length - 1
@@ -197,12 +197,12 @@ export function selectWebRemoteHistoryWindow<T>(messages: T[], budgetBytes = DEF
     while (low <= high) {
       const middle = Math.floor((low + high) / 2)
       const candidateStart = starts[middle]!
-      const candidate = slimWebRemoteHistory(messages.slice(candidateStart, boundedEnd), sessionId, candidateStart, true)
+      const candidate = slimWebRemoteHistory(messages.slice(candidateStart, boundedEnd), sessionId, candidateStart, true, inlineImageBudgetBytes)
       if (utf8Bytes(candidate) <= safeBudget) { fittingStart = middle; high = middle - 1 }
       else low = middle + 1
     }
     startIndex = starts[fittingStart]!
-    selected = slimWebRemoteHistory(messages.slice(startIndex, boundedEnd), sessionId, startIndex, true)
+    selected = slimWebRemoteHistory(messages.slice(startIndex, boundedEnd), sessionId, startIndex, true, inlineImageBudgetBytes)
   }
   return { messages: selected, omittedCount: startIndex, hasEarlier: startIndex > 0, startIndex }
 }

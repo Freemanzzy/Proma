@@ -67,6 +67,9 @@ tailscale serve --https=8443 off
 
 历史窗口内，解码后不超过 256 KB 的图片可直接在手机以 `<img>` 显示；每次返回（首屏或“加载更早”页）从最新内容向前累计，内联图片总量不超过 1 MB。其他图片以卡片显示大小并可点按加载；超 2 MB 的 tool_result 文本会先显示截断预览，点按后在原位读取并展开完整文本。单张按需图片读取上限 25 MB，原文展开上限 2 MB；超过上限或会话/消息发生变化时提示刷新或在桌面查看。
 
+顶部的“省流量模式”开关可手动启用/关闭并记入 localStorage。未手动选择时，浏览器报告 `slow-2g`/`2g` 或 downlink < 1 Mbps 会自动开启。开启后历史尾部预算为 256 KiB，内联图片预算为 0（全部点按加载）；关闭时恢复 2 MiB 历史预算与 1 MiB 图片预算。此预算由 Web Remote shim 仅附加到手机的历史 IPC 参数，不改变桌面行为。
+
+
 媒体标记仅由 Web Remote 的历史裁剪层生成，包含会话 ID、SDK 消息 UUID（缺少 UUID 时使用消息索引）及整条消息 SHA-256、块路径与内容校验摘要。按需读取通过 `web-remote:get-history-media` 只读 IPC，并按会话所属工作区授权；定位不唯一、摘要变化、越权或目标不存在均拒绝。桌面 renderer 的 SDK 历史返回不经该移动端裁剪，不包含 Web Remote 标记。
 
 ## 5. 通知（Web Push）
@@ -96,7 +99,7 @@ tailscale serve --https=8443 off
 
 - `bash scripts/personal/mobile-preview.sh start`：检查 17889/5173 空闲、开启临时 8443 Tailscale Serve、后台启动开发实例并等待启动与分级覆盖率 100% 日志；PID/日志分别记于 `/tmp/proma-mobile-preview.pids` 与 `/tmp/proma-mobile-preview.log`。
 - `bash scripts/personal/mobile-preview.sh sim [--device <name|udid>]`：默认启动 iPhone 17 Pro 模拟器、打开 Simulator、生成配对码并通过 AXe 的辅助功能树定位配对控件，配对后打开 `/app/` 并以 `simctl` 截图确认界面。
-- `bash scripts/personal/mobile-preview.sh test [suites...]`：默认运行 8 个既有 iPhone/Android 回归套件，并追加 `iphone:heavy-session` 大会话套件；每套单独去掉代理变量并受 420 秒外层 watchdog 保护，终端只汇总结果，完整 harness 输出分别保存在 `/tmp/proma-mobile-preview-<ua>-<suite>.log`；结束核查无残留 `proma-mobile-chrome`。
+- `bash scripts/personal/mobile-preview.sh test [suites...]`：默认运行既有 iPhone/Android 回归套件并追加 `iphone:heavy-session` 大会话套件；另可显式运行 `iphone:cellular`，以 CDP 50 ms RTT / 0.5 Mbps 下行验证弱网历史首屏和省流量图像策略（静态资源在开启节流前已加载，因此不代表更新后资源冷启动）。每套单独去掉代理变量并受 420 秒外层 watchdog 保护，终端只汇总结果，完整 harness 输出分别保存在 `/tmp/proma-mobile-preview-<ua>-<suite>.log`；结束核查无残留 `proma-mobile-chrome`。
 - `bash scripts/personal/mobile-preview.sh status` 查看服务、模拟器与 harness 进程；`stop` 只按记录 PID 停止开发实例进程树，关闭 8443 并确认 Serve 路由状态。用户需要继续体验时，最后运行 `start` 与 `sim`，保持服务运行，不要执行 `stop`。
 
 ### 首屏资源拆分评估（2026-09-28）
@@ -128,6 +131,10 @@ tailscale serve --https=8443 off
 
 harness 默认整体超时 300 秒（可用 `--timeout-ms` 覆盖），每次页面评估前以 3 秒 CDP 探活；每次运行后自动撤销测试配对设备、删除自建会话、关闭 Chrome 并移除临时 profile。`full-ui/mobile-patch.test.ts` 使用 linkedom 执行注入脚本并多次触发 MutationObserver，验证刷新/面板/菜单/通知图标、标题和 Tab 下拉菜单的 DOM 写入趋于稳定。`layout` 检查文件、改动、Todo、定时任务、MCP/Skills 与项目记忆列表/详情的横向溢出和元素可点性；`panel-probe` 检查页面下拉中的 Tab 可点性；`mobile-polish` 检查刷新和会话单击切换。左侧项目名是展开/折叠分组，不是 `agentWorkspaceId` 切换，勿以此字段判定工作区按钮点击。同步上游后必须运行；安装后另由用户在安装版上用两台手机验收（CLAUDE.md §6 第 7 项）。每周一的版本检查任务会报告上游新增、尚未分级的 IPC 通道。
 
+### Web Remote 计量与开发汇总
+
+开发实例中可由已认证设备读取 `GET /api/dev/metrics` JSON；生产环境不提供该端点。IPC 和静态资源计量均按设备汇总，主日志用 `[INFO]` / `Web Remote 计量` 每 30 秒或连接关闭时输出，内容不含响应正文。IPC 记录通道、序列化响应字节、应用层发送字节（大响应含分片 Base64/JSON 开销）、单帧 `deflateRawSync` 压缩估算、处理耗时、分片数和发送期间采样的 `bufferedAmount` 峰值；由于 `ws` 不暴露 permessage-deflate 后线缆字节，压缩字节为估算，不是实测线缆量。静态资源记录相对路径、原始文件字节、HTTP 实际 Content-Length、编码后字节、估算压缩字节与耗时；304 命中计 0 发送字节。开发端点只保存在运行时内存，不落入用户数据目录。
+
 ### WebSocket 压缩（2026-09-29）
 
 Web Remote WebSocket 为超过 16 KB 的消息启用 per-message deflate；服务端与客户端均禁用 context takeover，zlib 并发限制为 2，避免跨消息压缩状态与过量并发占用。iPhone UA 与 Android UA 的 Chromium harness 对 `/api/ipc` 均收到 HTTP 101，并协商 `permessage-deflate; server_no_context_takeover; client_no_context_takeover`。独立线缆侧探针确认 118,784 B 高重复文本帧在线路上压缩为 335 B，RSV1=true。此结果验证协议与压缩帧；不等同于 iOS Safari 真机验收。CDP 的 `Network.webSocketFrameReceived.payloadData` 是解压后的消息内容，当前 `Network.dataReceived` 未提供 WebSocket 线缆字节，因此不能据 CDP payload 计算实际压缩传输量。
@@ -141,3 +148,13 @@ Web Remote WebSocket 为超过 16 KB 的消息启用 per-message deflate；服�
 - 端到端弱网验收：在 `~/.proma-dev` 创建 33,408,055 B 全合成 JSONL，会话覆盖 user/assistant/tool_use/tool_result 与 base64 图片。iPhone UA、300 ms 延迟、下行 3 Mbps、上行 1 Mbps 下，当前实现 7,911 ms 首次显示历史；点按“加载更早”后 DOM 消息数 242→484；工具结果截断副本与图片占位副本均确认，0 JS exceptions。临时 session 与 JSONL 已清理。CDP 观测到 2,831,569 B 解压后的 WebSocket payload、最大解压帧 245,870 B；这些是 payload 统计，不是线缆字节。
 - 修复前对照使用开发版专用 `PROMA_WEB_REMOTE_HEAVY_SESSION_BASELINE=1`（仅 `NODE_ENV !== 'production'` 生效），关闭历史窗口/瘦身及分片传输，保留 WebSocket 压缩。相同 33 MB 测试在 40,420 ms 内仍未显示历史，随后 Web Remote IPC 连接断开；对照记录到 117,103 B 已解压帧，未获得编码线缆字节。由于页面断开，harness 无法经 UI 清理；仅删除其精确标记的两个 `~/.proma-dev` 合成会话索引项与合成文件，其他条目不变。详细证据见 `docs/personal/changelog.md`。
 - 压缩握手为 iPhone/Android Chromium UA 验证，不代表 iOS Safari 真机验收；CDP 当前不暴露 WebSocket 压缩后的线上 payload 字节。
+
+### 蜂窝网络：自建 DERP 中继 + Mac 侧阻断外网直连 UDP（2026-09-29）
+
+- **根因**：国内移动蜂窝网络对个人设备之间的直连 UDP（WireGuard）限速，实测 Mac→手机约 0.5 Mbps；Wi-Fi 同局域网不受影响。Tailscale 只要直连可达就一直走直连，不按速度选路（上游 issue #2270/#3579 未实现），所以需要“让外网直连失败”。
+- **中继**：国内云服务器（腾讯云轻量，3 Mbps 固定带宽）运行 `derper`（版本与服务器上的 tailscale 一致），IP + 自签证书，`-a :<DERP 端口> -http-port -1 -stun -stun-port 3478 -certmode manual -verify-clients`，systemd 服务 `derper.service` 开机自启；服务器以 `derp-gz` 加入 tailnet（后台已关闭密钥过期），供 `--verify-clients` 校验。防火墙只放行 DERP 的 TCP 端口与 UDP 3478。
+- **Tailscale 后台 Access controls**：`derpMap` 新增 900 号区域（HostName/IPv4 为服务器 IP、DERPPort、STUNPort、`CertName: sha256-raw:<指纹>`），`OmitDefaultRegions: false` 保留官方中继作后备。
+- **Mac 侧 pf 规则**：`/etc/pf.anchors/proma-derp`（挂在系统自带的 `com.apple/*` 锚点下，不改 `/etc/pf.conf`），只作用于 Tailscale 本地 UDP 端口 41641：放行到局域网/私有地址与中继 STUN，其余丢弃；由 `/Library/LaunchDaemons/com.proma.derp-pf.plist` 开机加载（最多重试 12 次，日志 `/var/log/proma-derp-pf.log`）。效果：手机用蜂窝时经中继（TCP/TLS），同一 Wi-Fi 下仍直连。
+- **核对**：`tailscale netcheck` 最近 DERP 为自建区域；`tailscale ping <手机节点>` 显示 `via DERP(<区域代码>)`；`sudo pfctl -a com.apple/proma-derp -s rules` 列出 3 条规则。
+- **回退**：`sudo launchctl bootout system /Library/LaunchDaemons/com.proma.derp-pf.plist; sudo pfctl -a com.apple/proma-derp -F all; sudo rm /Library/LaunchDaemons/com.proma.derp-pf.plist /etc/pf.anchors/proma-derp`（恢复直连）；中继故障时 Tailscale 自动回落官方中继。服务器地址、SSH 密钥与证书指纹只记在本机，不写入仓库。
+- **成本与到期**：服务器首年特惠，续费按日常价；到期前比价，迁移只需重建 derper 并更新 `derpMap`。
