@@ -909,3 +909,7 @@
 - 修复（`mobile-js.ts` / `mobile-css.ts`，个人版文件）：改为紧凑单行小条 `[data-web-remote-history-bar]`（“↑ 加载更早 · N 条” + “省流量 开/关”），定位在消息滚动区顶部下方 8 px，**只在消息列表滚到顶部附近（≤ 80 px）时显示**，阅读中不再遮挡；省流量开关从顶栏移入该小条（顶栏保持 4 个图标，避免挤压标题）。点“加载更早”直接用历史元数据中的会话 ID，不再为此拉取整份会话列表。滚动监听用 WeakSet 去重，DOM 写入经 `setIfChanged`。
 - `ipc-request-dedupe.ts`：`agent:list-sessions` 在并发合并之外增加 3 秒成功结果复用（失败不缓存），减少弱网下启动与交互中的重复下载。
 - 验证：全量 630 pass / 0 fail；harness heavy-session（小条 top 112 px 位于顶栏 56 px 之下，宽 223 px 单行）、cellular（0.5 Mbps 首屏 4.3 s）、android smoke、iphone layout 11/11 通过。用户同意跳过开发实例体验，直接随蜂窝批次打包。
+
+## 2026-09-29: 蜂窝批次合并（待安装）
+
+- 合并 `fix/mobile-cellular`：Web Remote 计量（dev 端点仅开发实例）、手机会话列表瘦身（约 −91%）、列表请求并发合并 + 3 秒复用、省流量模式、加载更早小条、蜂窝回归套件；并记录自建 DERP 中继与 Mac pf 规则（运维配置，非应用代码）。用户 2026-09-29 17:38 同意跳过开发实例体验直接打包。
