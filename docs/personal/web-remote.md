@@ -153,8 +153,16 @@ Web Remote WebSocket 为超过 16 KB 的消息启用 per-message deflate；服�
 
 - **根因**：国内移动蜂窝网络对个人设备之间的直连 UDP（WireGuard）限速，实测 Mac→手机约 0.5 Mbps；Wi-Fi 同局域网不受影响。Tailscale 只要直连可达就一直走直连，不按速度选路（上游 issue #2270/#3579 未实现），所以需要“让外网直连失败”。
 - **中继**：国内云服务器（腾讯云轻量，3 Mbps 固定带宽）运行 `derper`（版本与服务器上的 tailscale 一致），IP + 自签证书，`-a :<DERP 端口> -http-port -1 -stun -stun-port 3478 -certmode manual -verify-clients`，systemd 服务 `derper.service` 开机自启；服务器以 `derp-gz` 加入 tailnet（后台已关闭密钥过期），供 `--verify-clients` 校验。防火墙只放行 DERP 的 TCP 端口与 UDP 3478。
-- **Tailscale 后台 Access controls**：`derpMap` 新增 900 号区域（HostName/IPv4 为服务器 IP、DERPPort、STUNPort、`CertName: sha256-raw:<指纹>`），`OmitDefaultRegions: false` 保留官方中继作后备。
+- **Tailscale 后台 Access controls**：`derpMap` 新增 900 号区域（HostName/IPv4 为服务器 IP、DERPPort、STUNPort、`CertName: sha256-raw:<指纹>`），**2026-09-29 已改为 `OmitDefaultRegions: true`，仅保留自建区域 900**。此前 iPhone 选择官方香港区域导致蜂窝不可用；改为仅自建区域后用户确认恢复。**无官方中继兜底**，自建中继故障时依赖中继的远程访问会中断（用户已接受）。
 - **Mac 侧 pf 规则**：`/etc/pf.anchors/proma-derp`（挂在系统自带的 `com.apple/*` 锚点下，不改 `/etc/pf.conf`），只作用于 Tailscale 本地 UDP 端口 41641：放行到局域网/私有地址与中继 STUN，其余丢弃；由 `/Library/LaunchDaemons/com.proma.derp-pf.plist` 开机加载（最多重试 12 次，日志 `/var/log/proma-derp-pf.log`）。效果：手机用蜂窝时经中继（TCP/TLS），同一 Wi-Fi 下仍直连。
 - **核对**：`tailscale netcheck` 最近 DERP 为自建区域；`tailscale ping <手机节点>` 显示 `via DERP(<区域代码>)`；`sudo pfctl -a com.apple/proma-derp -s rules` 列出 3 条规则。
-- **回退**：`sudo launchctl bootout system /Library/LaunchDaemons/com.proma.derp-pf.plist; sudo pfctl -a com.apple/proma-derp -F all; sudo rm /Library/LaunchDaemons/com.proma.derp-pf.plist /etc/pf.anchors/proma-derp`（恢复直连）；中继故障时 Tailscale 自动回落官方中继。服务器地址、SSH 密钥与证书指纹只记在本机，不写入仓库。
+- **回退**：`sudo launchctl bootout system /Library/LaunchDaemons/com.proma.derp-pf.plist; sudo pfctl -a com.apple/proma-derp -F all; sudo rm /Library/LaunchDaemons/com.proma.derp-pf.plist /etc/pf.anchors/proma-derp`（恢复直连）；当前不会自动回落官方中继。恢复备用路径需用户在管理台重新允许官方区域，或在评估直连可用性后撤销 pf 限制；仅删除 pf 规则不保证受限网络恢复。服务器地址、SSH 密钥与证书指纹只记在本机，不写入仓库。
 - **成本与到期**：服务器首年特惠，续费按日常价；到期前比价，迁移只需重建 derper 并更新 `derpMap`。
+
+#### 中继恢复资料与证书维护（截至 2026-09-29）
+
+- 备份位置：外置硬盘 `proma 自建中继/`。包含 `derpmap-region-900.json`、`mac-pf/` 规则与启动项副本、`README.md` 恢复说明。按交接记录，备份配置与客户端实收配置一致，证书指纹与服务器一致。
+- **备份边界**：不含服务器证书、私钥、derper 配置与安全组规则；不能把它视为完整服务器备份。后续补备份应使用受保护的存储流程，禁止提交到公开仓库。
+- 当前证书到期：**2027-09-29 09:22:34 UTC（北京时间 17:22:34）**；客户端是否强制验证有效期尚未确认，不依赖该不确定性继续使用。已安排 2027-08-01 09:00（北京时间）续期日程与提醒。续期须同步更新 `CertName`、验证连接、更新备份，避免仅服务器换证导致客户端指纹不匹配。
+- Shadowrocket 内置 Tailscale **没有区域选择选项**。“始终使用 DERP”只禁止直连，不选择区域；保持关闭，避免 Wi-Fi 局域网也绕中继。当前规则分流设置不需改动。
+- 服务器 IP、证书指纹、部署端口等具体值以本机受保护配置及外置备份为准，不在公开仓库新增这些值。
