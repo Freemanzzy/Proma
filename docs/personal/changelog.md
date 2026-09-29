@@ -934,3 +934,10 @@
 - **验证**：定向 Web Remote、安全分级、移动补丁与日志测试通过；全量 Bun 测试 **634 pass / 0 fail / 0 error**（96 files、1,472 assertions）；`bun run typecheck`、`build:main`、`build:renderer`、`build:web-preload` 通过；`node --check scripts/personal/mobile-harness.mjs`、`bash -n scripts/personal/mobile-preview.sh`、`git diff --check` 通过。Renderer 构建保留已有 500 KB 大 chunk 警告。
 - **尚未证明/未完成的验收边界**：本机合成 925 条索引未注入/经 Serve 端到端测试；本轮未逐项操作“新建/改名/归档/删除”并测量每类变更可见延迟，也未做跨 workspace 的真浏览器列表切换 E2E；已有 9 套手机回归、列表权限单测和断线重连套件通过，不能替代以上专项验证。更新延迟目前没有实测数值；正式设备真实 iOS Safari 未测试；实际 WebSocket 线缆字节无法由当前指标取得。
 - **保留开发实例**：`mobile-preview.sh start`、开发端口 17889/8443 与 iPhone 17 Pro 模拟器已启动并配对，供用户体验；harness 自身临时 Chrome/设备授权已清理。未运行打包、安装、合并或 push；未停止正式 Proma，也未修改 Tailscale/DERP/pf。
+
+## 2026-09-29: 手机会话列表同步验收补齐（父会话复核）
+
+- 925 条合成会话（按正式索引字段分布：`piEntryBindings` 48,754 键、`delegationGoal`、`piSessionFile` 等）临时注入开发实例（测试后按标记移除，开发索引与备份逐 ID 一致）。经 Tailscale Serve、0.5 Mbps / 50 ms：首屏 `agent:list-sessions` 1 次，原文 409,409 B、应用层实发 546,201 B（base64 分片 ×4/3）；此后 183.4 s 空闲 0 次、0 B。
+- 新增 harness 套件 `session-sync`（只改本次新建会话）：本端改名 0.2 s 可见；外部（绕过本端渲染状态）改名/新建/删除**不实时**，断线重连后全部正确同步；归档从 active 列表移除；回复探索节点按需读取可用；0 JS 异常。复核代码：被移除的“在线状态上报”轮询从未把列表写入 renderer 状态，外部变更不实时是修复前即有的行为，本批未回退；如需实时应另加主进程会话变更推送事件。
+- 全量回归中 iphone smoke / android attachments（模型未回复）与 iphone heavy-session（加载更早未增加）在长时运行的开发实例上失败；开发实例随后收到外部“Polite quit”退出。重启后三套复跑全部通过。全量 634 pass / 0 fail；typecheck、main/renderer/web-preload 构建通过。
+- `mobile-preview.sh test` 单套超时由 420 s 调为 600 s（idle-session-sync 需 180 s 观察外加配对与清理）。

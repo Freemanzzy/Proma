@@ -168,7 +168,7 @@ run_tests() {
     [[ "$ua" != "$suite" ]] || { name="$suite"; ua=iphone; }
     local test_log="/tmp/proma-mobile-preview-${ua}-${name}.log"
     echo "=== ${ua} / ${name} ==="
-    if ! (cd "$ROOT" && perl -e 'alarm 420; exec @ARGV' env -u http_proxy -u https_proxy -u all_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u HTTP_ALL_PROXY -u HTTPS_ALL_PROXY bun "$agent" --url "$origin" --suite "$name" --user-agent "$ua") >"$test_log" 2>&1; then
+    if ! (cd "$ROOT" && perl -e 'alarm 600; exec @ARGV' env -u http_proxy -u https_proxy -u all_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u HTTP_ALL_PROXY -u HTTPS_ALL_PROXY bun "$agent" --url "$origin" --suite "$name" --user-agent "$ua") >"$test_log" 2>&1; then
       echo "FAIL ${ua}/${name}（日志：${test_log}）"
       tail -n 16 "$test_log" || true
       failed=1

@@ -1114,6 +1114,75 @@ async function runIdleSessionSync(harness, options, result, deviceId) {
   }
 }
 
+async function runSessionSync(harness, options, result) {
+  // 验证停止周期拉取后，会话列表在本端操作与断线重连后仍正确同步（只操作本次新建的会话）。
+  const sidebarHas = (text) => harness.client.evaluate(`(() => {const root=document.querySelector('[data-web-remote-sidebar="left"]');return !!root&&(root.innerText||'').includes(${JSON.stringify(text)})})()`)
+  const waitSidebar = async (text, present, timeoutMs) => {
+    const started = Date.now()
+    while (Date.now() - started < timeoutMs) { if ((await sidebarHas(text)) === present) return Date.now() - started; await delay(200) }
+    return null
+  }
+  const stamp = Date.now()
+  const titleA = `web-remote-sync-a-${stamp}`
+  const titleB = `web-remote-sync-b-${stamp}`
+  const titleC = `web-remote-sync-c-${stamp}`
+  const titleD = `web-remote-sync-d-${stamp}`
+  const steps = {}
+  await harness.openDrawer()
+  const created = await harness.createHarnessSession(titleA)
+  await harness.openDrawer()
+  // 新建会话在首条消息前是草稿，按设计不在侧栏显示（与本批改动无关），只记录
+  steps.draftHiddenBeforeFirstMessage = !(await sidebarHas(titleA))
+  // 本端改名：与侧栏重命名相同的 IPC，并触发标题事件
+  assertOwnedSessionMutation(created.id, harness.getCreatedSessionIds(), '改名')
+  await harness.invokeApi('updateAgentSessionTitle', [created.id, titleB])
+  await harness.client.evaluate(`window.dispatchEvent(new Event('focus'))`)
+  steps.renameVisibleMs = await waitSidebar(titleB, true, 10_000)
+  // 外部改名 + 外部新建（绕过本端渲染状态，模拟桌面/其他设备的操作），随后断线重连恢复
+  await harness.invokeRaw('agent:update-title', [created.id, titleC])
+  const workspaces = await harness.client.evaluate('window.electronAPI.listAgentWorkspaces()')
+  const workspace = workspaces.find((item) => item?.name === '独立站')
+  const external = await harness.invokeRaw('agent:create-session', [titleD, undefined, workspace.id])
+  result.externalSessionId = external?.id
+  const reconnect = async () => {
+    // 关闭当前 /api/ipc 连接，触发 shim 自动重连与 renderer 的 proma-web-remote-reconnected 恢复同步
+    await harness.client.evaluate(`(() => {if(!window.__syncSocketHooked){window.__syncSocketHooked=true;const orig=WebSocket.prototype.send;WebSocket.prototype.send=function(d){if(String(this.url).includes('/api/ipc'))window.__syncIpcSocket=this;return orig.call(this,d)}}return true})()`)
+    await harness.client.evaluate(`window.__PROMA_WEB_REMOTE_INVOKE('agent:count-archived-sessions').catch(()=>null)`)
+    const closed = await harness.client.evaluate(`(() => {const ws=window.__syncIpcSocket;if(!ws)return false;ws.close();return true})()`)
+    if (!closed) throw new Error('未捕获到 /api/ipc 连接，无法模拟重连')
+    await delay(1_500)
+    await harness.openDrawer().catch(() => undefined)
+  }
+  steps.liveRenameVisibleMs = await waitSidebar(titleC, true, 5_000)
+  steps.liveCreateVisibleMs = await waitSidebar(titleD, true, 5_000)
+  await reconnect()
+  steps.afterReconnectRenameVisible = (await waitSidebar(titleC, true, 30_000)) !== null
+  steps.afterReconnectCreateVisible = (await waitSidebar(titleD, true, 30_000)) !== null
+  // 外部删除 + 重连后应从列表消失
+  if (external?.id) {
+    const acceptConfirm = (event) => { if (event.type === 'confirm') void harness.client.command('Page.handleJavaScriptDialog', { accept: true }).catch(() => undefined) }
+    harness.client.on('Page.javascriptDialogOpening', acceptConfirm)
+    try { await harness.invokeApi('deleteAgentSession', [external.id]); steps.externalDeleted = true } catch (error) { steps.externalDeleteError = String(error) }
+    harness.client.off('Page.javascriptDialogOpening', acceptConfirm)
+    steps.liveDeleteGoneMs = await waitSidebar(titleD, false, 5_000)
+    await reconnect()
+    steps.afterReconnectDeleteGone = (await waitSidebar(titleD, false, 30_000)) !== null
+  }
+  // 本端归档：侧栏 active 视图应不再显示
+  await harness.invokeApi('toggleArchiveAgentSession', [created.id])
+  const archived = (await harness.client.evaluate('window.electronAPI.listActiveAgentSessions()')).some((item) => item?.id === created.id)
+  steps.archivedRemovedFromActiveList = !archived
+  await harness.invokeApi('toggleArchiveAgentSession', [created.id])
+  // 回复探索节点按需读取
+  const bindings = await harness.invokeRaw('web-remote:get-session-entry-bindings', [{ sessionId: created.id }]).catch((error) => ({ error: String(error) }))
+  steps.entryBindingsReadable = !!bindings && typeof bindings === 'object' && !bindings.error
+  result.sessionSync = { ...steps, exceptions: harness.exceptions.length }
+  steps.listCallsDuringSuite = (await harness.client.evaluate("fetch('/api/dev/metrics',{credentials:'include'}).then(r=>r.ok?r.json():null)"))?.ipc?.devices ? 'see-metrics' : 'n/a'
+  // 外部（其他客户端/桌面）变更没有推送事件，修复前后都只在重连/运行事件时同步：live* 只记录，不作为失败条件。
+  const failed = steps.renameVisibleMs === null || !steps.afterReconnectRenameVisible || !steps.afterReconnectCreateVisible || (external?.id && !steps.afterReconnectDeleteGone) || !steps.archivedRemovedFromActiveList || !steps.entryBindingsReadable || harness.exceptions.length > 0
+  if (failed) throw new Error(`会话列表同步验收失败：${JSON.stringify(result.sessionSync)}`)
+}
+
 async function runHeavySession(harness, options, result, onSyntheticFileCreated) {
   const baselineMode = process.env.PROMA_WEB_REMOTE_HEAVY_SESSION_BASELINE === '1'
   const title = `web-remote-heavy-session-${Date.now()}`
@@ -1363,6 +1432,7 @@ async function main() {
     else if (options.suite === 'mobile-polish') await runMobilePolishChecks(harness, options, result)
     else if (options.suite === 'heavy-session' || options.suite === 'cellular') await runHeavySession(harness, options, result, (path) => { syntheticFileCleanupPath = path })
     else if (options.suite === 'idle-session-sync') await runIdleSessionSync(harness, options, result, deviceId)
+    else if (options.suite === 'session-sync') await runSessionSync(harness, options, result)
     else if (options.suite === 'media-demo') await runMediaDemo(harness, result)
     else if (options.suite === 'cleanup-synthetic') await runCleanupSynthetic(harness, result)
     else if (options.suite === 'panel-probe') await runPanelProbe(harness, options, result)
