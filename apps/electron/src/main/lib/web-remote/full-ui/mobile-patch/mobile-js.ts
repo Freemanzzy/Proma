@@ -82,6 +82,18 @@ export const MOBILE_JS = String.raw`(function(){
     if(topbar&&!topbar.querySelector('[data-web-remote-refresh]')){
       var refresh=document.createElement('button'); refresh.type='button'; refresh.dataset.webRemoteRefresh='true'; refresh.innerHTML=ICONS.refresh; refresh.setAttribute('aria-label','刷新页面'); refresh.addEventListener('click',function(){window.location.reload()}); topbar.appendChild(refresh);
     }
+    if(topbar&&!topbar.querySelector('[data-web-remote-data-saver]')){
+      var saver=document.createElement('button');saver.type='button';saver.dataset.webRemoteDataSaver='true';saver.setAttribute('aria-pressed','false');
+      saver.addEventListener('click',function(){var current=localStorage.getItem('proma-web-remote-data-saver');var next=current==='on'?'off':'on';try{localStorage.setItem('proma-web-remote-data-saver',next)}catch{};syncDataSaver()});topbar.appendChild(saver);
+    }
+    function syncDataSaver(){
+      var saver=document.querySelector('[data-web-remote-data-saver]');if(!saver)return;
+      var override='';try{override=localStorage.getItem('proma-web-remote-data-saver')||''}catch{}
+      var connection=navigator.connection||navigator.mozConnection||navigator.webkitConnection;
+      var weak=override==='on'||(override!=='off'&&!!connection&&(/^(slow-2g|2g)$/.test(connection.effectiveType||'')||(typeof connection.downlink==='number'&&connection.downlink<1)));
+      setIfChanged(saver,'dataSaverState',weak?'on':'off',function(){saver.textContent=weak?'省流量模式：开':'省流量模式：关';saver.setAttribute('aria-pressed',String(weak));saver.setAttribute('aria-label','切换省流量模式，当前'+(weak?'开启':'关闭'))});
+    }
+    syncDataSaver();
     function syncHistoryMedia(){
       var walker=document.createTreeWalker(document.body,4);
       var nodes=[];var current;

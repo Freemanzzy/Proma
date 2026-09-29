@@ -1079,7 +1079,11 @@ async function runHeavySession(harness, options, result, onSyntheticFileCreated)
   if (syntheticBytes < 30 * 1024 * 1024) throw new Error(`合成大会话不足 30 MiB：${syntheticBytes}`)
   // Move away from the just-created empty snapshot, then reopen it after network throttling is active.
   await harness.createHarnessSession(awayTitle)
-  await harness.client.command('Network.emulateNetworkConditions', { offline: false, latency: 300, downloadThroughput: 3 * 1024 * 1024 / 8, uploadThroughput: 1 * 1024 * 1024 / 8, connectionType: 'cellular3g' })
+  const cellularProfile = options.suite === 'cellular'
+    ? { latency: 50, downloadThroughput: 0.5 * 1024 * 1024 / 8, uploadThroughput: 1 * 1024 * 1024 / 8, connectionType: 'cellular2g' }
+    : { latency: 300, downloadThroughput: 3 * 1024 * 1024 / 8, uploadThroughput: 1 * 1024 * 1024 / 8, connectionType: 'cellular3g' }
+  await harness.client.command('Network.emulateNetworkConditions', { offline: false, ...cellularProfile })
+  if (options.suite === 'cellular') await harness.client.evaluate("localStorage.removeItem('proma-web-remote-data-saver');document.querySelector('[data-web-remote-data-saver]')?.click()")
   const firstFrameIndex = harness.websocketFramesReceived.length
   const firstNetworkIndex = harness.websocketDataReceived.length
   const exceptionStart = harness.exceptions.length
@@ -1101,7 +1105,7 @@ async function runHeavySession(harness, options, result, onSyntheticFileCreated)
     syntheticSessionId: heavy.id,
     syntheticJsonlBytes: syntheticBytes,
     baselineMode,
-    network: { latencyMs: 300, downloadBitsPerSecond: 3 * 1024 * 1024, uploadBitsPerSecond: 1 * 1024 * 1024 },
+    network: { latencyMs: cellularProfile.latency, downloadBitsPerSecond: cellularProfile.downloadThroughput * 8, uploadBitsPerSecond: cellularProfile.uploadThroughput * 8 },
     firstHistoryMs,
     observedThroughMs: Date.now() - startedAt,
     historyVisible,
@@ -1118,7 +1122,8 @@ async function runHeavySession(harness, options, result, onSyntheticFileCreated)
     if (historyVisible && firstHistoryMs !== null && firstHistoryMs < 20_000) throw new Error(`基线对照意外在 20 秒内加载完成：${firstHistoryMs} ms`)
     return
   }
-  if (!historyVisible || firstHistoryMs === null || firstHistoryMs >= 20_000) throw new Error(`大会话首屏历史未在 20 秒内出现：${JSON.stringify(result.heavySession)}`)
+  if (!historyVisible || firstHistoryMs === null || firstHistoryMs >= (options.suite === 'cellular' ? 30_000 : 20_000)) throw new Error(`大会话首屏历史超出预算：${JSON.stringify(result.heavySession)}`)
+  if (options.suite === 'cellular') result.devMetrics = await harness.client.evaluate("fetch('/api/dev/metrics',{credentials:'include'}).then(r=>r.ok?r.json():{status:r.status})")
   const hasEarlier = await harness.client.evaluate(`!!document.querySelector('[data-web-remote-load-earlier]:not([hidden])')`)
   if (!hasEarlier) throw new Error('大会话历史顶部未出现“加载更早”按钮')
   const visibleMessagesBefore = await harness.client.evaluate(`document.querySelectorAll('[data-message-id][data-message-role]').length`)
@@ -1296,7 +1301,7 @@ async function main() {
     result.sessionManifestBefore = await harness.readSessionManifest()
     if (options.suite === 'smoke') await runSmoke(harness, options, result)
     else if (options.suite === 'mobile-polish') await runMobilePolishChecks(harness, options, result)
-    else if (options.suite === 'heavy-session') await runHeavySession(harness, options, result, (path) => { syntheticFileCleanupPath = path })
+    else if (options.suite === 'heavy-session' || options.suite === 'cellular') await runHeavySession(harness, options, result, (path) => { syntheticFileCleanupPath = path })
     else if (options.suite === 'media-demo') await runMediaDemo(harness, result)
     else if (options.suite === 'cleanup-synthetic') await runCleanupSynthetic(harness, result)
     else if (options.suite === 'panel-probe') await runPanelProbe(harness, options, result)
