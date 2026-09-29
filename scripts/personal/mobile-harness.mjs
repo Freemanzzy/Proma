@@ -1065,6 +1065,55 @@ async function waitForVisibleHistoryMarker(client, marker, timeoutMs) {
   return false
 }
 
+async function runIdleSessionSync(harness, options, result, deviceId) {
+  await harness.client.command('Network.emulateNetworkConditions', { offline: false, latency: 50, downloadThroughput: 0.5 * 1024 * 1024 / 8, uploadThroughput: 1 * 1024 * 1024 / 8, connectionType: 'cellular2g' })
+  const initial = await harness.client.evaluate("fetch('/api/dev/metrics',{credentials:'include'}).then(r=>r.ok?r.json():{status:r.status})")
+  const windows = new Map()
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < 180_000) {
+    await delay(5_000)
+    const snapshot = await harness.client.evaluate("fetch('/api/dev/metrics',{credentials:'include'}).then(r=>r.ok?r.json():{status:r.status})")
+    const metricDevice = snapshot?.deviceId || deviceId
+    const device = snapshot?.ipc?.devices?.[metricDevice]
+    if (device) windows.set(String(device.startedAt), device.byChannel?.['agent:list-sessions'] ?? null)
+  }
+  const initialMetricDevice = initial?.deviceId || deviceId
+  const initialDevice = initial?.ipc?.devices?.[initialMetricDevice]
+  const initialWindow = initialDevice ? String(initialDevice.startedAt) : ''
+  const entries = [...windows.entries()].map(([window, metric]) => {
+    const baseline = window === initialWindow ? initialDevice?.byChannel?.['agent:list-sessions'] : null
+    return {
+      calls: Math.max(0, (metric?.calls ?? 0) - (baseline?.calls ?? 0)),
+      responseUtf8Bytes: Math.max(0, (metric?.responseUtf8Bytes ?? 0) - (baseline?.responseUtf8Bytes ?? 0)),
+      appSentBytes: Math.max(0, (metric?.appSentBytes ?? 0) - (baseline?.appSentBytes ?? 0)),
+      bufferedAmountPeak: metric?.bufferedAmountPeak ?? 0,
+    }
+  })
+  const initialList = initialDevice?.byChannel?.['agent:list-sessions']
+  result.idleSessionSync = {
+    initialList: {
+      calls: initialList?.calls ?? 0,
+      responseUtf8Bytes: initialList?.responseUtf8Bytes ?? 0,
+      appFramingBytes: initialList?.appFramingBytes ?? 0,
+      base64PayloadBytes: initialList?.base64PayloadBytes ?? 0,
+      appSentBytes: initialList?.appSentBytes ?? 0,
+      estimatedDeflateRawBytes: initialList?.estimatedDeflateRawBytes ?? 0,
+      bufferedAmountPeak: initialList?.bufferedAmountPeak ?? 0,
+    },
+    elapsedMs: Date.now() - startedAt,
+    network: { latencyMs: 50, downloadBitsPerSecond: 0.5 * 1024 * 1024, uploadBitsPerSecond: 1 * 1024 * 1024 },
+    listRequests: entries.reduce((sum, item) => sum + item.calls, 0),
+    responseUtf8Bytes: entries.reduce((sum, item) => sum + item.responseUtf8Bytes, 0),
+    appSentBytes: entries.reduce((sum, item) => sum + item.appSentBytes, 0),
+    bufferedAmountPeak: Math.max(0, ...entries.map((item) => item.bufferedAmountPeak)),
+    metricWindows: entries.length,
+    exceptions: harness.exceptions.length,
+  }
+  if (result.idleSessionSync.elapsedMs < 180_000 || result.idleSessionSync.listRequests > 0 || result.idleSessionSync.responseUtf8Bytes > 0 || result.idleSessionSync.exceptions > 0) {
+    throw new Error(`空闲列表同步验收失败：${JSON.stringify(result.idleSessionSync)}`)
+  }
+}
+
 async function runHeavySession(harness, options, result, onSyntheticFileCreated) {
   const baselineMode = process.env.PROMA_WEB_REMOTE_HEAVY_SESSION_BASELINE === '1'
   const title = `web-remote-heavy-session-${Date.now()}`
@@ -1313,6 +1362,7 @@ async function main() {
     if (options.suite === 'smoke') await runSmoke(harness, options, result)
     else if (options.suite === 'mobile-polish') await runMobilePolishChecks(harness, options, result)
     else if (options.suite === 'heavy-session' || options.suite === 'cellular') await runHeavySession(harness, options, result, (path) => { syntheticFileCleanupPath = path })
+    else if (options.suite === 'idle-session-sync') await runIdleSessionSync(harness, options, result, deviceId)
     else if (options.suite === 'media-demo') await runMediaDemo(harness, result)
     else if (options.suite === 'cleanup-synthetic') await runCleanupSynthetic(harness, result)
     else if (options.suite === 'panel-probe') await runPanelProbe(harness, options, result)

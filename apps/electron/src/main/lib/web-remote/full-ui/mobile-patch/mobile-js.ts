@@ -229,17 +229,27 @@ export const MOBILE_JS = String.raw`(function(){
     }
     if (!window.__PROMA_PUSH_PRESENCE_INSTALLED) {
       window.__PROMA_PUSH_PRESENCE_INSTALLED=true;
-      var reportPresence=function(){
+      var presenceSession=null; var presenceTitle=''; var presenceLookup=null; var presenceResolved=false;
+      var lookupPresenceSession=function(titleText,requested){
+        if(presenceLookup)return presenceLookup;
+        presenceLookup=Promise.resolve(window.electronAPI?.listAgentSessions?.()).then(function(items){
+          presenceSession=(items||[]).find(function(item){return requested?item.id===requested:item.title===titleText})||null;
+          presenceTitle=titleText; presenceResolved=true; return presenceSession;
+        }).catch(function(){return null}).finally(function(){presenceLookup=null});
+        return presenceLookup;
+      };
+      var reportPresence=function(forceLookup){
         var button=document.querySelector('button[aria-label^="会话菜单："]'); var titleText=button?button.getAttribute('aria-label').replace(/^会话菜单：/,''):'';
         var requested=new URLSearchParams(location.search).get('session');
-        Promise.resolve(window.electronAPI?.listAgentSessions?.()).then(function(items){
-          var session=(items||[]).find(function(item){return requested?item.id===requested:item.title===titleText});
+        var lookup=forceLookup||titleText!==presenceTitle||!presenceResolved;
+        var sessionPromise=lookup?lookupPresenceSession(titleText,requested):Promise.resolve(presenceSession);
+        sessionPromise.then(function(session){
           fetch('/api/push/presence',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:session?.id||null,visible:document.visibilityState==='visible'&&!!session})}).catch(function(){});
-        }).catch(function(){});
+        });
       };
-      document.addEventListener('visibilitychange',reportPresence); window.setInterval(reportPresence,5000); window.addEventListener('popstate',reportPresence);
+      document.addEventListener('visibilitychange',function(){reportPresence(document.visibilityState==='visible')}); window.setInterval(function(){reportPresence(false)},5000); window.addEventListener('popstate',function(){reportPresence(true)});
       var requestedSession=new URLSearchParams(location.search).get('session');
-      if(requestedSession){var tries=0;var selectRequested=function(){Promise.resolve(window.electronAPI?.listAgentSessions?.()).then(function(items){var session=(items||[]).find(function(item){return item.id===requestedSession});if(!session)return;var candidates=Array.from(document.querySelectorAll('button,[role="button"], [data-web-remote-sidebar] *'));var target=candidates.find(function(node){return node.innerText?.trim()===session.title});if(target){target.click();history.replaceState(null,'',location.pathname);setTimeout(reportPresence,800)}else if(tries++<40)setTimeout(selectRequested,250)}).catch(function(){})};setTimeout(selectRequested,500)}
+      if(requestedSession){var tries=0;var requestedMeta=null;var selectRequested=function(){var metadata=requestedMeta?Promise.resolve(requestedMeta):lookupPresenceSession('',requestedSession);metadata.then(function(session){if(!session)return;requestedMeta=session;var candidates=Array.from(document.querySelectorAll('button,[role="button"], [data-web-remote-sidebar] *'));var target=candidates.find(function(node){return node.innerText?.trim()===session.title});if(target){target.click();history.replaceState(null,'',location.pathname);setTimeout(function(){reportPresence(true)},800)}else if(tries++<40)setTimeout(selectRequested,250)}).catch(function(){})};setTimeout(selectRequested,500)}
     }
     if (title) {
       var selectedTab=document.querySelector('[data-web-remote-panel="right"] [role="tab"][aria-selected="true"]');

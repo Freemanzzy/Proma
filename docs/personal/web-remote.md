@@ -133,7 +133,14 @@ harness 默认整体超时 300 秒（可用 `--timeout-ms` 覆盖），每次页
 
 ### Web Remote 计量与开发汇总
 
-开发实例中可由已认证设备读取 `GET /api/dev/metrics` JSON；生产环境不提供该端点。IPC 和静态资源计量均按设备汇总，主日志用 `[INFO]` / `Web Remote 计量` 每 30 秒或连接关闭时输出，内容不含响应正文。IPC 记录通道、序列化响应字节、应用层发送字节（大响应含分片 Base64/JSON 开销）、单帧 `deflateRawSync` 压缩估算、处理耗时、分片数和发送期间采样的 `bufferedAmount` 峰值；由于 `ws` 不暴露 permessage-deflate 后线缆字节，压缩字节为估算，不是实测线缆量。静态资源记录相对路径、原始文件字节、HTTP 实际 Content-Length、编码后字节、估算压缩字节与耗时；304 命中计 0 发送字节。开发端点只保存在运行时内存，不落入用户数据目录。
+开发实例中可由已认证设备读取 `GET /api/dev/metrics` JSON；生产环境不提供该端点。IPC 计量主日志按设备伪名、短时间窗 ID、通道拆成多条短 JSON `[INFO]` 行，正文不含响应内容。字段严格区分：`responseUtf8` 是序列化响应 UTF-8 字节；`appFraming` 与 `base64` 分别是分片 JSON 帧开销和 Base64 payload；`appSent` 是两者合计（或未分片响应字节）；`estimatedDeflateRaw` 是对完整响应单独计算的压缩估算；`wireBytes: null` 明确表示 `ws` API 无法读取 permessage-deflate 后的真实线缆字节，不能把估算称作实测。另记录 calls、累计处理毫秒、分片数及发送期间采样的 `bufferedPeak`。静态资源计量记录相对路径、原始文件字节、HTTP 实际 Content-Length、估算压缩字节与耗时；hash 文件使用 `Cache-Control: public, max-age=31536000, immutable` 与 ETag，非 hash 文件使用 `no-cache` 并支持 304；静态字节计量中的 304 发送字节为 0。开发端点只保存在运行时内存，不落入用户数据目录。
+
+#### 会话列表同步与按需字段
+
+- 完整 UI 目前必须保留全量列表，以支持全部工作区/归档视图、搜索与当前会话定位；不能只下发最近 30 条或截断列表。Web Remote 对 `agent:list-sessions`、`agent:list-active-sessions`、`agent:list-archived-sessions` 均应用移动端 metadata 瘦身，桌面 IPC 不变。
+- 手机列表不再下发 `delegationGoal`、`piSessionFile` 或可能很大的 `piEntryBindings`。`piEntryBindings` 只在用户从一条回复启动“回复探索”时，通过 `web-remote:get-session-entry-bindings` 按目标 session 查询键→true 的最小映射；该接口为 `read/session`，请求须通过既有 session→workspace 授权校验。正式设备行为与跨工作区拒绝仍须按变更记录完成开发实例验收。
+- Push presence 每 5 秒仍需续报，但已解析当前会话 ID 后复用缓存；只有首次解析、会话标题/URL 改变或页面回前台才重查全量列表，不让空闲 heartbeat 周期性重复拉列表。shim 原有同参请求互斥及 3 秒短缓存保留，仅覆盖并发与紧邻重复，不作为长期轮询修复的替代。
+- 以上瘦身不改变完整 session 搜索/加载范围。按需 Pi 节点接口的数据体积取决于单个会话分叉数，尚未给它设置分页上限；若单 session 数据异常大，需用真实使用数据另行评估。
 
 ### WebSocket 压缩（2026-09-29）
 

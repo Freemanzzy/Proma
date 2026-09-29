@@ -152,16 +152,58 @@ describe('Web Remote full-ui security policy', () => {
     expect((await invoke(ws, 'agent:get-sdk-messages', ['s-2'])).error.denied).toBe(true)
   })
 
-  test('手机会话 meta 剔除大字段并将 piEntryBindings 收敛为键到 true', () => {
-    const synthetic = Array.from({ length: 900 }, (_, index) => ({ id: `session-${index}`, title: `title-${index}`, workspaceId: 'ws-1', delegationGoal: 'g'.repeat(300), piSessionFile: `/tmp/${'p'.repeat(60)}`, piEntryBindings: Object.fromEntries(Array.from({ length: 5 }, (_, key) => [`${index}-${'k'.repeat(34)}-${key}`, 'v'.repeat(560)])) }))
+  test('手机会话 meta 剔除运行时大字段，Pi 回复节点映射改为按需读取', () => {
+    const synthetic = Array.from({ length: 925 }, (_, index) => {
+      const bindingIndex = index < 350 ? 19 : index < 385 ? 240 : index === 385 ? 2_372 : index < 698 ? 100 : 132
+      return {
+        id: `${String(index).padStart(4, '0')}-${'i'.repeat(32)}`,
+        title: `Synthetic session ${String(index).padStart(4, '0')}`,
+        workspaceId: 'workspace-synthetic-00000000000000000001',
+        channelId: 'channel-synthetic-000000000000000000001',
+        modelId: 'claude-sonnet-4-5',
+        createdAt: 1_790_000_000_000 + index,
+        updatedAt: 1_790_000_000_000 + index,
+        ...(index < 633 ? { sourceAutomationId: `automation-${String(index).padStart(4, '0')}-${'a'.repeat(24)}` } : {}),
+        ...(index < 194 ? { parentSessionId: `parent-${'p'.repeat(29)}`, rootSessionId: `root-${'r'.repeat(31)}`, sourceDelegationId: `delegation-${'d'.repeat(25)}`, delegationGoal: 'synthetic goal '.padEnd(1_020, 'g'), delegationStatus: 'completed', delegationRole: 'explore', delegationDepth: 1 } : {}),
+        ...(index < 915 ? { stoppedByUser: false } : {}),
+        ...(index < 793 ? { archived: false } : {}),
+        ...(index < 586 ? { agentCwdMode: 'workspace', reasoningLevel: 'high' } : {}),
+        ...(index < 498 ? { sessionWorkbenchLayout: 'split' } : {}),
+        ...(index < 287 ? { completedButUnconfirmed: false } : {}),
+        ...(index < 197 ? { legacyTranscript: { imported: true } } : {}),
+        ...(index < 152 ? { automationGraduated: false } : {}),
+        ...(index < 117 ? { openAIThinkingLevel: 'high' } : {}),
+        ...(index < 95 ? { isDraft: false } : {}),
+        ...(index < 33 ? { starred: false } : {}),
+        ...(index < 28 ? { pinned: false } : {}),
+        ...(index < 14 ? { explorationParentSessionId: `explore-${'e'.repeat(28)}`, explorationSourceMessageId: `message-${'m'.repeat(28)}`, explorationSourceLabel: 'synthetic label' } : {}),
+        ...(index < 15 ? { forkSourceDir: `/synthetic/${'f'.repeat(70)}` } : {}),
+        ...(index < 4 ? { attachedDirectories: ['/synthetic/dir'] } : {}),
+        ...(index < 194 ? { permissionMode: 'bypassPermissions' } : {}),
+        ...(index < 700 ? { piSessionFile: `/synthetic/${'p'.repeat(102)}` } : {}),
+        ...(index < 699 ? { piEntryBindings: Object.fromEntries(Array.from({ length: bindingIndex }, (_, key) => [`${String(index).padStart(4, '0')}-${String(key).padStart(4, '0')}-${'k'.repeat(28)}`, 'entry-id'])) } : {}),
+      }
+    })
     const slim = slimWebRemoteSessionMeta(synthetic) as Array<Record<string, unknown>>
     const before = Buffer.byteLength(JSON.stringify(synthetic))
+    const oldStyleSlim = synthetic.map((row): Record<string, unknown> => {
+      const copy: Record<string, unknown> = { ...row }
+      delete copy.delegationGoal
+      delete copy.piSessionFile
+      const bindings = copy.piEntryBindings
+      if (bindings && typeof bindings === 'object') copy.piEntryBindings = Object.fromEntries(Object.keys(bindings).map((key) => [key, true]))
+      return copy
+    })
+    const oldStyleBytes = Buffer.byteLength(JSON.stringify(oldStyleSlim))
     const after = Buffer.byteLength(JSON.stringify(slim))
-    expect(before).toBeGreaterThan(2_700_000)
-    expect(after).toBeLessThan(300_000)
+    expect(synthetic).toHaveLength(925)
+    expect(before).toBeGreaterThan(3_000_000)
+    expect(oldStyleBytes).toBeGreaterThan(2_400_000)
+    expect(after).toBeGreaterThan(200_000)
+    expect(after).toBeLessThan(600_000)
     expect(slim[0]).not.toHaveProperty('delegationGoal')
     expect(slim[0]).not.toHaveProperty('piSessionFile')
-    expect(slim[0]?.piEntryBindings).toEqual(Object.fromEntries(Object.keys(synthetic[0]!.piEntryBindings).map((key) => [key, true])))
+    expect(slim[0]).not.toHaveProperty('piEntryBindings')
   })
 
   test('IPC metrics aggregate response bytes/count without retaining payload content', async () => {
@@ -171,11 +213,38 @@ describe('Web Remote full-ui security policy', () => {
     const response = await invoke(ws, 'agent:list-sessions')
     expect(response.value[0]).not.toHaveProperty('delegationGoal')
     expect(response.value[0]).not.toHaveProperty('piSessionFile')
-    expect(response.value[0].piEntryBindings).toEqual({ 'message-1': true })
+    expect(response.value[0]).not.toHaveProperty('piEntryBindings')
     const metric = getWebRemoteMetricsSnapshot().devices['device-1']?.byChannel['agent:list-sessions']
     expect(metric).toMatchObject({ calls: 1 })
-    expect(metric?.rawBytes).toBeGreaterThan(0)
+    expect(metric?.responseUtf8Bytes).toBeGreaterThan(0)
+    expect(metric?.appSentBytes).toBeGreaterThan(0)
+    expect(metric?.estimatedDeflateRawBytes).toBeGreaterThan(0)
     expect(JSON.stringify(getWebRemoteMetricsSnapshot())).not.toContain('private text')
+  })
+
+  test('活动与归档会话列表使用与全列表相同的按需元数据瘦身', async () => {
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
+    const rows = [{ id: 's-1', workspaceId: 'ws-1', piEntryBindings: { 'reply-1': 'entry' }, delegationGoal: 'private', piSessionFile: '/private/session' }]
+    bridge.registerInvoke('agent:list-active-sessions', async () => rows)
+    bridge.registerInvoke('agent:list-archived-sessions', async () => rows)
+    const ws = client(bridge)
+    for (const channel of ['agent:list-active-sessions', 'agent:list-archived-sessions']) {
+      const result = await invoke(ws, channel)
+      expect(result.value[0]).not.toHaveProperty('piEntryBindings')
+      expect(result.value[0]).not.toHaveProperty('delegationGoal')
+      expect(result.value[0]).not.toHaveProperty('piSessionFile')
+    }
+  })
+
+  test('按需 Pi 节点查询受 session 工作区授权保护', async () => {
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
+    bridge.registerInvoke('web-remote:get-session-entry-bindings', async (_event, input) => {
+      const sessionId = (input as { sessionId: string }).sessionId
+      return { 'reply-1': sessionId === 's-1' }
+    })
+    const ws = client(bridge)
+    expect((await invoke(ws, 'web-remote:get-session-entry-bindings', [{ sessionId: 's-1' }])).value).toEqual({ 'reply-1': true })
+    expect((await invoke(ws, 'web-remote:get-session-entry-bindings', [{ sessionId: 's-2' }])).error.denied).toBe(true)
   })
 
   test('列表返回按工作区过滤，设置/渠道列表不泄露密钥字段', async () => {

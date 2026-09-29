@@ -98,6 +98,14 @@ describe('renderWebRemoteMobilePatch DOM write convergence', () => {
     expect(document.querySelectorAll('[data-web-remote-history-media]')).toHaveLength(2)
   })
 
+  test('presence 定时心跳不再调用全量列表，解析后复用当前 session id', () => {
+    const source = renderWebRemoteMobilePatch()
+    expect(source).toContain('var presenceSession=null; var presenceTitle=\'\'; var presenceLookup=null; var presenceResolved=false;')
+    expect(source).toContain('var lookup=forceLookup||titleText!==presenceTitle||!presenceResolved;')
+    expect(source).toContain('window.setInterval(function(){reportPresence(false)},5000)')
+    expect(source).not.toContain('window.setInterval(reportPresence,5000)')
+  })
+
   test('无法解析的媒体标记被替换为提示文本，不会在 observer 中反复处理', async () => {
     const { document, observers } = createMobilePatchHarness()
     const text = document.createElement('p'); text.textContent = 'x [[proma-web-remote-media:not_json]] y'; document.body.appendChild(text)

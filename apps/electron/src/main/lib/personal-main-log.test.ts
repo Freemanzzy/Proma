@@ -83,6 +83,34 @@ describe('personal main-process log', () => {
     }
   })
 
+  test('structured Web Remote metric rows survive the INFO writer limit and remain parseable', () => {
+    const root = mkdtempSync(join(tmpdir(), 'proma-main-log-metrics-'))
+    const path = join(root, 'logs', 'main.log')
+    const rows = [
+      { v: 1, w: '0123456789ab', d: '0123456789', c: 'agent:list-sessions', n: 2, ms: 15000 },
+      { v: 1, w: '0123456789ab', d: '0123456789', c: 'agent:list-sessions', responseUtf8: 2670000, appFraming: 2200, base64: 3560000, appSent: 3562200 },
+      { v: 1, w: '0123456789ab', d: '0123456789', c: 'agent:list-sessions', estimatedDeflateRaw: 1100000, wireBytes: null, chunks: 20, bufferedPeak: 3562200 },
+    ]
+    try {
+      setPersonalInfoSink((scope, message) => appendPersonalMainLog(path, 'info', new Date('2026-09-29T00:00:00.000Z'), undefined, undefined, { name: 'Info', scope, message }))
+      for (const row of rows) {
+        const body = JSON.stringify(row)
+        expect(body.length).toBeLessThan(240)
+        recordPersonalInfo('Web Remote 计量', body)
+      }
+      const lines = readFileSync(path, 'utf8').split('\n').filter(Boolean)
+      expect(lines).toHaveLength(3)
+      for (const [index, line] of lines.entries()) {
+        const body = line.match(/ message=(.*)$/)?.[1]
+        expect(body).toBeDefined()
+        expect(JSON.parse(body!)).toEqual(rows[index])
+      }
+    } finally {
+      setPersonalInfoSink(null)
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   test('rotates and keeps logs private', () => {
     const root = mkdtempSync(join(tmpdir(), 'proma-main-log-'))
     const path = join(root, 'logs', 'main.log')

@@ -197,6 +197,14 @@ if (result.heavySession) {
     process.exit(1)
   }
 }
+if (result.idleSessionSync) {
+  const idle = result.idleSessionSync
+  checks.push(`idle=${idle.elapsedMs}ms, listCalls=${idle.listRequests}, appSent=${idle.appSentBytes}B, bufferPeak=${idle.bufferedAmountPeak}B, initialList=${idle.initialList.calls} calls/${idle.initialList.appSentBytes}B`)
+  if (idle.elapsedMs < 180_000 || idle.listRequests !== 0 || idle.responseUtf8Bytes !== 0 || idle.exceptions !== 0) {
+    console.error(`FAIL ${ua}/${suite}: 空闲 session 列表发生重复下发：${JSON.stringify(idle)}`)
+    process.exit(1)
+  }
+}
 if (result.probe) checks.push(`tabs=${result.probe.filter((item) => item.hitIsTab).length}/${result.probe.length}`)
 if (result.attachments) checks.push(`attachments=${result.attachments.textAssistantReplyContainsFirstLine && result.attachments.imageAssistantIdentifiedRed ? 'pass' : 'fail'}`)
 if (result.singleTapChecks) checks.push(`singleTap=${result.singleTapSuccess}/${result.singleTapChecks}`)
