@@ -902,3 +902,10 @@
 - 复核 `097b4e74`/`84ef7aae`/`189446ad`：无上游文件改动；会话列表对手机去掉 `delegationGoal`/`piSessionFile`、`piEntryBindings` 值改 true（合成 900 会话 3.16 MB → 0.29 MB）；并发同参列表请求合并；省流量模式（256 KiB 历史、图片全部点按）；0.5 Mbps 已缓存资源下历史首屏 4.75 s。全量 629 pass。
 - 父会话修复：`/api/dev/metrics` 原以 `NODE_ENV !== 'production'` 判定开发环境，打包主进程未必设置该变量，可能在安装版暴露；改为仅在配置目录为 `.proma-dev` 时提供。
 - 说明：蜂窝慢的根因确认为运营商对直连 UDP 限速（用户确认），降载只是辅助；根治方案（国内自建 DERP + Mac 侧阻断外网直连 UDP）另行推进。
+
+## 2026-09-29: “加载更早”改为顶部小条 + 会话列表 3 秒短缓存
+
+- 用户反馈（OPPO 截图）：“加载更早（已省略 N 条）”固定悬浮在顶栏下方居中，文字折行、遮挡会话标题与正文。
+- 修复（`mobile-js.ts` / `mobile-css.ts`，个人版文件）：改为紧凑单行小条 `[data-web-remote-history-bar]`（“↑ 加载更早 · N 条” + “省流量 开/关”），定位在消息滚动区顶部下方 8 px，**只在消息列表滚到顶部附近（≤ 80 px）时显示**，阅读中不再遮挡；省流量开关从顶栏移入该小条（顶栏保持 4 个图标，避免挤压标题）。点“加载更早”直接用历史元数据中的会话 ID，不再为此拉取整份会话列表。滚动监听用 WeakSet 去重，DOM 写入经 `setIfChanged`。
+- `ipc-request-dedupe.ts`：`agent:list-sessions` 在并发合并之外增加 3 秒成功结果复用（失败不缓存），减少弱网下启动与交互中的重复下载。
+- 验证：全量 630 pass / 0 fail；harness heavy-session（小条 top 112 px 位于顶栏 56 px 之下，宽 223 px 单行）、cellular（0.5 Mbps 首屏 4.3 s）、android smoke、iphone layout 11/11 通过。用户同意跳过开发实例体验，直接随蜂窝批次打包。

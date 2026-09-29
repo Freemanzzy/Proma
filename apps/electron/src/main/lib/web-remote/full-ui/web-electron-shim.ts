@@ -333,7 +333,7 @@ async function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
       throw error
     }
   }
-  if (channel === 'agent:list-sessions') return coalesceRequest(inFlightReadRequests, JSON.stringify([channel, args]), () => invokeWithToken(channel, args))
+  if (channel === 'agent:list-sessions') return coalesceRequest(inFlightReadRequests, JSON.stringify([channel, args]), () => invokeWithToken(channel, args), 3_000)
   try {
     return await invokeWithToken(channel, args)
   } catch (error) {

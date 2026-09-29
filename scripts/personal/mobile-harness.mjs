@@ -1124,6 +1124,11 @@ async function runHeavySession(harness, options, result, onSyntheticFileCreated)
   }
   if (!historyVisible || firstHistoryMs === null || firstHistoryMs >= (options.suite === 'cellular' ? 30_000 : 20_000)) throw new Error(`大会话首屏历史超出预算：${JSON.stringify(result.heavySession)}`)
   if (options.suite === 'cellular') result.devMetrics = await harness.client.evaluate("fetch('/api/dev/metrics',{credentials:'include'}).then(r=>r.ok?r.json():{status:r.status})")
+  // “加载更早”只在消息列表滚到顶部附近时显示，避免遮挡正文。
+  await harness.client.evaluate(`(() => {const m=document.querySelector('[data-message-role]');for(let n=m&&m.parentElement;n&&n!==document.body;n=n.parentElement){const s=getComputedStyle(n);if(/(auto|scroll)/.test(s.overflowY)&&n.scrollHeight>n.clientHeight+4){n.scrollTop=0;n.dispatchEvent(new Event('scroll'));return true}}return false})()`)
+  await waitUntil(harness.client, `!!document.querySelector('[data-web-remote-history-bar]:not([hidden]) [data-web-remote-load-earlier]:not([hidden])')`, 10_000).catch(() => undefined)
+  result.heavySession.historyBar = await harness.client.evaluate(`(() => {const bar=document.querySelector('[data-web-remote-history-bar]');const b=bar&&bar.getBoundingClientRect();const top=document.querySelector('[data-web-remote-mobile-topbar]')?.getBoundingClientRect();return bar?{hidden:bar.hidden,top:Math.round(b.top),height:Math.round(b.height),width:Math.round(b.width),topbarBottom:top?Math.round(top.bottom):null,text:bar.innerText}:null})()`)
+  if (result.heavySession.historyBar && result.heavySession.historyBar.topbarBottom !== null && result.heavySession.historyBar.top < result.heavySession.historyBar.topbarBottom) throw new Error(`加载更早条与顶栏重叠：${JSON.stringify(result.heavySession.historyBar)}`)
   const hasEarlier = await harness.client.evaluate(`!!document.querySelector('[data-web-remote-load-earlier]:not([hidden])')`)
   if (!hasEarlier) throw new Error('大会话历史顶部未出现“加载更早”按钮')
   const visibleMessagesBefore = await harness.client.evaluate(`document.querySelectorAll('[data-message-id][data-message-role]').length`)
