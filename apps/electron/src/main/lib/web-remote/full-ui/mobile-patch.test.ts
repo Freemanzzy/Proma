@@ -98,6 +98,14 @@ describe('renderWebRemoteMobilePatch DOM write convergence', () => {
     expect(document.querySelectorAll('[data-web-remote-history-media]')).toHaveLength(2)
   })
 
+  test('无法解析的媒体标记被替换为提示文本，不会在 observer 中反复处理', async () => {
+    const { document, observers } = createMobilePatchHarness()
+    const text = document.createElement('p'); text.textContent = 'x [[proma-web-remote-media:not_json]] y'; document.body.appendChild(text)
+    for (let index = 0; index < 5; index++) observers[0]!.trigger()
+    expect(document.body.textContent).not.toContain('[[proma-web-remote-')
+    expect(document.body.textContent).toContain('图片标记无法解析')
+  })
+
   test('repeated ensure/sync callbacks stop writing toolbar icons, notification, title, dropdown, and layout', async () => {
     const { document, writes, observers, resolveSubscription } = createMobilePatchHarness()
     resolveSubscription({ ok: true, json: async () => ({ subscribed: true }) })

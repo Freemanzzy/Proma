@@ -861,3 +861,8 @@
 - 增加 `media-demo` harness suite，并在开发实例保留“手机图片演示”会话。
 - 在 `~/.proma-dev` 保留一条全合成演示会话“手机图片演示”（JSONL **465,051 B**，小图 111 B、大图 307,384 B、长文本 54,024 B），经 harness 重载后历史首条可见。其它本轮合成大会话/会话已清理；开发实例工作区中原有记录未改。
 - 未运行 `install-update.sh`、未打包/push/合并；未触碰正式 `~/.proma` 或已安装 Proma 进程。
+
+## 2026-09-29: 父会话复核历史图片批次
+
+- 复核 `5af07180`：上游文件 0 行改动；新通道 `web-remote:get-history-media` 分级 read/session；全量 623 pass。
+- 父会话修复：`mobile-js.ts` 中标记载荷解析失败时原样放回 `[[proma-web-remote-…]]` 文本，会被 MutationObserver 反复命中并替换（潜在死循环）；改为替换为“标记无法解析，请在桌面查看”提示。新增单测；全量 624 pass / 0 fail。

@@ -90,7 +90,7 @@ export const MOBILE_JS = String.raw`(function(){
         var text=node.nodeValue||'';var pattern=/\[\[proma-web-remote-(media|text):([A-Za-z0-9_-]+)\]\]([^\[]*)/g;var match;var fragment=document.createDocumentFragment();var offset=0;var found=false;
         while((match=pattern.exec(text))){
           found=true;if(match.index>offset)fragment.appendChild(document.createTextNode(text.slice(offset,match.index)));
-          var kind=match[1];var payload;try{payload=JSON.parse(atob(match[2].replace(/-/g,'+').replace(/_/g,'/').padEnd(Math.ceil(match[2].length/4)*4,'=')))}catch{fragment.appendChild(document.createTextNode(match[0]));offset=pattern.lastIndex;continue}
+          var kind=match[1];var payload;try{payload=JSON.parse(atob(match[2].replace(/-/g,'+').replace(/_/g,'/').padEnd(Math.ceil(match[2].length/4)*4,'=')))}catch{fragment.appendChild(document.createTextNode(kind==='media'?'[图片标记无法解析，请在桌面查看]':'[原文标记无法解析，请在桌面查看]'));offset=pattern.lastIndex;continue}
           var holder=document.createElement('span');holder.dataset.webRemoteHistoryMedia='true';holder.dataset.mediaKind=kind;holder.dataset.mediaState='idle';holder.style.cssText='display:inline-flex;flex-direction:column;align-items:flex-start;gap:6px;max-width:100%;vertical-align:middle';
           if(kind==='media'&&typeof payload.inlineData==='string'){
             var inlineImage=document.createElement('img');inlineImage.dataset.webRemoteInlineImage='true';inlineImage.alt='历史图片';inlineImage.style.cssText='display:block;max-width:100%;height:auto;border-radius:8px';inlineImage.src='data:'+(payload.mime||'image/*')+';base64,'+payload.inlineData;
