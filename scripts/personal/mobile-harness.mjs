@@ -1034,15 +1034,20 @@ async function runMobilePolishChecks(harness, options, result) {
 function createSyntheticHeavyHistory(roundCount = 500) {
   const lines = []
   const visibleMarker = 'SYNTHETIC_HEAVY_HISTORY_VISIBLE_MARKER'
+  const svgImage = (padding = '') => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="#d22"/><!--${padding}--></svg>`).toString('base64')
+  const smallImage = svgImage()
+  const largeImage = svgImage('L'.repeat(300 * 1024))
   for (let index = 0; index < roundCount; index++) {
     const callId = `synthetic-tool-${index}`
     const payload = randomBytes(48 * 1024).toString('base64')
     const userText = index === roundCount - 1 ? `${visibleMarker} round=${index}` : `SYNTHETIC_USER round=${index}`
-    const imageBlocks = index % 50 === 0 || index === roundCount - 1 ? [{ type: 'image', source: { media_type: 'image/png', data: randomBytes(16 * 1024).toString('base64') } }] : []
+    const imageBlocks = index % 50 === 0 || index === roundCount - 1
+      ? [{ type: 'image', source: { media_type: 'image/svg+xml', data: smallImage } }, ...(index === roundCount - 1 ? [{ type: 'image', source: { media_type: 'image/svg+xml', data: smallImage } }, { type: 'image', source: { media_type: 'image/svg+xml', data: largeImage } }] : [])]
+      : []
     const messages = [
       { type: 'user', uuid: `synthetic-user-${index}`, message: { role: 'user', content: [{ type: 'text', text: userText }, ...imageBlocks] }, parent_tool_use_id: null },
-      { type: 'assistant', uuid: `synthetic-assistant-call-${index}`, message: { role: 'assistant', content: [{ type: 'tool_use', id: callId, name: 'Read', input: { file_path: 'synthetic-heavy-session.txt' } }] }, parent_tool_use_id: null },
-      { type: 'user', uuid: `synthetic-tool-result-${index}`, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: callId, content: `SYNTHETIC_TOOL_RESULT_${index} ${payload}` }] }, parent_tool_use_id: null },
+      { type: 'assistant', uuid: `synthetic-assistant-call-${index}`, message: { role: 'assistant', content: [{ type: 'tool_use', id: callId, name: 'Synthetic', input: { file_path: 'synthetic-heavy-session.txt' } }] }, parent_tool_use_id: null },
+      { type: 'user', uuid: `synthetic-tool-result-${index}`, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: callId, content: [{ type: 'text', text: `SYNTHETIC_TOOL_RESULT_${index} ${payload}` }] }] }, parent_tool_use_id: null },
       { type: 'assistant', uuid: `synthetic-assistant-final-${index}`, message: { role: 'assistant', content: [{ type: 'text', text: `SYNTHETIC_ASSISTANT_REPLY round=${index}` }] }, parent_tool_use_id: null },
     ]
     for (const message of messages) lines.push(JSON.stringify(message))
@@ -1126,29 +1131,43 @@ async function runHeavySession(harness, options, result, onSyntheticFileCreated)
   if (!executionSummary) throw new Error('合成大会话中没有可展开的工具调用组')
   await touchAt(harness.client, executionSummary.x, executionSummary.y)
   await waitUntil(harness.client, `document.body.innerText.includes('synthetic-heavy-session.txt')`, 10_000)
-  const toolButton = await harness.client.evaluate(`(() => {const nodes=[...document.querySelectorAll('button')];const matches=nodes.filter((item)=>(item.innerText||'').includes('synthetic-heavy-session.txt'));const node=matches.at(-1)||nodes.filter((item)=>(item.innerText||'').includes('读取文件')).at(-1);if(!node)return {missing:true,buttons:nodes.map((item)=>(item.innerText||'').trim()).filter(Boolean).slice(-40),bodyIncludesFile:document.body.innerText.includes('synthetic-heavy-session.txt')};node.scrollIntoView({block:'center'});const r=node.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2,label:(node.innerText||'').trim()}})()`)
+  const toolButton = await harness.client.evaluate(`(() => {const nodes=[...document.querySelectorAll('button')];const matches=nodes.filter((item)=>(item.innerText||'').includes('synthetic-heavy-session.txt'));const node=matches.at(-1)||nodes.filter((item)=>(item.innerText||'').includes('Synthetic')).at(-1);if(!node)return {missing:true,buttons:nodes.map((item)=>(item.innerText||'').trim()).filter(Boolean).slice(-40),bodyIncludesFile:document.body.innerText.includes('synthetic-heavy-session.txt')};node.scrollIntoView({block:'center'});const r=node.getBoundingClientRect();return {x:r.left+Math.min(50,r.width/3),y:r.top+r.height/2,label:(node.innerText||'').trim()}})()`)
   if (!toolButton || toolButton.missing) throw new Error(`无法定位 Read 工具结果按钮：${JSON.stringify(toolButton)}`)
   result.heavySession.expandedToolLabel = toolButton.label
   await touchAt(harness.client, toolButton.x, toolButton.y)
   const expandAll = await harness.client.evaluate(`(() => {const node=[...document.querySelectorAll('button')].filter((item)=>(item.innerText||'').includes('展开全部')).at(-1);if(!node)return null;node.scrollIntoView({block:'center'});const r=node.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`)
   if (expandAll) await touchAt(harness.client, expandAll.x, expandAll.y)
-  const copyProof = await harness.client.evaluate(`window.electronAPI.getAgentSessionSDKMessages(${quoteJs(heavy.id)}).then(messages=>{const all=Array.isArray(messages)?messages:[];const blocks=all.flatMap(message=>Array.isArray(message?.message?.content)?message.message.content:[]);const toolResult=blocks.find(block=>block?.type==='tool_result'&&typeof block.content==='string'&&block.content.includes('内容已截断，原文'));const image=blocks.find(block=>block?.type==='text'&&typeof block.text==='string'&&block.text.includes('图片已省略：image/png'));return {truncationCopy:!!toolResult,imageCopy:!!image,toolResultPreview:toolResult?.content?.slice(-100),imagePreview:image?.text}})`)
+  const copyProof = await harness.client.evaluate(`window.electronAPI.getAgentSessionSDKMessages(${quoteJs(heavy.id)}).then(messages=>{const all=Array.isArray(messages)?messages:[];const blocks=all.flatMap(message=>Array.isArray(message?.message?.content)?message.message.content:[]);const toolResult=blocks.find(block=>block?.type==='tool_result');const text=toolResult&&Array.isArray(toolResult.content)?toolResult.content.find(item=>item?.type==='text'&&typeof item.text==='string'&&item.text.includes('SYNTHETIC_TOOL_RESULT_')):null;const media=blocks.filter(block=>block?.type==='text'&&typeof block.text==='string'&&block.text.includes('proma-web-remote-media:')).map(block=>{const prefix='[[proma-web-remote-media:';const start=block.text.indexOf(prefix);const end=start>=0?block.text.indexOf(']]',start):-1;const token=start>=0&&end>start?block.text.slice(start+prefix.length,end):null;return token?JSON.parse(atob(token.replace(/-/g,'+').replace(/_/g,'/').padEnd(Math.ceil(token.length/4)*4,'='))):null}).filter(Boolean);return {longToolResultBytes:text?new TextEncoder().encode(text.text).length:0,textMarkerPresent:!!text?.text?.includes('proma-web-remote-text'),mediaMarkerCount:media.length,inlineMediaCount:media.filter(item=>typeof item.inlineData==='string').length,mediaBytes:media.map(item=>item.bytes)}})`)
   result.heavySession.transformedCopyProof = copyProof
   const resultExpanded = await harness.client.evaluate(`document.body.innerText.includes('收起')`)
-  const truncationTextVisible = copyProof.truncationCopy && resultExpanded
+  await harness.client.evaluate(`(() => {const nodes=document.querySelectorAll('[data-message-id][data-message-role]');nodes[nodes.length-1]?.scrollIntoView({block:'center'})})()`)
+  await delay(350)
+  result.heavySession.mediaDomProbe = await harness.client.evaluate(`(() => ({mediaMarker:(document.body.innerText||'').includes('proma-web-remote-media'),textMarker:(document.body.innerText||'').includes('proma-web-remote-text'),mediaCards:document.querySelectorAll('[data-web-remote-history-media]').length,buttons:[...document.querySelectorAll('button')].map(node=>(node.innerText||'').trim()).filter(text=>text.includes('图片')||text.includes('点按')).slice(-12),tail:(document.body.innerText||'').slice(-800)}))()`)
+  const expandOriginalButton = await harness.client.evaluate(`(() => {const node=[...document.querySelectorAll('button')].find(item=>(item.innerText||'').includes('点按查看完整内容'));if(!node)return null;node.scrollIntoView({block:'center'});const r=node.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`)
+  if (!expandOriginalButton) throw new Error('未显示截断原文的按需展开按钮')
+  const originalBeforeLength = await harness.client.evaluate(`document.body.innerText.length`)
+  await touchAt(harness.client, expandOriginalButton.x, expandOriginalButton.y)
+  await waitUntil(harness.client, `document.body.innerText.length>${originalBeforeLength + 10}`, 10_000)
+  result.heavySession.expandedToolResultTextLength = await harness.client.evaluate(`document.querySelectorAll('[data-web-remote-expanded-text]').length ? document.querySelectorAll('[data-web-remote-expanded-text]')[0].textContent.length : 0`)
+  const truncationTextVisible = copyProof.longToolResultBytes > 16 * 1024 && resultExpanded && result.heavySession.expandedToolResultTextLength > 16 * 1024
   if (!truncationTextVisible) {
     result.heavySession.visibleTextAfterToolExpand = await harness.client.evaluate(`document.body.innerText.slice(-2200)`)
     result.screenshots.push(await harness.screenshot('heavy-tool-result'))
-    throw new Error(`展开 Read 结果后未能证明截断文案已渲染：${JSON.stringify(copyProof)}`)
+    throw new Error(`展开 Read 结果后未能取得完整原文：${JSON.stringify({ copyProof, expandedLength: result.heavySession.expandedToolResultTextLength })}`)
   }
-  const imagePlaceholderVisible = copyProof.imageCopy && await harness.client.evaluate(`(document.body.innerText+'\\n'+document.body.textContent).includes('图片已省略：image/png')`)
-  if (!imagePlaceholderVisible) throw new Error(`大会话页面未显示图片占位文案：${JSON.stringify(copyProof)}`)
-  const imagePlaceholderPoint = await harness.client.evaluate(`(() => {const node=[...document.querySelectorAll('[data-message-id][data-message-role]')].find((item)=>(item.textContent||'').includes('图片已省略：image/png'));if(!node)return null;node.scrollIntoView({block:'center'});const r=node.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2,top:r.top,bottom:r.bottom}})()`)
-  if (!imagePlaceholderPoint) throw new Error('图片占位消息未出现在已渲染的对话 DOM 中')
-  await delay(300)
-  const imagePlaceholderInViewport = await harness.client.evaluate(`(() => {const node=[...document.querySelectorAll('[data-message-id][data-message-role]')].find((item)=>(item.textContent||'').includes('图片已省略：image/png'));if(!node)return false;const r=node.getBoundingClientRect();return r.bottom>0&&r.top<innerHeight})()`)
-  if (!imagePlaceholderInViewport) throw new Error(`图片占位消息未滚动到视口：${JSON.stringify(imagePlaceholderPoint)}`)
-  result.screenshots.push(await harness.screenshot('heavy-image-placeholder-visible'))
+  const imagePlaceholderVisible = copyProof.mediaMarkerCount > 0 && await harness.client.evaluate(`[...document.querySelectorAll('button')].some(node=>(node.innerText||'').includes('图片 ·')&&(node.innerText||'').includes('点按加载'))`)
+  if (!imagePlaceholderVisible) throw new Error(`大会话页面未显示图片按需加载卡片：${JSON.stringify(copyProof)}`)
+  const inlineImage = await harness.client.evaluate(`(() => {const image=[...document.querySelectorAll('[data-message-id][data-message-role] img[data-web-remote-inline-image]')].find(node=>node.naturalWidth>0);if(!image)return null;image.scrollIntoView({block:'center'});return {naturalWidth:image.naturalWidth,naturalHeight:image.naturalHeight}})()`)
+  if (!inlineImage || inlineImage.naturalWidth <= 0) throw new Error('小图未以内联 <img> 正常显示')
+  result.heavySession.inlineImage = inlineImage
+  const imageButton = await harness.client.evaluate(`(() => {const node=[...document.querySelectorAll('button')].find(item=>(item.innerText||'').includes('图片 ·')&&(item.innerText||'').includes('点按加载'));if(!node)return null;node.scrollIntoView({block:'center'});const r=node.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`)
+  if (!imageButton) throw new Error('无法定位大图按需加载卡片')
+  await touchAt(harness.client, imageButton.x, imageButton.y)
+  await waitUntil(harness.client, `(() => [...document.querySelectorAll('[data-web-remote-history-media] img')].some(image=>image.complete&&image.naturalWidth>0))()`, 10_000)
+  const loadedImage = await harness.client.evaluate(`(() => {const image=[...document.querySelectorAll('[data-web-remote-history-media] img')].find(node=>node.naturalWidth>0);return image?{naturalWidth:image.naturalWidth,naturalHeight:image.naturalHeight}:null})()`)
+  if (!loadedImage || loadedImage.naturalWidth <= 0) throw new Error('点按后大图没有成功显示')
+  result.heavySession.loadedImage = loadedImage
+  result.screenshots.push(await harness.screenshot('heavy-image-loaded'))
   result.screenshots.push(await harness.screenshot('heavy-history-copy-visible'))
   result.heavySession.truncationTextVisible = true
   result.heavySession.imagePlaceholderVisible = true
@@ -1157,6 +1176,52 @@ async function runHeavySession(harness, options, result, onSyntheticFileCreated)
   if (result.heavySession.exceptions !== 0) throw new Error(`大会话页面出现 JS exception：${JSON.stringify(exceptionsDuringTest)}`)
   if (!frameEvents.some((item) => item.payloadBytes > 16 * 1024)) throw new Error('未捕获到大于 16 KB 的 WebSocket 接收帧')
   result.heavySession.largeDecodedFrameObserved = true
+}
+
+async function runCleanupSynthetic(harness, result) {
+  const ids = (process.env.PROMA_WEB_REMOTE_CLEANUP_SESSION_IDS || '').split(',').map((id) => id.trim()).filter(Boolean)
+  if (ids.length === 0 || ids.some((id) => !/^[a-f0-9-]{36}$/i.test(id))) throw new Error('cleanup-synthetic 需要显式传入合成 session UUID 列表')
+  const manifest = await harness.readSessionManifest()
+  result.explicitCleanupSessionIds = []
+  const acceptDeleteConfirm = (event) => { if (event.type === 'confirm') void harness.client.command('Page.handleJavaScriptDialog', { accept: true }).catch(() => {}) }
+  harness.client.on('Page.javascriptDialogOpening', acceptDeleteConfirm)
+  try {
+    for (const id of ids) {
+      const session = manifest.find((item) => item.id === id)
+      if (!session || !/^web-remote-heavy-(?:session|away)-\d+$/.test(session.title)) throw new Error(`目标不是本次格式的合成大会话，拒绝删除：${id}`)
+      await harness.invokeApi('deleteAgentSession', [id])
+      await waitUntil(harness.client, `window.electronAPI.listAgentSessions().then(items=>!(items||[]).some(item=>item?.id===${quoteJs(id)}))`, 15_000)
+      result.explicitCleanupSessionIds.push(id)
+    }
+  } finally { harness.client.off('Page.javascriptDialogOpening', acceptDeleteConfirm) }
+}
+
+async function runMediaDemo(harness, result) {
+  const title = '手机图片演示'
+  const existing = await harness.client.evaluate(`window.electronAPI.listAgentSessions().then(items=>(items||[]).find(item=>item?.title===${quoteJs(title)}))`)
+  const session = existing ?? await harness.createHarnessSession(title)
+  const messagesPath = join(homedir(), '.proma-dev', 'agent-sessions', `${session.id}.jsonl`)
+  if (!messagesPath.startsWith(join(homedir(), '.proma-dev', 'agent-sessions') + '/')) throw new Error('拒绝写入开发会话目录以外的文件')
+  if (existing && (!existsSync(messagesPath) || !readFileSync(messagesPath, 'utf8').includes('synthetic-media-demo-user'))) throw new Error('发现同名非本任务合成演示会话，拒绝覆盖')
+  const smallImage = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="#d22"/></svg>').toString('base64')
+  const largeImage = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120"><rect width="160" height="120" fill="#2670d8"/><text x="12" y="64" fill="white" font-size="16">Demo</text><!--${'D'.repeat(300 * 1024)}--></svg>`).toString('base64')
+  const toolId = 'synthetic-media-demo-tool'
+  const rows = [
+    { type: 'user', uuid: 'synthetic-media-demo-user', message: { role: 'user', content: [{ type: 'text', text: '手机图片演示：小图应直接显示，大图可点按加载。' }, { type: 'image', source: { media_type: 'image/svg+xml', data: smallImage } }, { type: 'image', source: { media_type: 'image/svg+xml', data: largeImage } }] }, parent_tool_use_id: null },
+    { type: 'assistant', uuid: 'synthetic-media-demo-call', message: { role: 'assistant', content: [{ type: 'tool_use', id: toolId, name: 'Synthetic', input: { label: '长文本演示' } }] }, parent_tool_use_id: null },
+    { type: 'user', uuid: 'synthetic-media-demo-result', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolId, content: [{ type: 'text', text: `长工具结果演示：${'这是一段用于点按展开测试的合成原文。'.repeat(1_000)}` }] }] }, parent_tool_use_id: null },
+    { type: 'assistant', uuid: 'synthetic-media-demo-answer', message: { role: 'assistant', content: [{ type: 'text', text: '演示会话：检查小图直显、大图点按加载与长文本点按展开。' }] }, parent_tool_use_id: null },
+  ]
+  const data = `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`
+  const bytes = Buffer.byteLength(data, 'utf8')
+  if (bytes > 3 * 1024 * 1024) throw new Error(`演示会话超过 3 MB：${bytes}`)
+  writeFileSync(messagesPath, data, { encoding: 'utf8', flag: 'w' })
+  result.preserveHarnessSessionIds = [session.id]
+  result.mediaDemo = { sessionId: session.id, title, jsonlBytes: bytes, smallImageBytes: Buffer.from(smallImage, 'base64').byteLength, largeImageBytes: Buffer.from(largeImage, 'base64').byteLength, longTextBytes: Buffer.byteLength(rows[2].message.content[0].content[0].text, 'utf8') }
+  await harness.navigate('/app/')
+  await harness.openSession(title)
+  result.mediaDemo.visibleInHarness = await waitForVisibleHistoryMarker(harness.client, '手机图片演示：', 10_000)
+  if (!result.mediaDemo.visibleInHarness) throw new Error('演示会话已保存，但页面没有显示合成历史首条消息')
 }
 
 async function runSmoke(harness, options, result) {
@@ -1232,6 +1297,8 @@ async function main() {
     if (options.suite === 'smoke') await runSmoke(harness, options, result)
     else if (options.suite === 'mobile-polish') await runMobilePolishChecks(harness, options, result)
     else if (options.suite === 'heavy-session') await runHeavySession(harness, options, result, (path) => { syntheticFileCleanupPath = path })
+    else if (options.suite === 'media-demo') await runMediaDemo(harness, result)
+    else if (options.suite === 'cleanup-synthetic') await runCleanupSynthetic(harness, result)
     else if (options.suite === 'panel-probe') await runPanelProbe(harness, options, result)
     else if (options.suite === 'layout') await runLayout(harness, options, result)
     else if (options.suite === 'push') await runPush(harness, options, result)
@@ -1291,7 +1358,8 @@ async function main() {
       const beforeDelete = await harness.readSessionManifest()
       harnessSessionCleanup.beforeIds = beforeDelete.map((session) => session.id)
       const createdIds = harness.getCreatedSessionIds()
-      const createdBeforeDelete = beforeDelete.filter((session) => createdIds.has(session.id)).map((session) => session.id)
+      const preserveIds = new Set(result.preserveHarnessSessionIds ?? [])
+      const createdBeforeDelete = beforeDelete.filter((session) => createdIds.has(session.id) && !preserveIds.has(session.id)).map((session) => session.id)
       const acceptDeleteConfirm = (event) => {
         if (event.type === 'confirm') void harness.client.command('Page.handleJavaScriptDialog', { accept: true }).catch((error) => harnessSessionCleanup.errors.push(String(error)))
       }
@@ -1336,7 +1404,8 @@ async function main() {
         unchanged: JSON.stringify(before) === JSON.stringify(afterById.get(before.id) ?? null),
       }))
       result.createdHarnessSessionIds = [...createdIds]
-      const changed = result.existingSessionManifestComparison.filter((item) => !item.unchanged)
+      const intentionallyDeleted = new Set(result.explicitCleanupSessionIds ?? [])
+      const changed = result.existingSessionManifestComparison.filter((item) => !item.unchanged && !intentionallyDeleted.has(item.id))
       if (changed.length > 0 && !result.error) result.error = `已有会话标题/权限模式发生变化: ${JSON.stringify(changed)}`
     } catch (error) {
       result.sessionManifestError = String(error)

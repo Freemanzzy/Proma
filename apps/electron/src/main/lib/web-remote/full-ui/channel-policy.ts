@@ -18,7 +18,7 @@ const EXPORTED_CHANNELS = new Set<string>([
   ...channelValues(UPDATER_IPC_CHANNELS),
 ])
 
-const RUNTIME_LITERAL_CHANNELS = new Set(['file:exists-batch', 'file:office-to-html', 'file:prepare-pdf-preview', 'file:read-binary-base64', 'file:resolve-and-read', 'file:resolve-html-preview-path', 'file:resolve-markdown-media', 'file:resolve-path', 'file:write-text', 'migration:open-data-folder', 'web-remote:admin-get', 'web-remote:admin-save', 'web-remote:admin-pair', 'web-remote:admin-revoke', 'web-remote:admin-push-test', 'web-remote:admin-push-delete'])
+const RUNTIME_LITERAL_CHANNELS = new Set(['file:exists-batch', 'file:office-to-html', 'file:prepare-pdf-preview', 'file:read-binary-base64', 'file:resolve-and-read', 'file:resolve-html-preview-path', 'file:resolve-markdown-media', 'file:resolve-path', 'file:write-text', 'migration:open-data-folder', 'web-remote:admin-get', 'web-remote:admin-save', 'web-remote:admin-pair', 'web-remote:admin-revoke', 'web-remote:admin-push-test', 'web-remote:admin-push-delete', 'web-remote:get-history-media'])
 
 /** Explicit reviewed table. Do not replace this with runtime regex inference. */
 export const WEB_REMOTE_CHANNEL_POLICY: Readonly<Record<string, WebRemoteChannelPolicyEntry>> = Object.freeze({
@@ -28,6 +28,7 @@ export const WEB_REMOTE_CHANNEL_POLICY: Readonly<Record<string, WebRemoteChannel
   "web-remote:admin-revoke": { level: "denied", scope: "none", rationale: "仅桌面远程连接设置使用，手机禁止撤销设备。" },
   "web-remote:admin-push-test": { level: "denied", scope: "none", rationale: "仅桌面设置发送测试通知，手机桥接禁止调用。" },
   "web-remote:admin-push-delete": { level: "denied", scope: "none", rationale: "仅桌面设置删除手机推送订阅，手机桥接禁止调用。" },
+  "web-remote:get-history-media": { level: "read", scope: "session", rationale: "只读取指定已授权会话内、经消息摘要与路径校验的单张图片或完整 tool_result 文本。" },
   "simulator:list": { level: "denied", scope: "none", rationale: "读取本机 macOS 模拟器设备信息，仅桌面可用。" },
   "simulator:start": { level: "denied", scope: "none", rationale: "控制本机模拟器并启动本地预览服务，手机端禁止。" },
   "simulator:stop": { level: "denied", scope: "none", rationale: "停止本机模拟器预览服务，手机端禁止。" },

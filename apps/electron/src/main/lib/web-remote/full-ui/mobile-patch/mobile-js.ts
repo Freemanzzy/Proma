@@ -82,6 +82,42 @@ export const MOBILE_JS = String.raw`(function(){
     if(topbar&&!topbar.querySelector('[data-web-remote-refresh]')){
       var refresh=document.createElement('button'); refresh.type='button'; refresh.dataset.webRemoteRefresh='true'; refresh.innerHTML=ICONS.refresh; refresh.setAttribute('aria-label','刷新页面'); refresh.addEventListener('click',function(){window.location.reload()}); topbar.appendChild(refresh);
     }
+    function syncHistoryMedia(){
+      var walker=document.createTreeWalker(document.body,4);
+      var nodes=[];var current;
+      while((current=walker.nextNode()))if((current.nodeValue||'').includes('[[proma-web-remote-'))nodes.push(current);
+      nodes.forEach(function(node){
+        var text=node.nodeValue||'';var pattern=/\[\[proma-web-remote-(media|text):([A-Za-z0-9_-]+)\]\]([^\[]*)/g;var match;var fragment=document.createDocumentFragment();var offset=0;var found=false;
+        while((match=pattern.exec(text))){
+          found=true;if(match.index>offset)fragment.appendChild(document.createTextNode(text.slice(offset,match.index)));
+          var kind=match[1];var payload;try{payload=JSON.parse(atob(match[2].replace(/-/g,'+').replace(/_/g,'/').padEnd(Math.ceil(match[2].length/4)*4,'=')))}catch{fragment.appendChild(document.createTextNode(match[0]));offset=pattern.lastIndex;continue}
+          var holder=document.createElement('span');holder.dataset.webRemoteHistoryMedia='true';holder.dataset.mediaKind=kind;holder.dataset.mediaState='idle';holder.style.cssText='display:inline-flex;flex-direction:column;align-items:flex-start;gap:6px;max-width:100%;vertical-align:middle';
+          if(kind==='media'&&typeof payload.inlineData==='string'){
+            var inlineImage=document.createElement('img');inlineImage.dataset.webRemoteInlineImage='true';inlineImage.alt='历史图片';inlineImage.style.cssText='display:block;max-width:100%;height:auto;border-radius:8px';inlineImage.src='data:'+(payload.mime||'image/*')+';base64,'+payload.inlineData;
+            inlineImage.addEventListener('load',function(){holder.dataset.mediaState='loaded'},{once:true});inlineImage.addEventListener('error',function(){holder.dataset.mediaState='failed';inlineImage.alt='小图显示失败'},{once:true});holder.appendChild(inlineImage);holder.dataset.mediaState='loaded';fragment.appendChild(holder);offset=pattern.lastIndex;continue;
+          }
+          var button=document.createElement('button');button.type='button';button.style.cssText='padding:8px 12px;border:1px solid rgba(127,127,127,.35);border-radius:10px;background:var(--background,#fff);color:var(--foreground,#222);font-size:14px;line-height:1.35;max-width:100%;white-space:normal;text-align:left';
+          var kb=Math.max(0,Number(payload.bytes)||0)/1024;button.textContent=kind==='media'?'图片 · '+(kb>=1024?(kb/1024).toFixed(1)+' MB':kb.toFixed(1)+' KB')+' · 点按加载':'点按查看完整内容（原文 '+(kb>=1024?(kb/1024).toFixed(1)+' MB':kb.toFixed(1)+' KB')+'）';
+          button.addEventListener('click',async function(){
+            if(holder.dataset.mediaState==='loading')return;
+            holder.dataset.mediaState='loading';button.disabled=true;button.textContent='正在加载…';
+            try{
+              var invoke=window.__PROMA_WEB_REMOTE_INVOKE;if(typeof invoke!=='function')throw new Error('连接尚未就绪，请重试');
+              var result=await invoke('web-remote:get-history-media',Object.assign({},payload,{kind:kind}));
+              if(kind==='text'){
+                if(typeof result?.text!=='string')throw new Error('原文内容为空');
+                var expanded=document.createElement('span');expanded.dataset.webRemoteExpandedText='true';expanded.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere';expanded.textContent=result.text;holder.replaceChildren(expanded);holder.dataset.mediaState='expanded';return;
+              }
+              if(typeof result?.data!=='string'||typeof result?.mime!=='string')throw new Error('图片数据为空');
+              var image=document.createElement('img');image.dataset.webRemoteExpandedImage='true';image.alt='历史图片';image.style.cssText='display:block;max-width:100%;height:auto;border-radius:8px';image.src='data:'+result.mime+';base64,'+result.data;
+              image.addEventListener('error',function(){holder.dataset.mediaState='failed';button.disabled=false;button.textContent='图片显示失败，点按重试';image.remove()},{once:true});
+              image.addEventListener('load',function(){holder.dataset.mediaState='loaded'},{once:true});holder.appendChild(image);button.textContent='图片已加载 · 点按重试';button.disabled=false;holder.dataset.mediaState='loaded';
+            }catch(error){holder.dataset.mediaState='failed';button.disabled=false;button.textContent=(kind==='media'?'图片加载失败，点按重试':'原文加载失败，点按重试')+'（'+String(error?.reason||error?.message||error)+'）'}
+          });holder.appendChild(button);fragment.appendChild(holder);offset=pattern.lastIndex;
+        }
+        if(found){if(offset<text.length)fragment.appendChild(document.createTextNode(text.slice(offset)));node.parentNode?.replaceChild(fragment,node)}
+      });
+    }
     function syncEarlierHistory(){
       var meta=window.__PROMA_WEB_REMOTE_HISTORY_META;
       var button=document.querySelector('[data-web-remote-load-earlier]');
@@ -127,6 +163,7 @@ export const MOBILE_JS = String.raw`(function(){
       }
     }
     syncEarlierHistory();
+    syncHistoryMedia();
     syncRightPanel();
     var topbar=document.querySelector('[data-web-remote-mobile-topbar]');
     if (topbar && !topbar.querySelector('[data-web-remote-notification-entry]')) {

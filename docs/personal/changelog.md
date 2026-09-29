@@ -846,3 +846,18 @@
 - 现象：父会话 01:52 被唤醒并用 `get_delegation_results` 收回 `05c70f81` 的结果（标记 consumed），随后用 `continue_delegation` 让子任务补做验收；03:52 子任务再次完成时 main.log 记 `[子任务唤醒] consumed: delegationId=05c70f81…`，未唤醒——consumed 标记没有随委派重跑清除。
 - 修复：`personal-delegation-wake.ts` 新增 `markPersonalDelegationRestarted`；`agent-collaboration-tools.ts` 在 `continue_delegation` 把委派重置为 running 时调用一行清除标记。新增单测；全量 618 pass / 0 fail。待打包。
 - 同日记录：上游改动面第 1 阶段（报告在 `.context/proma-personal/upstream-surface/phase1-2026-09-29.md`）结论为第 2 阶段暂缓，下次正式 tag 同步时按实际冲突决定，并顺带把 `useGlobalAgentListeners.ts` 个人版恢复逻辑迁出；仓库已开 `git rerere`（autoupdate=false）。
+
+## 2026-09-29: Web Remote 历史图片与原文按需加载
+
+- 历史消息只在 Web Remote bridge 返回值中转换，桌面端 IPC 不变。单图解码后 ≤256 KB 可作为内联数据由移动补丁生成 `<img>`；每个返回页（首屏或“加载更早”）从较新的消息向前分配，原始图像字节合计 ≤1 MB。更大的图片是含机器可读媒体标记的文本块，手机显示大小卡片，点按后按需读取原图。窗口预算在插入 base64 后再次核验；多轮时必要则从尾部向前缩窗，单一超预算轮次仍保留完整。
+- tool_result 文本仍先裁至 16 KB，追加可识别原文标记与“点按查看完整内容（原文 X KB）”；手机按需取回并原位展开。完整原文上限 2 MB，单张按需图片上限 25 MB。
+- 标记为 `[[proma-web-remote-media:<base64url JSON>]]` / `[[proma-web-remote-text:<base64url JSON>]]`，载荷包含 `sessionId`、SDK `uuid`（如无则用 SDK 数组索引）、消息 SHA-256、块路径、MIME/字节数及原文 SHA-256；内联小图另带数据。`uuid` 在 SDK 历史中唯一时优先定位；缺少 UUID 时使用数组索引并强制校验整条消息 SHA-256，消息移动或变化时拒绝而不猜测。
+- 新增 `web-remote:get-history-media` 为 `read/session`，只在真实 session resolver 存在时注册；IPC 鉴权仍先验证目标 session 的工作区授权，再按 UUID/索引、消息摘要和路径解析图片或原文。失配、不唯一、缺少目标、文本/图片超限均返回明确错误。大结果复用现有 WebSocket 分片/进度超时。
+- 手机补丁以 text-node marker 识别卡片，状态标记管理加载、失败可重试与原位展示；未比较 `innerHTML`/SVG 字符串，MutationObserver 收敛测试覆盖已变换的占位。
+- 变更文件：`sdk-history-window.ts`、`sdk-history-window.test.ts`、`web-remote-ipc.ts`、`channel-policy.ts`、`full-ui-security.test.ts`、`mobile-patch/mobile-js.ts`、`mobile-patch.test.ts`、`scripts/personal/mobile-harness.mjs`、`docs/personal/web-remote.md` 与本记录。**未改任何上游 renderer 文件，新增上游钩子 0 行**。
+- 测试：Web Remote 历史/分级/mobile patch 定向测试 **25 pass / 0 fail**（113 assertions）；全量 `bun test` **623 pass / 0 fail**（94 files，1,415 assertions）；Electron typecheck、`build:main`、`build:renderer`、`build:web-preload` 通过；`node --check scripts/personal/mobile-harness.mjs` 与 `git diff --check` 通过。Renderer 保留既有大 chunk 警告。
+- 手机弱网验证：iPhone UA Chromium、300 ms 延迟、下行 3 Mbps、上行 1 Mbps，33,594,585 B 合成 SDK JSONL；首屏 **8,023 ms**，加载更早后 236→472 个消息节点，最大解压帧 245,870 B、解压接收 payload **2,842,207 B**，CDP 线缆字节不可用（0 个 `Network.dataReceived` WebSocket 事件），JS exceptions **0**。小图 `naturalWidth=32`，大图点按后 `naturalWidth=32`；长文本原文从 16 KB 预览取回并在原位展开至 **65,562 字符**。默认 `mobile-preview.sh test` **9/9 套件通过**。此前全部占位版本记录的基准为 33,408,055 B 输入、7,911 ms、2,808,871 B 解压 payload；本轮增加 SVG 小/大图后输入大小不同，故只作指标参考，不宣称严格同文件字节对比。
+- 另按基线开关关闭窗口/瘦身与分片，用本轮 33,594,585 B 输入复跑原始响应策略：**40,364 ms** 仍未显示历史，随后 IPC 断开；部分解压帧 145,432 B，不能代表线缆传输字节。该次异常使两个合成 session 索引项未能自动删除（合成 JSONL 已移除）；随后以标题前缀校验并按精确 ID 经开发实例 IPC 删除，专用 `cleanup-synthetic` suite 通过，未改动其他会话。
+- 增加 `media-demo` harness suite，并在开发实例保留“手机图片演示”会话。
+- 在 `~/.proma-dev` 保留一条全合成演示会话“手机图片演示”（JSONL **465,051 B**，小图 111 B、大图 307,384 B、长文本 54,024 B），经 harness 重载后历史首条可见。其它本轮合成大会话/会话已清理；开发实例工作区中原有记录未改。
+- 未运行 `install-update.sh`、未打包/push/合并；未触碰正式 `~/.proma` 或已安装 Proma 进程。

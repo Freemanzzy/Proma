@@ -97,6 +97,16 @@ describe('Web Remote full-ui security policy', () => {
     }
   })
 
+  test('历史媒体只读通道显式为 session scope 并拒绝未授权会话', async () => {
+    expect(getWebRemoteChannelPolicy('web-remote:get-history-media')).toMatchObject({ level: 'read', scope: 'session' })
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
+    bridge.registerInvoke('web-remote:get-history-media', async (_event, input) => ({ text: (input as { sessionId: string }).sessionId }))
+    const ws = client(bridge)
+    expect((await invoke(ws, 'web-remote:get-history-media', [{ sessionId: 's-1' }])).value.text).toBe('s-1')
+    expect((await invoke(ws, 'web-remote:get-history-media', [{ sessionId: 's-2' }])).error.denied).toBe(true)
+    expect((await invoke(ws, 'web-remote:get-history-media', [{ sessionId: 'missing' }])).error.denied).toBe(true)
+  })
+
   test('默认拒绝、denied 通道和 session/workspace 越权均生效', async () => {
     const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
     bridge.registerInvoke('agent:get-sdk-messages', async () => ['ok'])
