@@ -877,3 +877,14 @@
 - 验证：main.log `[FATAL]`/`[ERROR]` 为 0，DEP0180 为 `[WARN]`；桌面“Proma personal”历史完整；两台手机在 **Wi-Fi** 下打开该 36 MB 会话十秒级、加载更早 / 小图 / 大图点按 / 截断展开 / 发送 / 通知均通过。`[子任务唤醒]` 的 `[INFO]` 分级待长期观察。
 - **蜂窝网络不可用（未解决）**：对照实验（15:50–15:57，OPPO 蜂窝，官方 Tailscale App）——16 KB 图标秒出；`/app/` 约 1 分钟出框架、内容 2 分钟以上未完成。路径直连（33 ms），官方 Tailscale 与代理内置 Tailscale 无差别；服务端采样 Mac→手机平均 62 KB/s（约 0.5 Mbps），回环 Send-Q 最高约 475 KB（应用数据已就绪，瓶颈在链路）；窗口内下发 9.66 MB。已知体量：会话索引 `agent-sessions.json` 3.85 MB、前端资源 brotli 约 5.3 MB（更新后首次需重下）、历史尾部 ≤ 2 MiB。推断运营商对直连 UDP 限速（未证实）。
 - 处理：`CLAUDE.md` §6 第 7 项加入“更新后先在 Wi-Fi 下打开一次 `/app/`”；应用侧降载（会话列表精简、服务端计量、蜂窝首屏预算）另立批次。
+## 2026-09-29: 蜂窝弱网降载实现（待开发实例端到端验收）
+
+- Web Remote IPC 计量按 device/channel 汇总响应 JSON 原始字节、应用层发送字节、`deflateRawSync` 压缩估算、调用数、耗时、分片数与发送队列 `bufferedAmount` 峰值；WebSocket 关闭单独记录 close code/reason。静态 HTTP 汇总设备、相对资源路径、原始/实际发送字节、估算压缩字节、耗时及请求次数。均通过 `recordPersonalInfo('Web Remote 计量', ...)` 每 30 秒或连接关闭写 `[INFO]`，正文不保存；开发模式已认证端点 `GET /api/dev/metrics` 返回内存 JSON，生产关闭。`ws` 无法直接读取 permessage-deflate 线缆字节，估算字段不代表线上实测；HTTP Content-Length 为实际发送编码字节。
+- 仅 Web Remote 的 `agent:list-sessions` meta 转换删除 `delegationGoal`、`piSessionFile`，`piEntryBindings` 保留 message key 并将 value 替换为 `true`。桌面 IPC 不经过此转换。renderer 仅使用 `AgentHistorySelectionLayer.tsx` 的 `parentSession?.piEntryBindings?.[messageId]` truthy 判断，因此当前/历史分叉可见性语义保留；未发现 renderer/preload 对前两字段有读取。
+- 仿照字段统计的合成 900 会话索引：瘦身前 3,163,631 B，瘦身后 289,031 B（减少 90.9%，低于 300 KB，无需分页）。合成数据只包含字段形状与重复填充内容，不复制正式会话正文。删除字段清单：`delegationGoal`、`piSessionFile`；`piEntryBindings` 的 value 替换为 boolean。
+- Web Remote shim 对并发且参数相同的 `agent:list-sessions` 合并为单请求，完成后清除缓存项，后续调用仍可重新获取；不会改变桌面请求行为。请求次数的实际手机冷启动统计需开发实例 harness 实测。
+- 手机 shim 根据 `navigator.connection` 的 `slow-2g`/`2g` 或 downlink < 1 Mbps 自动启用省流量模式；顶部开关将 on/off 记入 localStorage，手动选择覆盖自动判断。模式开启时历史预算 256 KiB、内联图片预算 0；关闭时为原 2 MiB/1 MiB。图片统一改为点按加载。
+- 新增 `cellular` harness suite：CDP 下行 0.5 Mbps、50 ms RTT，打开合成大会话，记录 WebSocket 接收 payload 与开发计量 JSON；目标首屏 30 秒。尚未执行 cellular suite、更新后清缓存/已缓存两组、baseline 对照及全默认 mobile-preview 回归；因此未得出首屏新旧实测耗时或完成对 9.66 MB 的通道拆账。合成 900 索引通过单测验证瘦身数字。
+- Service Worker 仅处理 push/通知，不缓存导航、静态文件、API 或 WebSocket。Wi-Fi 后台预取可以通过 install/activate 预缓存静态 hash 资源实现，但需先取得资源清单并处理版本激活、存储配额、过期资源清理与并发更新；若错误地 `cache.addAll` 大资源可能耗流量、占空间或延迟新版本使用。本批评估后未实现。
+- 验证：专项 28 pass；全量 `bun test` 629 pass / 0 fail；`bun run typecheck` 通过；`build:main`、`build:renderer`、`build:web-preload` 通过。`build:renderer` 仍报告既有大 chunk 警告；未修改 Vite 上游拆包配置。
+- 未运行安装、更新脚本、打包或 push；未触碰正式 `~/.proma` 与已安装 Proma 进程。开发实例 start/sim 与 cellular/mobile-preview 测试待本轮结束时执行。

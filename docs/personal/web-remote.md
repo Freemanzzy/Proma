@@ -67,6 +67,9 @@ tailscale serve --https=8443 off
 
 历史窗口内，解码后不超过 256 KB 的图片可直接在手机以 `<img>` 显示；每次返回（首屏或“加载更早”页）从最新内容向前累计，内联图片总量不超过 1 MB。其他图片以卡片显示大小并可点按加载；超 2 MB 的 tool_result 文本会先显示截断预览，点按后在原位读取并展开完整文本。单张按需图片读取上限 25 MB，原文展开上限 2 MB；超过上限或会话/消息发生变化时提示刷新或在桌面查看。
 
+顶部的“省流量模式”开关可手动启用/关闭并记入 localStorage。未手动选择时，浏览器报告 `slow-2g`/`2g` 或 downlink < 1 Mbps 会自动开启。开启后历史尾部预算为 256 KiB，内联图片预算为 0（全部点按加载）；关闭时恢复 2 MiB 历史预算与 1 MiB 图片预算。此预算由 Web Remote shim 仅附加到手机的历史 IPC 参数，不改变桌面行为。
+
+
 媒体标记仅由 Web Remote 的历史裁剪层生成，包含会话 ID、SDK 消息 UUID（缺少 UUID 时使用消息索引）及整条消息 SHA-256、块路径与内容校验摘要。按需读取通过 `web-remote:get-history-media` 只读 IPC，并按会话所属工作区授权；定位不唯一、摘要变化、越权或目标不存在均拒绝。桌面 renderer 的 SDK 历史返回不经该移动端裁剪，不包含 Web Remote 标记。
 
 ## 5. 通知（Web Push）
@@ -127,6 +130,10 @@ tailscale serve --https=8443 off
 - 可复用的既有稳定特征仍优先使用：右侧 Tab 以 `role="tablist"` + `aria-label="右侧工作区"` 定位；设置按钮按既有 `aria-label` 定位。模拟器菜单/标签本身继续保留显式标记，以避免与其它同类菜单项混淆。
 
 harness 默认整体超时 300 秒（可用 `--timeout-ms` 覆盖），每次页面评估前以 3 秒 CDP 探活；每次运行后自动撤销测试配对设备、删除自建会话、关闭 Chrome 并移除临时 profile。`full-ui/mobile-patch.test.ts` 使用 linkedom 执行注入脚本并多次触发 MutationObserver，验证刷新/面板/菜单/通知图标、标题和 Tab 下拉菜单的 DOM 写入趋于稳定。`layout` 检查文件、改动、Todo、定时任务、MCP/Skills 与项目记忆列表/详情的横向溢出和元素可点性；`panel-probe` 检查页面下拉中的 Tab 可点性；`mobile-polish` 检查刷新和会话单击切换。左侧项目名是展开/折叠分组，不是 `agentWorkspaceId` 切换，勿以此字段判定工作区按钮点击。同步上游后必须运行；安装后另由用户在安装版上用两台手机验收（CLAUDE.md §6 第 7 项）。每周一的版本检查任务会报告上游新增、尚未分级的 IPC 通道。
+
+### Web Remote 计量与开发汇总
+
+开发实例中可由已认证设备读取 `GET /api/dev/metrics` JSON；生产环境不提供该端点。IPC 和静态资源计量均按设备汇总，主日志用 `[INFO]` / `Web Remote 计量` 每 30 秒或连接关闭时输出，内容不含响应正文。IPC 记录通道、序列化响应字节、应用层发送字节（大响应含分片 Base64/JSON 开销）、单帧 `deflateRawSync` 压缩估算、处理耗时、分片数和发送期间采样的 `bufferedAmount` 峰值；由于 `ws` 不暴露 permessage-deflate 后线缆字节，压缩字节为估算，不是实测线缆量。静态资源记录相对路径、原始文件字节、HTTP 实际 Content-Length、编码后字节、估算压缩字节与耗时；304 命中计 0 发送字节。开发端点只保存在运行时内存，不落入用户数据目录。
 
 ### WebSocket 压缩（2026-09-29）
 
