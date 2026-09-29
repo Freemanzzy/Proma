@@ -818,3 +818,55 @@
 - `personal-log-writer.ts` 新增 `info` 级别与 `recordPersonalInfo` / `setPersonalInfoSink`（不依赖 electron）；`personal-main-log.ts` 初始化时接入 main.log，写 `[INFO]`。
 - `personal-delegation-wake.ts`：wake / consumed / queued / disabled / stopped / rate-limited / run-completed 等正常流转记 `[INFO]`；只有 run-error / start-error / dependency-error 记 `[WARN]`。
 - install-update.sh 健康检查只判 `[FATAL]`，不受影响。验证：typecheck、全量 611 pass / 0 fail、build:main。待下次打包。
+
+## 2026-09-29: Web Remote WebSocket 保守压缩
+
+- WebSocketServer 启用 per-message deflate，阈值 16 KB，双端 no-context-takeover，zlib 并发限制 2；扩展仅作用于 WebSocket，不影响桌面 IPC。
+- 更新 `docs/personal/web-remote.md`。验证：Electron typecheck 通过；web-remote-server 定向测试因测试初始化时 Electron mock 导出缺失而失败（0 pass / 2 fail），尚未完成 iOS Safari / Android Chrome 握手核验。
+
+## 2026-09-29: Web Remote 大会话历史分页与分块传输
+
+- 仅对 Web Remote `agent:get-sdk-messages` 响应启用历史裁剪：先将 tool_result 内超 16 KB 文本裁剪并注明原大小，图片块/base64 图片改为含类型与尺寸估算的占位；再按约 2 MiB JSON 序列化预算从尾部选取完整轮次，返回 omittedCount/hasEarlier/startIndex 元数据。轮次扫描将匹配的 tool_use 与 tool_result 作为同轮续接；超预算单轮会整体保留，不从中间截断。桌面 IPC 未改。
+- 手机端由 `mobile-patch` 增加“加载更早（已省略 N 条）”按钮，复用 IPC 传入 endIndex 与预算，以 2 MiB 页前置消息。`AgentView.tsx` 仅新增一行事件监听钩子同步加载结果，符合尽量缩小上游改动面；未新增 IPC 通道，既有 `agent:get-sdk-messages` 继续按 session scope 鉴权。单条原文展开未实现，原因是没有稳定 message ID 与单条 tool_result 读取 API；占位文案提示完整内容请在桌面查看。
+- 大于 256 KB 的 IPC 响应按约 180 KiB UTF-8 切片，分片带请求 ID/序号/总数；shim 重组并在每个进度分片到达时重置 35 秒超时。WebSocket 压缩另见同日上一节提交：threshold 16 KB、双端 no-context-takeover、concurrencyLimit=2。
+- 验证：历史窗口/瘦身、手机 patch 与 Web Remote 分级集成定向测试 **20 pass / 0 fail**（89 assertions）；全量 `bun test` **541 pass / 0 fail / 0 error**（83 files，1222 assertions）；typecheck、build:main、build:renderer、build:web-preload 均通过。Renderer 仍有既有大 chunk 警告。手机回归实跑 8 套，其中 7 套通过（panel-probe、smoke、layout、dead-socket、Android smoke/attachments/dead-socket）；iPhone mobile-polish 因既有侧栏目标会话“回复 pong”不可见失败，未涉及新历史入口，待重跑确认。定向 server 测试仍受现有 Electron mock 导出缺失影响，0 pass / 2 fail。
+- 未完成：未构造/清理 `~/.proma-dev` 30 MB 合成会话，未运行 CDP 300 ms/2–4 Mbps 弱网修复前后对比，未验证 Safari/Chrome 压缩扩展握手；因此无真实大会话首屏耗时与传输字节对比，不把算法测试结果冒充端到端证据。开发实例、8443 与 iPhone 17 Pro 模拟器已启动并保留，供继续验收；未运行安装更新、未退出/重启正式 Proma。
+
+## 2026-09-29: Web Remote 大会话与移动回归验收补齐
+
+- 大会话当前实现：在 `~/.proma-dev` 生成并登记 33,408,055 B 的全合成 SDK JSONL（user/assistant/tool_use/tool_result、64 KB 工具结果、base64 图片）。在 iPhone UA Chromium harness、300 ms latency、下行 3 Mbps、上行 1 Mbps 下，独立运行历史首屏 **7,911 ms**；最终默认回归中的 `iphone:heavy-session` 为 **8,137 ms**。“加载更早”点按后可见消息节点从 **242 增至 484**；工具结果可展开并显示“内容已截断，原文 64.0 KB；完整内容请在桌面查看”，图片占位“图片已省略：image/png，约 16.0 KB；完整内容请在桌面查看”可见；**0 JS exceptions**。最终回归 CDP 收到 2,808,871 B 解压 WebSocket payload、最大解压帧 245,870 B；并非线缆压缩字节。对应截图由 harness 生成到系统临时目录。合成 session 与 JSONL 均已清理，开发索引恢复为测试前 6 条会话。
+- 修复前对照：以仅开发可用的 `PROMA_WEB_REMOTE_HEAVY_SESSION_BASELINE=1` 关闭历史窗口/瘦身与分片传输、保留 permessage-deflate，运行同一 33 MB 合成输入。**40,420 ms** 仍未显示历史，随后 IPC 页面连接断开；CDP 仅收集到 117,103 B 已解压 WebSocket 帧，未提供线缆压缩字节。连接断开使 harness 无法通过 UI 清理；随后按两个精确 synthetic ID 与标题前缀校验，只从 `~/.proma-dev` 删除本次建立的两个会话索引项和会话文件，余下原有 6 条记录未改。
+- 压缩握手：iPhone UA 与 Android UA 对 `/api/ipc` 均为 **101**，扩展为 `permessage-deflate; server_no_context_takeover; client_no_context_takeover`。独立 Node 线缆侧探针的 118,784 B 高重复文本帧压缩为 335 B、RSV1=true。Chrome CDP 的 `Network.webSocketFrameReceived.payloadData` 是解压内容，`Network.dataReceived` 未提供 WebSocket 编码字节，故未声称测得大会话实际压缩线缆量；iOS Safari 真机仍未测。
+- `mobile-polish` 归因：从 `9f7cfcac` 读取旧版 harness 并复跑，重现“目标会话在侧栏不可见：回复 pong”。旧 harness 假设既有 `回复 pong` 会话位于当前侧栏可视区；改为本轮自建源/目标会话后，当前分支 iPhone mobile-polish **2/2 单击检查通过**、0 exceptions。该失败归因于 harness 夹具/可见性假设，不是新历史功能的侧栏回归。
+- `web-remote-server.test.ts` 单独复跑仍为 **0 pass / 2 fail**：Electron mock 初始化报 `Export named 'app' not found`，后续 `server.stop` undefined 为清理连带错误。该测试文件相对 `9f7cfcac` 未改动；本轮未扩大 Electron mock 修复范围。
+- 最终验证：`mobile-preview.sh test` 默认 **9/9 套件通过**（原 8 套 + `iphone:heavy-session`），所有套件 **0 JS exceptions**；mobile-polish 单击检查 2/2。`bun test` **542 pass / 0 fail**（84 files，1,226 assertions），Electron typecheck 通过；`build:main`、`build:renderer`、`build:web-preload` 均通过，Renderer 保留既有大 chunk warning。独立重跑 `web-remote-server.test.ts` 仍为 0 pass / 2 fail：Electron mock 缺少 `app` 导出，之后 `server.stop` undefined 为清理连带错误；该测试文件与 `9f7cfcac` 相同，未归因于本次改动。`git diff --check` 通过。开发实例、17889/5173、8443 Serve 与 iPhone 17 Pro 模拟器均保持运行；未 push、合并、打包或运行安装更新；正式 Proma 未退出/重启。
+
+## 2026-09-29: 修复 continue_delegation 后不再自动唤醒
+
+- 现象：父会话 01:52 被唤醒并用 `get_delegation_results` 收回 `05c70f81` 的结果（标记 consumed），随后用 `continue_delegation` 让子任务补做验收；03:52 子任务再次完成时 main.log 记 `[子任务唤醒] consumed: delegationId=05c70f81…`，未唤醒——consumed 标记没有随委派重跑清除。
+- 修复：`personal-delegation-wake.ts` 新增 `markPersonalDelegationRestarted`；`agent-collaboration-tools.ts` 在 `continue_delegation` 把委派重置为 running 时调用一行清除标记。新增单测；全量 618 pass / 0 fail。待打包。
+- 同日记录：上游改动面第 1 阶段（报告在 `.context/proma-personal/upstream-surface/phase1-2026-09-29.md`）结论为第 2 阶段暂缓，下次正式 tag 同步时按实际冲突决定，并顺带把 `useGlobalAgentListeners.ts` 个人版恢复逻辑迁出；仓库已开 `git rerere`（autoupdate=false）。
+
+## 2026-09-29: Web Remote 历史图片与原文按需加载
+
+- 历史消息只在 Web Remote bridge 返回值中转换，桌面端 IPC 不变。单图解码后 ≤256 KB 可作为内联数据由移动补丁生成 `<img>`；每个返回页（首屏或“加载更早”）从较新的消息向前分配，原始图像字节合计 ≤1 MB。更大的图片是含机器可读媒体标记的文本块，手机显示大小卡片，点按后按需读取原图。窗口预算在插入 base64 后再次核验；多轮时必要则从尾部向前缩窗，单一超预算轮次仍保留完整。
+- tool_result 文本仍先裁至 16 KB，追加可识别原文标记与“点按查看完整内容（原文 X KB）”；手机按需取回并原位展开。完整原文上限 2 MB，单张按需图片上限 25 MB。
+- 标记为 `[[proma-web-remote-media:<base64url JSON>]]` / `[[proma-web-remote-text:<base64url JSON>]]`，载荷包含 `sessionId`、SDK `uuid`（如无则用 SDK 数组索引）、消息 SHA-256、块路径、MIME/字节数及原文 SHA-256；内联小图另带数据。`uuid` 在 SDK 历史中唯一时优先定位；缺少 UUID 时使用数组索引并强制校验整条消息 SHA-256，消息移动或变化时拒绝而不猜测。
+- 新增 `web-remote:get-history-media` 为 `read/session`，只在真实 session resolver 存在时注册；IPC 鉴权仍先验证目标 session 的工作区授权，再按 UUID/索引、消息摘要和路径解析图片或原文。失配、不唯一、缺少目标、文本/图片超限均返回明确错误。大结果复用现有 WebSocket 分片/进度超时。
+- 手机补丁以 text-node marker 识别卡片，状态标记管理加载、失败可重试与原位展示；未比较 `innerHTML`/SVG 字符串，MutationObserver 收敛测试覆盖已变换的占位。
+- 变更文件：`sdk-history-window.ts`、`sdk-history-window.test.ts`、`web-remote-ipc.ts`、`channel-policy.ts`、`full-ui-security.test.ts`、`mobile-patch/mobile-js.ts`、`mobile-patch.test.ts`、`scripts/personal/mobile-harness.mjs`、`docs/personal/web-remote.md` 与本记录。**未改任何上游 renderer 文件，新增上游钩子 0 行**。
+- 测试：Web Remote 历史/分级/mobile patch 定向测试 **25 pass / 0 fail**（113 assertions）；全量 `bun test` **623 pass / 0 fail**（94 files，1,415 assertions）；Electron typecheck、`build:main`、`build:renderer`、`build:web-preload` 通过；`node --check scripts/personal/mobile-harness.mjs` 与 `git diff --check` 通过。Renderer 保留既有大 chunk 警告。
+- 手机弱网验证：iPhone UA Chromium、300 ms 延迟、下行 3 Mbps、上行 1 Mbps，33,594,585 B 合成 SDK JSONL；首屏 **8,023 ms**，加载更早后 236→472 个消息节点，最大解压帧 245,870 B、解压接收 payload **2,842,207 B**，CDP 线缆字节不可用（0 个 `Network.dataReceived` WebSocket 事件），JS exceptions **0**。小图 `naturalWidth=32`，大图点按后 `naturalWidth=32`；长文本原文从 16 KB 预览取回并在原位展开至 **65,562 字符**。默认 `mobile-preview.sh test` **9/9 套件通过**。此前全部占位版本记录的基准为 33,408,055 B 输入、7,911 ms、2,808,871 B 解压 payload；本轮增加 SVG 小/大图后输入大小不同，故只作指标参考，不宣称严格同文件字节对比。
+- 另按基线开关关闭窗口/瘦身与分片，用本轮 33,594,585 B 输入复跑原始响应策略：**40,364 ms** 仍未显示历史，随后 IPC 断开；部分解压帧 145,432 B，不能代表线缆传输字节。该次异常使两个合成 session 索引项未能自动删除（合成 JSONL 已移除）；随后以标题前缀校验并按精确 ID 经开发实例 IPC 删除，专用 `cleanup-synthetic` suite 通过，未改动其他会话。
+- 增加 `media-demo` harness suite，并在开发实例保留“手机图片演示”会话。
+- 在 `~/.proma-dev` 保留一条全合成演示会话“手机图片演示”（JSONL **465,051 B**，小图 111 B、大图 307,384 B、长文本 54,024 B），经 harness 重载后历史首条可见。其它本轮合成大会话/会话已清理；开发实例工作区中原有记录未改。
+- 未运行 `install-update.sh`、未打包/push/合并；未触碰正式 `~/.proma` 或已安装 Proma 进程。
+
+## 2026-09-29: 父会话复核历史图片批次
+
+- 复核 `5af07180`：上游文件 0 行改动；新通道 `web-remote:get-history-media` 分级 read/session；全量 623 pass。
+- 父会话修复：`mobile-js.ts` 中标记载荷解析失败时原样放回 `[[proma-web-remote-…]]` 文本，会被 MutationObserver 反复命中并替换（潜在死循环）；改为替换为“标记无法解析，请在桌面查看”提示。新增单测；全量 624 pass / 0 fail。
+
+## 2026-09-29: 手机大会话批次合并（待安装）
+
+- 合并 `fix/mobile-heavy-sessions`：尾部分页 + 加载更早、瘦身、保守压缩、分片按进度超时、小图直显 / 大图与长文本点按加载（`web-remote:get-history-media`）、continue_delegation 后重新可唤醒、标记解析失败防循环。用户 2026-09-29 12:49 同意打包。

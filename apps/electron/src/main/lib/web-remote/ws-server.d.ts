@@ -4,7 +4,15 @@ declare module 'ws' {
   import type { Duplex } from 'node:stream'
 
   export class WebSocketServer extends EventEmitter {
-    constructor(options: { noServer: boolean })
+    constructor(options: {
+      noServer: boolean
+      perMessageDeflate?: {
+        threshold?: number
+        serverNoContextTakeover?: boolean
+        clientNoContextTakeover?: boolean
+        concurrencyLimit?: number
+      }
+    })
     handleUpgrade(
       req: IncomingMessage,
       socket: Duplex,

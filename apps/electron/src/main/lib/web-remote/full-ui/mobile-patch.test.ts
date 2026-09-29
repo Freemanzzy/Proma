@@ -70,19 +70,41 @@ function createMobilePatchHarness() {
   const html = renderWebRemoteMobilePatch()
   const script = html.match(/<script nonce="__PROMA_NONCE__">([\s\S]*?)<\/script>/)?.[1]
   if (!script) throw new Error('mobile patch script not found')
-  const run = new Function('window', 'document', 'MutationObserver', 'HTMLElement', 'Element', 'fetch', script)
-  run(window, document, ManualMutationObserver, window.HTMLElement, window.Element, fetchMock)
+  const run = new Function('window', 'document', 'MutationObserver', 'HTMLElement', 'Element', 'NodeFilter', 'fetch', script)
+  run(window, document, ManualMutationObserver, window.HTMLElement, window.Element, window.NodeFilter, fetchMock)
   const ensureObserver = ManualMutationObserver.instances[0]
   const syncRightObserver = ManualMutationObserver.instances[1]
   const syncMenuObserver = ManualMutationObserver.instances[2]
   if (!ensureObserver || !syncRightObserver || !syncMenuObserver) throw new Error('expected ensure and state observers')
   const title = document.querySelector<HTMLButtonElement>('[data-web-remote-mobile-topbar-title]')!
   title.dispatchEvent(new window.Event('click', { bubbles: true }))
-  return { document, writes, observers: [ensureObserver, syncRightObserver, syncMenuObserver], resolveSubscription }
+  return { window, document, writes, observers: [ensureObserver, syncRightObserver, syncMenuObserver], resolveSubscription }
 }
 
 describe('renderWebRemoteMobilePatch DOM write convergence', () => {
   afterEach(() => { ManualMutationObserver.instances = [] })
+
+  test('媒体占位点击后原位显示图片，长文本点击后原位展开', async () => {
+    const { window, document, observers } = createMobilePatchHarness()
+    const mediaPayload = Buffer.from(JSON.stringify({ sessionId: 's', uuid: 'u', index: 0, messageHash: 'h', path: ['content', 0], mime: 'image/png', bytes: 300_000 })).toString('base64url')
+    const textPayload = Buffer.from(JSON.stringify({ sessionId: 's', uuid: 'u', index: 0, messageHash: 'h', path: ['content', 1], bytes: 40_000, hash: 't' })).toString('base64url')
+    const text = document.createElement('p'); text.textContent = `before [[proma-web-remote-media:${mediaPayload}]][图片 · 293.0 KB · 点按加载] and [[proma-web-remote-text:${textPayload}]][内容已截断] after`; document.body.appendChild(text)
+    ;(window as any).__PROMA_WEB_REMOTE_INVOKE = async (channel: string, payload: { kind?: string }) => payload.kind === 'text' ? { text: 'expanded original text' } : { mime: 'image/png', data: 'aW1hZ2U=' }
+    observers[0]!.trigger()
+    const mediaButton = document.querySelector<HTMLButtonElement>('[data-media-kind="media"] button')
+    const textButton = document.querySelector<HTMLButtonElement>('[data-media-kind="text"] button')
+    expect(mediaButton?.textContent).toContain('图片 · 293.0 KB · 点按加载')
+    expect(textButton?.textContent).toContain('点按查看完整内容（原文 39.1 KB）')
+    expect(document.querySelectorAll('[data-web-remote-history-media]')).toHaveLength(2)
+  })
+
+  test('无法解析的媒体标记被替换为提示文本，不会在 observer 中反复处理', async () => {
+    const { document, observers } = createMobilePatchHarness()
+    const text = document.createElement('p'); text.textContent = 'x [[proma-web-remote-media:not_json]] y'; document.body.appendChild(text)
+    for (let index = 0; index < 5; index++) observers[0]!.trigger()
+    expect(document.body.textContent).not.toContain('[[proma-web-remote-')
+    expect(document.body.textContent).toContain('图片标记无法解析')
+  })
 
   test('repeated ensure/sync callbacks stop writing toolbar icons, notification, title, dropdown, and layout', async () => {
     const { document, writes, observers, resolveSubscription } = createMobilePatchHarness()

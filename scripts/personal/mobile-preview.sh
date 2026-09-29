@@ -157,7 +157,7 @@ NODE
 
 run_tests() {
   local suites=("$@") suite agent="$(dirname "$0")/mobile-harness.mjs" url config origin chrome_pids failed=0
-  if ((${#suites[@]} == 0)); then suites=(iphone:panel-probe iphone:smoke iphone:mobile-polish iphone:layout iphone:dead-socket android:smoke android:attachments android:dead-socket); fi
+  if ((${#suites[@]} == 0)); then suites=(iphone:panel-probe iphone:smoke iphone:mobile-polish iphone:layout iphone:dead-socket iphone:heavy-session android:smoke android:attachments android:dead-socket); fi
   config="$HOME/.proma-dev/web-remote/config.json"
   [[ -r "$config" ]] || fail "找不到开发实例配置：$config"
   origin="$(node -e 'const c=require(process.argv[1]); process.stdout.write(c.allowedOrigin||"")' "$config")"
@@ -185,6 +185,18 @@ const result = JSON.parse(fs.readFileSync(path, 'utf8'))
 const badSteps = (result.steps || []).filter((step) => step.ok === false && !step.skipped)
 const checks = []
 if (result.layout) checks.push(`pages=${result.layout.pages.filter((page) => !page.failed).length}/${result.layout.pages.length}`)
+if (result.heavySession) {
+  const heavy = result.heavySession
+  checks.push(`heavy=${Math.round(heavy.syntheticJsonlBytes / 1024 / 1024)}MiB, first=${heavy.firstHistoryMs ?? 'not-visible'}ms, wsDecoded=${heavy.websocketPayloadBytes}B, netEncoded=${heavy.cdpEncodedNetworkBytes}B`)
+  if (!heavy.baselineMode && (!heavy.historyVisible || heavy.firstHistoryMs === null || heavy.firstHistoryMs >= 20_000 || heavy.visibleMessagesAfterLoadEarlier <= heavy.visibleMessagesBeforeLoadEarlier || !heavy.truncationTextVisible || !heavy.imagePlaceholderVisible || heavy.exceptions !== 0 || !heavy.largeDecodedFrameObserved)) {
+    console.error(`FAIL ${ua}/${suite}: 大会话验收字段不完整：${JSON.stringify(heavy)}`)
+    process.exit(1)
+  }
+  if (heavy.baselineMode && heavy.historyVisible && heavy.firstHistoryMs !== null && heavy.firstHistoryMs < 20_000) {
+    console.error(`FAIL ${ua}/${suite}: 修复前基线意外在 20 秒内完成：${JSON.stringify(heavy)}`)
+    process.exit(1)
+  }
+}
 if (result.probe) checks.push(`tabs=${result.probe.filter((item) => item.hitIsTab).length}/${result.probe.length}`)
 if (result.attachments) checks.push(`attachments=${result.attachments.textAssistantReplyContainsFirstLine && result.attachments.imageAssistantIdentifiedRed ? 'pass' : 'fail'}`)
 if (result.singleTapChecks) checks.push(`singleTap=${result.singleTapSuccess}/${result.singleTapChecks}`)

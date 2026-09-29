@@ -8,12 +8,14 @@ import type { WebRemoteConfig } from '../web-remote-auth'
 import { decodeWebRemoteValue, encodeWebRemoteValue } from './serialization'
 import { WebRemoteRegistrationTable } from './registration-table'
 import { getWebRemoteChannelPolicy, getDeclaredWebRemoteChannels, type WebRemoteChannelPolicyEntry } from './channel-policy'
+import { readWebRemoteHistoryMedia, selectWebRemoteHistoryWindow } from './sdk-history-window'
 
 const REQUEST_TIMEOUT_MS = 30_000
 const CONFIRM_TTL_MS = 60_000
 const WEB_REMOTE_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024
 const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024
 const SENSITIVE_KEY = /(?:api.?key|token|secret|password|credential|authorization|private.?key|refresh|cookie|encrypted|decrypted)/i
+const HEAVY_SESSION_BASELINE = process.env.NODE_ENV !== 'production' && process.env.PROMA_WEB_REMOTE_HEAVY_SESSION_BASELINE === '1'
 
 type InvokeHandler = (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
 type EventHandler = (event: IpcMainEvent, ...args: unknown[]) => void
@@ -80,6 +82,20 @@ const EMPTY_SCOPE_RESOLVERS: WebRemoteScopeResolvers = { getSessionMeta: () => u
 export function installWebRemoteIpcCapture(ipcMain: IpcMainCaptureTarget, config: WebRemoteConfig = {}, resolvers: WebRemoteScopeResolvers = EMPTY_SCOPE_RESOLVERS): WebRemoteIpcBridge {
   if (activeBridge) return activeBridge
   const bridge = new WebRemoteIpcBridge(config, resolvers)
+  if (resolvers.getSessionMeta !== EMPTY_SCOPE_RESOLVERS.getSessionMeta) {
+    bridge.registerInvoke('web-remote:get-history-media', async (_event, input) => {
+      if (!input || typeof input !== 'object') throw new Error('历史媒体参数无效')
+      const request = input as { sessionId?: unknown; uuid?: unknown; index?: unknown; messageHash?: unknown; path?: unknown; kind?: unknown; hash?: unknown }
+      if (typeof request.sessionId !== 'string' || typeof request.messageHash !== 'string' || !Array.isArray(request.path) || (request.kind !== 'media' && request.kind !== 'text')) throw new Error('历史媒体参数不完整')
+      if (request.path.length > 64 || request.path.some((part) => typeof part === 'string' ? part.length > 256 : !Number.isInteger(part) || part < 0)) throw new Error('历史媒体路径无效')
+      const { getAgentSessionSDKMessages } = await import('../../agent-session-manager')
+      return readWebRemoteHistoryMedia(getAgentSessionSDKMessages(request.sessionId), {
+        sessionId: request.sessionId, uuid: typeof request.uuid === 'string' ? request.uuid : undefined,
+        index: typeof request.index === 'number' ? request.index : undefined, messageHash: request.messageHash,
+        path: request.path as Array<string | number>, kind: request.kind, hash: typeof request.hash === 'string' ? request.hash : undefined,
+      })
+    })
+  }
   const target = ipcMain as unknown as IpcMainCaptureTarget
   const originalHandle = target.handle.bind(ipcMain)
   const originalOn = target.on.bind(ipcMain)
@@ -348,8 +364,14 @@ export class WebRemoteIpcBridge {
     return null
   }
 
-  private filterResult(channel: string, value: unknown): unknown {
+  private filterResult(channel: string, value: unknown, args: unknown[]): unknown {
     let filtered = channel === 'settings:get' || channel === 'channel:list' ? redactSensitive(value) : channel === 'agent:get-mcp-config' ? redactMcpConfig(value) : value
+    if (!HEAVY_SESSION_BASELINE && channel === 'agent:get-sdk-messages' && Array.isArray(value)) {
+      const paging = args[1] && typeof args[1] === 'object' ? args[1] as { budgetBytes?: unknown; endIndex?: unknown } : {}
+      const budget = typeof paging.budgetBytes === 'number' ? paging.budgetBytes : 2 * 1024 * 1024
+      const endIndex = typeof paging.endIndex === 'number' ? paging.endIndex : value.length
+      filtered = { __webRemoteHistoryWindow: true, ...selectWebRemoteHistoryWindow(value, budget, endIndex, typeof args[0] === 'string' ? args[0] : '') }
+    }
     if (channel === 'agent:get-pending-requests' && filtered && typeof filtered === 'object') {
       const snapshot = filtered as { permissions?: unknown; askUsers?: unknown; exitPlans?: unknown }
       const filterRequests = (items: unknown): unknown => Array.isArray(items)
@@ -428,7 +450,7 @@ export class WebRemoteIpcBridge {
     if (!handler) { this.send(client, { type: 'response', id, ok: false, error: `unknown channel: ${channel}` }); return }
     try {
       const value = await Promise.race([Promise.resolve(handler(fakeEvent(sender), ...args)), new Promise<never>((_, reject) => setTimeout(() => reject(new Error('IPC 请求超时')), REQUEST_TIMEOUT_MS))])
-      this.send(client, { type: 'response', id, ok: true, value: encodeWebRemoteValue(this.filterResult(channel, value)) })
+      this.send(client, { type: 'response', id, ok: true, value: encodeWebRemoteValue(this.filterResult(channel, value, args)) })
     } catch (error) {
       try { this.send(client, { type: 'response', id, ok: false, error: serializeError(error) }) }
       catch (serializationError) { console.error('[Web Remote] 响应序列化失败:', serializationError) }
@@ -436,7 +458,21 @@ export class WebRemoteIpcBridge {
   }
 
   private send(client: IpcClient, message: unknown): void { if (client.ws.readyState === WebSocket.OPEN) this.sendRaw(client.ws, JSON.stringify(message)) }
-  private sendRaw(ws: WebSocket, message: string): void { ;(ws as unknown as { send(data: string): void }).send(message) }
+  private sendRaw(ws: WebSocket, message: string): void {
+    if (HEAVY_SESSION_BASELINE) { (ws as unknown as { send(data: string): void }).send(message); return }
+    const bytes = Buffer.from(message, 'utf8')
+    const chunkBytes = 180 * 1024
+    if (bytes.byteLength <= 256 * 1024) { (ws as unknown as { send(data: string): void }).send(message); return }
+    let requestId: string | undefined
+    try { requestId = (JSON.parse(message) as { id?: string }).id } catch {}
+    const transferId = randomBytes(12).toString('hex')
+    const total = Math.ceil(bytes.byteLength / chunkBytes)
+    for (let seq = 0; seq < total; seq++) {
+      const data = bytes.subarray(seq * chunkBytes, Math.min((seq + 1) * chunkBytes, bytes.byteLength)).toString('base64')
+      const frame = JSON.stringify({ type: 'chunk', id: transferId, requestId, seq, total, data })
+      ;(ws as unknown as { send(data: string): void }).send(frame)
+    }
+  }
 }
 
 function serializeError(error: unknown): unknown {

@@ -131,7 +131,15 @@ export class WebRemoteServer {
     this.pushStore = new WebRemotePushStore(options.pushDataDir ?? this.auth.getDataDir(), this.auth, (sessionId) => getAgentSessionMeta(sessionId)?.workspaceId, options.pushProxyUrl)
     this.unsubscribePush = agentEventBus.on((sessionId, payload) => { void this.handlePushEvent(sessionId, payload) })
     this.httpServer = createServer((req, res) => { void this.handleHttp(req, res) })
-    this.wsServer = new WebSocketServer({ noServer: true })
+    this.wsServer = new WebSocketServer({
+      noServer: true,
+      perMessageDeflate: {
+        threshold: 16 * 1024,
+        serverNoContextTakeover: true,
+        clientNoContextTakeover: true,
+        concurrencyLimit: 2,
+      },
+    })
     this.httpServer.on('upgrade', (req, socket, head) => { void this.handleUpgrade(req, socket, head) })
     this.wsServer.on('connection', (ws: WebSocket, req: IncomingMessage) => this.handleWebSocket(ws, req))
   }

@@ -1115,6 +1115,7 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
   // 消息首次加载状态直接由同步缓存决定；缓存命中时首个 render 就显示历史，IPC 只做后台校准。
   const [messagesLoaded, setMessagesLoaded] = React.useState(initialCachedMessages !== undefined)
   const [messagesRefreshing, setMessagesRefreshing] = React.useState(false)
+  React.useEffect(() => { const onEarlier = (event: Event) => { const detail = (event as CustomEvent<{ sessionId: string; messages: SDKMessage[] }>).detail; if (detail?.sessionId !== sessionId) return; const merged = [...detail.messages, ...persistedSDKMessagesRef.current]; persistedSDKMessagesRef.current = merged; setPersistedSDKMessages(merged); setMessagesCache((prev) => setSessionMessagesCache(prev, sessionId, merged)) }; window.addEventListener('proma-web-remote-history-earlier', onEarlier); return () => window.removeEventListener('proma-web-remote-history-earlier', onEarlier) }, [sessionId, setMessagesCache])
   const messagesRefreshingRef = React.useRef(false)
   const loadingSessionIdRef = React.useRef<string | null>(null)
 

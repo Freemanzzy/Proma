@@ -9,10 +9,11 @@
  * no private hostname is embedded in this file.
  */
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { setTimeout as delay } from 'node:timers/promises'
 import WebSocket from 'ws'
 
@@ -186,6 +187,25 @@ async function waitUntil(client, expression, timeoutMs = 30_000, intervalMs = 25
 
 function quoteJs(value) { return JSON.stringify(value) }
 
+function websocketExtensions(headers) {
+  const entry = Object.entries(headers ?? {}).find(([key]) => key.toLowerCase() === 'sec-websocket-extensions')
+  return typeof entry?.[1] === 'string' ? entry[1] : ''
+}
+
+async function assertIpcCompressionHandshake(harness, options, result) {
+  const end = Date.now() + 15_000
+  let response
+  while (Date.now() < end) {
+    response = harness.websocketHandshakes.find((item) => item.url?.endsWith('/api/ipc') && /permessage-deflate/i.test(websocketExtensions(item.headers)))
+    if (response) break
+    await delay(100)
+  }
+  const extension = response ? websocketExtensions(response.headers) : ''
+  result.websocketCompression = { userAgent: options.userAgent, ipcHandshakeStatus: response?.status ?? null, extension: extension || null }
+  if (!response || !/permessage-deflate/i.test(extension)) throw new Error(`/api/ipc 未协商 permessage-deflate：${JSON.stringify(result.websocketCompression)}`)
+  result.websocketCompression.cdpFramePayload = 'Network.webSocketFrameReceived.payloadData 按解压后的 WebSocket 消息内容报告，无法从该字段测量线上的压缩字节。'
+}
+
 let lastHarnessStep = 'harness initialization'
 
 function sdkMessageRole(message) {
@@ -270,6 +290,20 @@ async function createHarness(options) {
   await client.command('Runtime.enable')
   await client.command('Page.enable')
   await client.command('Network.enable')
+  const websocketUrls = new Map()
+  const websocketHandshakes = []
+  const websocketFramesReceived = []
+  const websocketDataReceived = []
+  client.on('Network.webSocketCreated', (event) => { websocketUrls.set(event.requestId, event.url) })
+  client.on('Network.webSocketHandshakeResponseReceived', (event) => websocketHandshakes.push({ requestId: event.requestId, url: websocketUrls.get(event.requestId), status: event.response?.status, headers: event.response?.headers ?? {} }))
+  client.on('Network.webSocketFrameReceived', (event) => {
+    const url = websocketUrls.get(event.requestId)
+    websocketFramesReceived.push({ requestId: event.requestId, url, payloadBytes: Buffer.byteLength(event.response?.payloadData ?? '', 'utf8'), opcode: event.response?.opcode })
+  })
+  client.on('Network.dataReceived', (event) => {
+    const url = websocketUrls.get(event.requestId)
+    if (url) websocketDataReceived.push({ requestId: event.requestId, url, dataLength: Number(event.dataLength ?? 0), encodedDataLength: Number(event.encodedDataLength ?? 0) })
+  })
   let activeNavigation = null
   const loadMetrics = []
   client.on('Network.requestWillBeSent', (event) => {
@@ -537,7 +571,7 @@ async function createHarness(options) {
     activeChrome = null
     activeProfile = null
   }
-  return { client, chrome, profile, pair, navigate, installInteractionStreamAudit, loadMetrics, openDrawer, clickSidebarText, clickText, openSession, createHarnessSession, setPermissionMode, inputAndSend, waitText, readHistory, waitForUserSubmission, waitForAssistantReply, waitForRunning, waitForAbortedAssistant, resolveVisibleAskUserA, resolveVisiblePlanApproval, getInteractionStreamEvents, getActiveSessionId: () => activeSessionId, getCreatedSessionIds: () => new Set(createdSessionIds), invokeApi, invokeRaw, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, readSessionManifest, close }
+  return { client, chrome, profile, pair, navigate, installInteractionStreamAudit, loadMetrics, openDrawer, clickSidebarText, clickText, openSession, createHarnessSession, setPermissionMode, inputAndSend, waitText, readHistory, waitForUserSubmission, waitForAssistantReply, waitForRunning, waitForAbortedAssistant, resolveVisibleAskUserA, resolveVisiblePlanApproval, getInteractionStreamEvents, getActiveSessionId: () => activeSessionId, getCreatedSessionIds: () => new Set(createdSessionIds), invokeApi, invokeRaw, websocketUrls, websocketHandshakes, websocketFramesReceived, websocketDataReceived, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, readSessionManifest, close }
 }
 
 async function runDeadSocket(harness, options, result) {
@@ -983,20 +1017,211 @@ async function runMobilePolishChecks(harness, options, result) {
   const otherWorkspace = Array.isArray(workspaces) ? workspaces.find((item) => item?.id && item.id !== currentWorkspaceId) : null
   result.steps.push({ name: 'workspace-switch-single-tap', ok: false, skipped: otherWorkspace ? '侧栏项目名为可折叠分组；单击只展开会话列表，不改变 agentWorkspaceId，故不作为工作区切换断言' : '没有可切换的第二个工作区' })
 
-  const sessions = await harness.invokeApi('listAgentSessions')
-  const currentId = await harness.client.evaluate('document.querySelector("[data-session-switch-id].agent-session-item-active")?.getAttribute("data-session-switch-id")')
-  const targetSession = Array.isArray(sessions) ? sessions.find((item) => item?.id && item.id !== currentId && item.workspaceId === currentWorkspaceId && !item.archived) : null
-  if (targetSession) {
-    await harness.openDrawer()
-    const target = await harness.client.evaluate(`(() => { const n=document.querySelector('[data-session-switch-id=${quoteJs(targetSession.id)}]'); if(!n)return null; const r=n.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`)
-    if (!target) throw new Error(`目标会话在侧栏不可见：${targetSession.title}`)
-    await touchAt(harness.client, target.x, target.y)
-    const selected = await waitUntil(harness.client, `document.querySelector('[data-session-switch-id=${quoteJs(targetSession.id)}].agent-session-item-active') !== null`, 10_000)
-    result.steps.push({ name: 'open-session-single-tap', ok: Boolean(selected), touchCount: 1, session: targetSession.title })
-  } else result.steps.push({ name: 'open-session-single-tap', ok: false, skipped: '当前工作区没有可用于切换的第二个活跃会话' })
+  // Build two harness-owned sessions rather than assuming an arbitrary existing session (for example “回复 pong”) is visible in the current sidebar viewport.
+  const sourceSession = await harness.createHarnessSession(`web-remote-harness-mobile-polish-source-${Date.now()}`)
+  const targetSession = await harness.createHarnessSession(`web-remote-harness-mobile-polish-target-${Date.now()}`)
+  await harness.openDrawer()
+  const target = await harness.client.evaluate(`(() => { const n=document.querySelector('[data-session-switch-id=${quoteJs(sourceSession.id)}]'); if(!n)return null; n.scrollIntoView({block:'center'}); const r=n.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`)
+  if (!target) throw new Error(`本套件自建的源会话未出现在侧栏：${sourceSession.id}`)
+  await touchAt(harness.client, target.x, target.y)
+  const selected = await waitUntil(harness.client, `document.querySelector('[data-session-switch-id=${quoteJs(sourceSession.id)}].agent-session-item-active') !== null`, 10_000)
+  result.steps.push({ name: 'open-session-single-tap', ok: Boolean(selected), touchCount: 1, session: sourceSession.title, target: targetSession.title })
   result.singleTapSuccess = result.steps.filter((step) => /single-tap/.test(step.name) && step.ok).length
   result.singleTapChecks = result.steps.filter((step) => /single-tap/.test(step.name) && !step.skipped).length
   result.singleTapSuccessRate = result.singleTapChecks ? `${result.singleTapSuccess}/${result.singleTapChecks}` : 'n/a'
+}
+
+function createSyntheticHeavyHistory(roundCount = 500) {
+  const lines = []
+  const visibleMarker = 'SYNTHETIC_HEAVY_HISTORY_VISIBLE_MARKER'
+  const svgImage = (padding = '') => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="#d22"/><!--${padding}--></svg>`).toString('base64')
+  const smallImage = svgImage()
+  const largeImage = svgImage('L'.repeat(300 * 1024))
+  for (let index = 0; index < roundCount; index++) {
+    const callId = `synthetic-tool-${index}`
+    const payload = randomBytes(48 * 1024).toString('base64')
+    const userText = index === roundCount - 1 ? `${visibleMarker} round=${index}` : `SYNTHETIC_USER round=${index}`
+    const imageBlocks = index % 50 === 0 || index === roundCount - 1
+      ? [{ type: 'image', source: { media_type: 'image/svg+xml', data: smallImage } }, ...(index === roundCount - 1 ? [{ type: 'image', source: { media_type: 'image/svg+xml', data: smallImage } }, { type: 'image', source: { media_type: 'image/svg+xml', data: largeImage } }] : [])]
+      : []
+    const messages = [
+      { type: 'user', uuid: `synthetic-user-${index}`, message: { role: 'user', content: [{ type: 'text', text: userText }, ...imageBlocks] }, parent_tool_use_id: null },
+      { type: 'assistant', uuid: `synthetic-assistant-call-${index}`, message: { role: 'assistant', content: [{ type: 'tool_use', id: callId, name: 'Synthetic', input: { file_path: 'synthetic-heavy-session.txt' } }] }, parent_tool_use_id: null },
+      { type: 'user', uuid: `synthetic-tool-result-${index}`, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: callId, content: [{ type: 'text', text: `SYNTHETIC_TOOL_RESULT_${index} ${payload}` }] }] }, parent_tool_use_id: null },
+      { type: 'assistant', uuid: `synthetic-assistant-final-${index}`, message: { role: 'assistant', content: [{ type: 'text', text: `SYNTHETIC_ASSISTANT_REPLY round=${index}` }] }, parent_tool_use_id: null },
+    ]
+    for (const message of messages) lines.push(JSON.stringify(message))
+  }
+  return { content: `${lines.join('\n')}\n`, visibleMarker }
+}
+
+async function waitForVisibleHistoryMarker(client, marker, timeoutMs) {
+  const end = Date.now() + timeoutMs
+  while (Date.now() < end) {
+    const visible = await client.evaluate(`(() => [...document.querySelectorAll('[data-message-id][data-message-role]')].some((node)=>(node.innerText||'').includes(${quoteJs(marker)})))()`)
+    if (visible) return true
+    await delay(150)
+  }
+  return false
+}
+
+async function runHeavySession(harness, options, result, onSyntheticFileCreated) {
+  const baselineMode = process.env.PROMA_WEB_REMOTE_HEAVY_SESSION_BASELINE === '1'
+  const title = `web-remote-heavy-session-${Date.now()}`
+  const awayTitle = `web-remote-heavy-away-${Date.now()}`
+  const heavy = await harness.createHarnessSession(title)
+  const messagesPath = join(homedir(), '.proma-dev', 'agent-sessions', `${heavy.id}.jsonl`)
+  if (!messagesPath.startsWith(join(homedir(), '.proma-dev', 'agent-sessions') + '/')) throw new Error('拒绝写入开发会话目录以外的文件')
+  const synthetic = createSyntheticHeavyHistory()
+  writeFileSync(messagesPath, synthetic.content, { encoding: 'utf8', flag: 'w' })
+  onSyntheticFileCreated(messagesPath, heavy.id)
+  const syntheticBytes = Buffer.byteLength(synthetic.content, 'utf8')
+  if (syntheticBytes < 30 * 1024 * 1024) throw new Error(`合成大会话不足 30 MiB：${syntheticBytes}`)
+  // Move away from the just-created empty snapshot, then reopen it after network throttling is active.
+  await harness.createHarnessSession(awayTitle)
+  await harness.client.command('Network.emulateNetworkConditions', { offline: false, latency: 300, downloadThroughput: 3 * 1024 * 1024 / 8, uploadThroughput: 1 * 1024 * 1024 / 8, connectionType: 'cellular3g' })
+  const firstFrameIndex = harness.websocketFramesReceived.length
+  const firstNetworkIndex = harness.websocketDataReceived.length
+  const exceptionStart = harness.exceptions.length
+  const startedAt = Date.now()
+  await harness.openDrawer()
+  const heavySessionPoint = await harness.client.evaluate(`(() => {const n=document.querySelector('[data-session-switch-id=${quoteJs(heavy.id)}]');if(!n)return null;n.scrollIntoView({block:'center'});const r=n.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`)
+  if (!heavySessionPoint) throw new Error(`新建的大会话未出现在侧栏：${heavy.id}`)
+  await touchAt(harness.client, heavySessionPoint.x, heavySessionPoint.y)
+  await waitUntil(harness.client, `document.querySelector('[data-session-switch-id=${quoteJs(heavy.id)}].agent-session-item-active') !== null`, 10_000)
+  const historyVisible = await waitForVisibleHistoryMarker(harness.client, synthetic.visibleMarker, baselineMode ? 40_000 : 20_000)
+  const firstHistoryMs = historyVisible ? Date.now() - startedAt : null
+  const timeoutObserved = harness.consoleErrors.slice().some((entry) => JSON.stringify(entry).includes('IPC 请求超时'))
+  const frameEvents = harness.websocketFramesReceived.slice(firstFrameIndex).filter((item) => item.url && new URL(item.url).pathname === '/api/ipc')
+  const networkEvents = harness.websocketDataReceived.slice(firstNetworkIndex).filter((item) => item.url && new URL(item.url).pathname === '/api/ipc')
+  const receivedPayloadBytes = frameEvents.reduce((total, item) => total + item.payloadBytes, 0)
+  const encodedNetworkBytes = networkEvents.reduce((total, item) => total + item.encodedDataLength, 0)
+  const exceptionsDuringTest = harness.exceptions.slice(exceptionStart)
+  result.heavySession = {
+    syntheticSessionId: heavy.id,
+    syntheticJsonlBytes: syntheticBytes,
+    baselineMode,
+    network: { latencyMs: 300, downloadBitsPerSecond: 3 * 1024 * 1024, uploadBitsPerSecond: 1 * 1024 * 1024 },
+    firstHistoryMs,
+    observedThroughMs: Date.now() - startedAt,
+    historyVisible,
+    timeoutObserved,
+    websocketFrameCount: frameEvents.length,
+    websocketPayloadBytes: receivedPayloadBytes,
+    maxDecodedFrameBytes: frameEvents.reduce((max, item) => Math.max(max, item.payloadBytes), 0),
+    cdpEncodedNetworkBytes: encodedNetworkBytes,
+    cdpDataReceivedEventCount: networkEvents.length,
+    exceptions: exceptionsDuringTest.length,
+  }
+  if (baselineMode) {
+    // The pre-fix comparison deliberately expects the unpaged response to miss the 20 s target or hit the 35 s client timeout.
+    if (historyVisible && firstHistoryMs !== null && firstHistoryMs < 20_000) throw new Error(`基线对照意外在 20 秒内加载完成：${firstHistoryMs} ms`)
+    return
+  }
+  if (!historyVisible || firstHistoryMs === null || firstHistoryMs >= 20_000) throw new Error(`大会话首屏历史未在 20 秒内出现：${JSON.stringify(result.heavySession)}`)
+  const hasEarlier = await harness.client.evaluate(`!!document.querySelector('[data-web-remote-load-earlier]:not([hidden])')`)
+  if (!hasEarlier) throw new Error('大会话历史顶部未出现“加载更早”按钮')
+  const visibleMessagesBefore = await harness.client.evaluate(`document.querySelectorAll('[data-message-id][data-message-role]').length`)
+  const earlierButton = await findElement(harness.client, '加载更早', '[data-web-remote-load-earlier]')
+  await touchAt(harness.client, earlierButton.x, earlierButton.y)
+  await waitUntil(harness.client, `document.querySelectorAll('[data-message-id][data-message-role]').length>${visibleMessagesBefore}`, 15_000)
+  result.heavySession.visibleMessagesBeforeLoadEarlier = visibleMessagesBefore
+  result.heavySession.visibleMessagesAfterLoadEarlier = await harness.client.evaluate(`document.querySelectorAll('[data-message-id][data-message-role]').length`)
+  const executionSummary = await harness.client.evaluate(`(() => {const node=[...document.querySelectorAll('button')].filter((item)=>(item.innerText||'').includes('执行过程：1 次工具调用')).at(-1);if(!node)return null;node.scrollIntoView({block:'center'});const r=node.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`)
+  if (!executionSummary) throw new Error('合成大会话中没有可展开的工具调用组')
+  await touchAt(harness.client, executionSummary.x, executionSummary.y)
+  await waitUntil(harness.client, `document.body.innerText.includes('synthetic-heavy-session.txt')`, 10_000)
+  const toolButton = await harness.client.evaluate(`(() => {const nodes=[...document.querySelectorAll('button')];const matches=nodes.filter((item)=>(item.innerText||'').includes('synthetic-heavy-session.txt'));const node=matches.at(-1)||nodes.filter((item)=>(item.innerText||'').includes('Synthetic')).at(-1);if(!node)return {missing:true,buttons:nodes.map((item)=>(item.innerText||'').trim()).filter(Boolean).slice(-40),bodyIncludesFile:document.body.innerText.includes('synthetic-heavy-session.txt')};node.scrollIntoView({block:'center'});const r=node.getBoundingClientRect();return {x:r.left+Math.min(50,r.width/3),y:r.top+r.height/2,label:(node.innerText||'').trim()}})()`)
+  if (!toolButton || toolButton.missing) throw new Error(`无法定位 Read 工具结果按钮：${JSON.stringify(toolButton)}`)
+  result.heavySession.expandedToolLabel = toolButton.label
+  await touchAt(harness.client, toolButton.x, toolButton.y)
+  const expandAll = await harness.client.evaluate(`(() => {const node=[...document.querySelectorAll('button')].filter((item)=>(item.innerText||'').includes('展开全部')).at(-1);if(!node)return null;node.scrollIntoView({block:'center'});const r=node.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`)
+  if (expandAll) await touchAt(harness.client, expandAll.x, expandAll.y)
+  const copyProof = await harness.client.evaluate(`window.electronAPI.getAgentSessionSDKMessages(${quoteJs(heavy.id)}).then(messages=>{const all=Array.isArray(messages)?messages:[];const blocks=all.flatMap(message=>Array.isArray(message?.message?.content)?message.message.content:[]);const toolResult=blocks.find(block=>block?.type==='tool_result');const text=toolResult&&Array.isArray(toolResult.content)?toolResult.content.find(item=>item?.type==='text'&&typeof item.text==='string'&&item.text.includes('SYNTHETIC_TOOL_RESULT_')):null;const media=blocks.filter(block=>block?.type==='text'&&typeof block.text==='string'&&block.text.includes('proma-web-remote-media:')).map(block=>{const prefix='[[proma-web-remote-media:';const start=block.text.indexOf(prefix);const end=start>=0?block.text.indexOf(']]',start):-1;const token=start>=0&&end>start?block.text.slice(start+prefix.length,end):null;return token?JSON.parse(atob(token.replace(/-/g,'+').replace(/_/g,'/').padEnd(Math.ceil(token.length/4)*4,'='))):null}).filter(Boolean);return {longToolResultBytes:text?new TextEncoder().encode(text.text).length:0,textMarkerPresent:!!text?.text?.includes('proma-web-remote-text'),mediaMarkerCount:media.length,inlineMediaCount:media.filter(item=>typeof item.inlineData==='string').length,mediaBytes:media.map(item=>item.bytes)}})`)
+  result.heavySession.transformedCopyProof = copyProof
+  const resultExpanded = await harness.client.evaluate(`document.body.innerText.includes('收起')`)
+  await harness.client.evaluate(`(() => {const nodes=document.querySelectorAll('[data-message-id][data-message-role]');nodes[nodes.length-1]?.scrollIntoView({block:'center'})})()`)
+  await delay(350)
+  result.heavySession.mediaDomProbe = await harness.client.evaluate(`(() => ({mediaMarker:(document.body.innerText||'').includes('proma-web-remote-media'),textMarker:(document.body.innerText||'').includes('proma-web-remote-text'),mediaCards:document.querySelectorAll('[data-web-remote-history-media]').length,buttons:[...document.querySelectorAll('button')].map(node=>(node.innerText||'').trim()).filter(text=>text.includes('图片')||text.includes('点按')).slice(-12),tail:(document.body.innerText||'').slice(-800)}))()`)
+  const expandOriginalButton = await harness.client.evaluate(`(() => {const node=[...document.querySelectorAll('button')].find(item=>(item.innerText||'').includes('点按查看完整内容'));if(!node)return null;node.scrollIntoView({block:'center'});const r=node.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`)
+  if (!expandOriginalButton) throw new Error('未显示截断原文的按需展开按钮')
+  const originalBeforeLength = await harness.client.evaluate(`document.body.innerText.length`)
+  await touchAt(harness.client, expandOriginalButton.x, expandOriginalButton.y)
+  await waitUntil(harness.client, `document.body.innerText.length>${originalBeforeLength + 10}`, 10_000)
+  result.heavySession.expandedToolResultTextLength = await harness.client.evaluate(`document.querySelectorAll('[data-web-remote-expanded-text]').length ? document.querySelectorAll('[data-web-remote-expanded-text]')[0].textContent.length : 0`)
+  const truncationTextVisible = copyProof.longToolResultBytes > 16 * 1024 && resultExpanded && result.heavySession.expandedToolResultTextLength > 16 * 1024
+  if (!truncationTextVisible) {
+    result.heavySession.visibleTextAfterToolExpand = await harness.client.evaluate(`document.body.innerText.slice(-2200)`)
+    result.screenshots.push(await harness.screenshot('heavy-tool-result'))
+    throw new Error(`展开 Read 结果后未能取得完整原文：${JSON.stringify({ copyProof, expandedLength: result.heavySession.expandedToolResultTextLength })}`)
+  }
+  const imagePlaceholderVisible = copyProof.mediaMarkerCount > 0 && await harness.client.evaluate(`[...document.querySelectorAll('button')].some(node=>(node.innerText||'').includes('图片 ·')&&(node.innerText||'').includes('点按加载'))`)
+  if (!imagePlaceholderVisible) throw new Error(`大会话页面未显示图片按需加载卡片：${JSON.stringify(copyProof)}`)
+  const inlineImage = await harness.client.evaluate(`(() => {const image=[...document.querySelectorAll('[data-message-id][data-message-role] img[data-web-remote-inline-image]')].find(node=>node.naturalWidth>0);if(!image)return null;image.scrollIntoView({block:'center'});return {naturalWidth:image.naturalWidth,naturalHeight:image.naturalHeight}})()`)
+  if (!inlineImage || inlineImage.naturalWidth <= 0) throw new Error('小图未以内联 <img> 正常显示')
+  result.heavySession.inlineImage = inlineImage
+  const imageButton = await harness.client.evaluate(`(() => {const node=[...document.querySelectorAll('button')].find(item=>(item.innerText||'').includes('图片 ·')&&(item.innerText||'').includes('点按加载'));if(!node)return null;node.scrollIntoView({block:'center'});const r=node.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`)
+  if (!imageButton) throw new Error('无法定位大图按需加载卡片')
+  await touchAt(harness.client, imageButton.x, imageButton.y)
+  await waitUntil(harness.client, `(() => [...document.querySelectorAll('[data-web-remote-history-media] img')].some(image=>image.complete&&image.naturalWidth>0))()`, 10_000)
+  const loadedImage = await harness.client.evaluate(`(() => {const image=[...document.querySelectorAll('[data-web-remote-history-media] img')].find(node=>node.naturalWidth>0);return image?{naturalWidth:image.naturalWidth,naturalHeight:image.naturalHeight}:null})()`)
+  if (!loadedImage || loadedImage.naturalWidth <= 0) throw new Error('点按后大图没有成功显示')
+  result.heavySession.loadedImage = loadedImage
+  result.screenshots.push(await harness.screenshot('heavy-image-loaded'))
+  result.screenshots.push(await harness.screenshot('heavy-history-copy-visible'))
+  result.heavySession.truncationTextVisible = true
+  result.heavySession.imagePlaceholderVisible = true
+  result.screenshots.push(await harness.screenshot('heavy-truncation-visible'))
+  result.heavySession.exceptions = harness.exceptions.slice(exceptionStart).length
+  if (result.heavySession.exceptions !== 0) throw new Error(`大会话页面出现 JS exception：${JSON.stringify(exceptionsDuringTest)}`)
+  if (!frameEvents.some((item) => item.payloadBytes > 16 * 1024)) throw new Error('未捕获到大于 16 KB 的 WebSocket 接收帧')
+  result.heavySession.largeDecodedFrameObserved = true
+}
+
+async function runCleanupSynthetic(harness, result) {
+  const ids = (process.env.PROMA_WEB_REMOTE_CLEANUP_SESSION_IDS || '').split(',').map((id) => id.trim()).filter(Boolean)
+  if (ids.length === 0 || ids.some((id) => !/^[a-f0-9-]{36}$/i.test(id))) throw new Error('cleanup-synthetic 需要显式传入合成 session UUID 列表')
+  const manifest = await harness.readSessionManifest()
+  result.explicitCleanupSessionIds = []
+  const acceptDeleteConfirm = (event) => { if (event.type === 'confirm') void harness.client.command('Page.handleJavaScriptDialog', { accept: true }).catch(() => {}) }
+  harness.client.on('Page.javascriptDialogOpening', acceptDeleteConfirm)
+  try {
+    for (const id of ids) {
+      const session = manifest.find((item) => item.id === id)
+      if (!session || !/^web-remote-heavy-(?:session|away)-\d+$/.test(session.title)) throw new Error(`目标不是本次格式的合成大会话，拒绝删除：${id}`)
+      await harness.invokeApi('deleteAgentSession', [id])
+      await waitUntil(harness.client, `window.electronAPI.listAgentSessions().then(items=>!(items||[]).some(item=>item?.id===${quoteJs(id)}))`, 15_000)
+      result.explicitCleanupSessionIds.push(id)
+    }
+  } finally { harness.client.off('Page.javascriptDialogOpening', acceptDeleteConfirm) }
+}
+
+async function runMediaDemo(harness, result) {
+  const title = '手机图片演示'
+  const existing = await harness.client.evaluate(`window.electronAPI.listAgentSessions().then(items=>(items||[]).find(item=>item?.title===${quoteJs(title)}))`)
+  const session = existing ?? await harness.createHarnessSession(title)
+  const messagesPath = join(homedir(), '.proma-dev', 'agent-sessions', `${session.id}.jsonl`)
+  if (!messagesPath.startsWith(join(homedir(), '.proma-dev', 'agent-sessions') + '/')) throw new Error('拒绝写入开发会话目录以外的文件')
+  if (existing && (!existsSync(messagesPath) || !readFileSync(messagesPath, 'utf8').includes('synthetic-media-demo-user'))) throw new Error('发现同名非本任务合成演示会话，拒绝覆盖')
+  const smallImage = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="#d22"/></svg>').toString('base64')
+  const largeImage = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120"><rect width="160" height="120" fill="#2670d8"/><text x="12" y="64" fill="white" font-size="16">Demo</text><!--${'D'.repeat(300 * 1024)}--></svg>`).toString('base64')
+  const toolId = 'synthetic-media-demo-tool'
+  const rows = [
+    { type: 'user', uuid: 'synthetic-media-demo-user', message: { role: 'user', content: [{ type: 'text', text: '手机图片演示：小图应直接显示，大图可点按加载。' }, { type: 'image', source: { media_type: 'image/svg+xml', data: smallImage } }, { type: 'image', source: { media_type: 'image/svg+xml', data: largeImage } }] }, parent_tool_use_id: null },
+    { type: 'assistant', uuid: 'synthetic-media-demo-call', message: { role: 'assistant', content: [{ type: 'tool_use', id: toolId, name: 'Synthetic', input: { label: '长文本演示' } }] }, parent_tool_use_id: null },
+    { type: 'user', uuid: 'synthetic-media-demo-result', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolId, content: [{ type: 'text', text: `长工具结果演示：${'这是一段用于点按展开测试的合成原文。'.repeat(1_000)}` }] }] }, parent_tool_use_id: null },
+    { type: 'assistant', uuid: 'synthetic-media-demo-answer', message: { role: 'assistant', content: [{ type: 'text', text: '演示会话：检查小图直显、大图点按加载与长文本点按展开。' }] }, parent_tool_use_id: null },
+  ]
+  const data = `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`
+  const bytes = Buffer.byteLength(data, 'utf8')
+  if (bytes > 3 * 1024 * 1024) throw new Error(`演示会话超过 3 MB：${bytes}`)
+  writeFileSync(messagesPath, data, { encoding: 'utf8', flag: 'w' })
+  result.preserveHarnessSessionIds = [session.id]
+  result.mediaDemo = { sessionId: session.id, title, jsonlBytes: bytes, smallImageBytes: Buffer.from(smallImage, 'base64').byteLength, largeImageBytes: Buffer.from(largeImage, 'base64').byteLength, longTextBytes: Buffer.byteLength(rows[2].message.content[0].content[0].text, 'utf8') }
+  await harness.navigate('/app/')
+  await harness.openSession(title)
+  result.mediaDemo.visibleInHarness = await waitForVisibleHistoryMarker(harness.client, '手机图片演示：', 10_000)
+  if (!result.mediaDemo.visibleInHarness) throw new Error('演示会话已保存，但页面没有显示合成历史首条消息')
 }
 
 async function runSmoke(harness, options, result) {
@@ -1049,6 +1274,7 @@ async function main() {
   }
   let deviceId
   let timeoutTimer
+  let syntheticFileCleanupPath = null
   try {
     const timeoutDiagnostics = async () => {
       const evaluateSafely = (expression) => Promise.race([harness.client.evaluate(expression), delay(4000).then(() => { throw new Error('diagnostic timeout') })]).catch((error) => ({ error: String(error) }))
@@ -1063,12 +1289,16 @@ async function main() {
     const paired = await harness.pair()
     deviceId = paired.deviceId
     result.pairedDeviceId = deviceId
+    await assertIpcCompressionHandshake(harness, options, result)
     const secondAppLoad = await harness.navigate('/app/')
     await harness.installInteractionStreamAudit()
     result.loadMetrics = { first: paired.firstAppLoad, second: secondAppLoad }
     result.sessionManifestBefore = await harness.readSessionManifest()
     if (options.suite === 'smoke') await runSmoke(harness, options, result)
     else if (options.suite === 'mobile-polish') await runMobilePolishChecks(harness, options, result)
+    else if (options.suite === 'heavy-session') await runHeavySession(harness, options, result, (path) => { syntheticFileCleanupPath = path })
+    else if (options.suite === 'media-demo') await runMediaDemo(harness, result)
+    else if (options.suite === 'cleanup-synthetic') await runCleanupSynthetic(harness, result)
     else if (options.suite === 'panel-probe') await runPanelProbe(harness, options, result)
     else if (options.suite === 'layout') await runLayout(harness, options, result)
     else if (options.suite === 'push') await runPush(harness, options, result)
@@ -1128,7 +1358,8 @@ async function main() {
       const beforeDelete = await harness.readSessionManifest()
       harnessSessionCleanup.beforeIds = beforeDelete.map((session) => session.id)
       const createdIds = harness.getCreatedSessionIds()
-      const createdBeforeDelete = beforeDelete.filter((session) => createdIds.has(session.id)).map((session) => session.id)
+      const preserveIds = new Set(result.preserveHarnessSessionIds ?? [])
+      const createdBeforeDelete = beforeDelete.filter((session) => createdIds.has(session.id) && !preserveIds.has(session.id)).map((session) => session.id)
       const acceptDeleteConfirm = (event) => {
         if (event.type === 'confirm') void harness.client.command('Page.handleJavaScriptDialog', { accept: true }).catch((error) => harnessSessionCleanup.errors.push(String(error)))
       }
@@ -1157,6 +1388,10 @@ async function main() {
       result.harnessSessionCleanup = harnessSessionCleanup
       if (!result.error) result.error = `无法执行 harness 专用会话清理: ${String(error)}`
     }
+    if (syntheticFileCleanupPath && existsSync(syntheticFileCleanupPath)) {
+      try { unlinkSync(syntheticFileCleanupPath); result.syntheticJsonlCleanup = 'removed' }
+      catch (error) { result.syntheticJsonlCleanup = `failed: ${String(error)}`; if (!result.error) result.error = result.syntheticJsonlCleanup }
+    }
     try {
       result.sessionManifestAfter = await harness.readSessionManifest()
       const beforeById = new Map((result.sessionManifestBefore ?? []).map((item) => [item.id, item]))
@@ -1169,7 +1404,8 @@ async function main() {
         unchanged: JSON.stringify(before) === JSON.stringify(afterById.get(before.id) ?? null),
       }))
       result.createdHarnessSessionIds = [...createdIds]
-      const changed = result.existingSessionManifestComparison.filter((item) => !item.unchanged)
+      const intentionallyDeleted = new Set(result.explicitCleanupSessionIds ?? [])
+      const changed = result.existingSessionManifestComparison.filter((item) => !item.unchanged && !intentionallyDeleted.has(item.id))
       if (changed.length > 0 && !result.error) result.error = `已有会话标题/权限模式发生变化: ${JSON.stringify(changed)}`
     } catch (error) {
       result.sessionManifestError = String(error)

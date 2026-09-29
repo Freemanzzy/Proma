@@ -80,6 +80,11 @@ export function createPersonalDelegationWakeController(dependencies: DelegationW
     for (const id of ids) consumed.add(id)
   }
 
+  /** continue_delegation 让委派重新运行：清除旧的“已收回”标记，下次完成才能再次唤醒父会话。 */
+  function markRestarted(id: string): void {
+    consumed.delete(id)
+  }
+
   async function attempt(parentSessionId: string): Promise<void> {
     const item = pending.get(parentSessionId)
     if (!item || item.running || now() < item.readyAt) return
@@ -157,7 +162,7 @@ export function createPersonalDelegationWakeController(dependencies: DelegationW
     item.timer = setTimeout(() => { void attempt(record.parentSessionId) }, coalesceMs)
   }
 
-  return { markConsumed, notifyFinished }
+  return { markConsumed, markRestarted, notifyFinished }
 }
 
 function isPersonalDelegationAutoWakeEnabled(): boolean {
@@ -178,6 +183,10 @@ const personalController = createPersonalDelegationWakeController({
 
 export function markPersonalDelegationsConsumed(ids: string[]): void {
   personalController.markConsumed(ids)
+}
+
+export function markPersonalDelegationRestarted(delegationId: string): void {
+  personalController.markRestarted(delegationId)
 }
 
 export function notifyPersonalDelegationFinished(record: DelegationWakeRecord): void {

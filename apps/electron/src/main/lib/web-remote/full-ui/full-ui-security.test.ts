@@ -97,6 +97,16 @@ describe('Web Remote full-ui security policy', () => {
     }
   })
 
+  test('历史媒体只读通道显式为 session scope 并拒绝未授权会话', async () => {
+    expect(getWebRemoteChannelPolicy('web-remote:get-history-media')).toMatchObject({ level: 'read', scope: 'session' })
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
+    bridge.registerInvoke('web-remote:get-history-media', async (_event, input) => ({ text: (input as { sessionId: string }).sessionId }))
+    const ws = client(bridge)
+    expect((await invoke(ws, 'web-remote:get-history-media', [{ sessionId: 's-1' }])).value.text).toBe('s-1')
+    expect((await invoke(ws, 'web-remote:get-history-media', [{ sessionId: 's-2' }])).error.denied).toBe(true)
+    expect((await invoke(ws, 'web-remote:get-history-media', [{ sessionId: 'missing' }])).error.denied).toBe(true)
+  })
+
   test('默认拒绝、denied 通道和 session/workspace 越权均生效', async () => {
     const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
     bridge.registerInvoke('agent:get-sdk-messages', async () => ['ok'])
@@ -106,6 +116,40 @@ describe('Web Remote full-ui security policy', () => {
     expect((await invoke(ws, 'channel:decrypt-key', ['x'])).error.denied).toBe(true)
     expect((await invoke(ws, 'agent:get-sdk-messages', ['s-2'])).error.denied).toBe(true)
     expect((await invoke(ws, 'agent:get-skills', [{ workspaceId: 'ws-2' }])).error.denied).toBe(true)
+  })
+
+  test('大 IPC 响应切成有限大小 UTF-8 分块，序号可完整重组', async () => {
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
+    bridge.registerInvoke('agent:get-sdk-messages', async () => Array.from({ length: 40 }, (_, index) => ({ type: index % 2 === 0 ? 'user' : 'assistant', text: '块界🎐'.repeat(1_000) })))
+    const ws = client(bridge)
+    ws.emit('message', Buffer.from(JSON.stringify({ type: 'invoke', id: 'chunked', channel: 'agent:get-sdk-messages', args: ['s-1'] })))
+    for (let i = 0; i < 100 && !ws.sent.some((frame) => JSON.parse(frame).type === 'chunk'); i++) await new Promise((resolve) => setTimeout(resolve, 2))
+    const chunks = ws.sent.map((frame) => JSON.parse(frame)).filter((frame) => frame.type === 'chunk').sort((a, b) => a.seq - b.seq)
+    expect(chunks.length).toBeGreaterThan(1)
+    expect(chunks.every((frame) => frame.total === chunks.length && frame.requestId === 'chunked')).toBe(true)
+    const assembled = Buffer.from(chunks.map((frame) => frame.data).join(''), 'base64').toString('utf8')
+    const response = JSON.parse(assembled)
+    expect(response.type).toBe('response')
+    expect(response.ok).toBe(true)
+    expect(response.value.messages).toHaveLength(40)
+    expect(chunks.every((frame) => Buffer.byteLength(JSON.stringify(frame)) < 256 * 1024)).toBe(true)
+  })
+
+  test('SDK 历史仅对 Web Remote 返回尾部完整轮次窗口并按 session 授权', async () => {
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
+    bridge.registerInvoke('agent:get-sdk-messages', async () => [
+      { type: 'user', content: 'one' },
+      { type: 'assistant', content: 'answer one' },
+      { type: 'user', content: 'two' },
+      { type: 'assistant', content: 'answer two' },
+    ])
+    const ws = client(bridge)
+    const response = await invoke(ws, 'agent:get-sdk-messages', ['s-1', { budgetBytes: 1 }])
+    expect(response.ok).toBe(true)
+    expect(response.value.__webRemoteHistoryWindow).toBe(true)
+    expect(response.value.messages.map((message: { type: string }) => message.type)).toEqual(['user', 'assistant'])
+    expect(response.value.hasEarlier).toBe(true)
+    expect((await invoke(ws, 'agent:get-sdk-messages', ['s-2'])).error.denied).toBe(true)
   })
 
   test('列表返回按工作区过滤，设置/渠道列表不泄露密钥字段', async () => {
