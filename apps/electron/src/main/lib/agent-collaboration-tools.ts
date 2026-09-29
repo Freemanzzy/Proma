@@ -41,7 +41,7 @@ import {
 } from './agent-collaboration-utils'
 import { assertEnabledModelForChannel, listEnabledAgentModelsForChannel } from './agent-model-selection'
 import { serializePiToolResultPayload } from './adapters/pi-tool-result-json'
-import { markPersonalDelegationsConsumed, notifyPersonalDelegationFinished } from './personal-delegation-wake'
+import { markPersonalDelegationRestarted, markPersonalDelegationsConsumed, notifyPersonalDelegationFinished } from './personal-delegation-wake'
 
 interface CollaborationToolContext {
   sessionId: string
@@ -1144,6 +1144,7 @@ export function buildPiCollaborationTools(
         record.error = undefined
         record.resultSummary = undefined
         record.completedAt = undefined
+        markPersonalDelegationRestarted(record.delegationId)
         const completionHandle = createDelegationCompletion()
         record.completion = completionHandle.completion
         record.resolveCompletion = completionHandle.resolveCompletion

@@ -840,3 +840,9 @@
 - `mobile-polish` 归因：从 `9f7cfcac` 读取旧版 harness 并复跑，重现“目标会话在侧栏不可见：回复 pong”。旧 harness 假设既有 `回复 pong` 会话位于当前侧栏可视区；改为本轮自建源/目标会话后，当前分支 iPhone mobile-polish **2/2 单击检查通过**、0 exceptions。该失败归因于 harness 夹具/可见性假设，不是新历史功能的侧栏回归。
 - `web-remote-server.test.ts` 单独复跑仍为 **0 pass / 2 fail**：Electron mock 初始化报 `Export named 'app' not found`，后续 `server.stop` undefined 为清理连带错误。该测试文件相对 `9f7cfcac` 未改动；本轮未扩大 Electron mock 修复范围。
 - 最终验证：`mobile-preview.sh test` 默认 **9/9 套件通过**（原 8 套 + `iphone:heavy-session`），所有套件 **0 JS exceptions**；mobile-polish 单击检查 2/2。`bun test` **542 pass / 0 fail**（84 files，1,226 assertions），Electron typecheck 通过；`build:main`、`build:renderer`、`build:web-preload` 均通过，Renderer 保留既有大 chunk warning。独立重跑 `web-remote-server.test.ts` 仍为 0 pass / 2 fail：Electron mock 缺少 `app` 导出，之后 `server.stop` undefined 为清理连带错误；该测试文件与 `9f7cfcac` 相同，未归因于本次改动。`git diff --check` 通过。开发实例、17889/5173、8443 Serve 与 iPhone 17 Pro 模拟器均保持运行；未 push、合并、打包或运行安装更新；正式 Proma 未退出/重启。
+
+## 2026-09-29: 修复 continue_delegation 后不再自动唤醒
+
+- 现象：父会话 01:52 被唤醒并用 `get_delegation_results` 收回 `05c70f81` 的结果（标记 consumed），随后用 `continue_delegation` 让子任务补做验收；03:52 子任务再次完成时 main.log 记 `[子任务唤醒] consumed: delegationId=05c70f81…`，未唤醒——consumed 标记没有随委派重跑清除。
+- 修复：`personal-delegation-wake.ts` 新增 `markPersonalDelegationRestarted`；`agent-collaboration-tools.ts` 在 `continue_delegation` 把委派重置为 running 时调用一行清除标记。新增单测；全量 618 pass / 0 fail。待打包。
+- 同日记录：上游改动面第 1 阶段（报告在 `.context/proma-personal/upstream-surface/phase1-2026-09-29.md`）结论为第 2 阶段暂缓，下次正式 tag 同步时按实际冲突决定，并顺带把 `useGlobalAgentListeners.ts` 个人版恢复逻辑迁出；仓库已开 `git rerere`（autoupdate=false）。

@@ -55,6 +55,16 @@ describe('personal delegation auto wake', () => {
     expect(h.logs.some((line) => line.includes('consumed:'))).toBe(true)
   })
 
+  it('收回结果后 continue_delegation 重跑，再次完成时仍会唤醒', async () => {
+    const h = makeHarness()
+    h.controller.markConsumed(['continued-id'])
+    h.controller.markRestarted('continued-id')
+    h.controller.notifyFinished(record('continued-id'))
+    await pause()
+    expect(h.calls).toHaveLength(1)
+    expect(h.calls[0]?.input.userMessage).toContain('continued-id')
+  })
+
   it('父会话 stoppedByUser 时不唤醒', async () => {
     const h = makeHarness()
     h.setParent({ channelId: 'channel-1', stoppedByUser: true })
