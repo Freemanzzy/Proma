@@ -1163,8 +1163,14 @@ async function runHeavySession(harness, options, result, onSyntheticFileCreated)
   const imagePlaceholderVisible = copyProof.mediaMarkerCount > 0 && await harness.client.evaluate(`[...document.querySelectorAll('button')].some(node=>(node.innerText||'').includes('图片 ·')&&(node.innerText||'').includes('点按加载'))`)
   if (!imagePlaceholderVisible) throw new Error(`大会话页面未显示图片按需加载卡片：${JSON.stringify(copyProof)}`)
   const inlineImage = await harness.client.evaluate(`(() => {const image=[...document.querySelectorAll('[data-message-id][data-message-role] img[data-web-remote-inline-image]')].find(node=>node.naturalWidth>0);if(!image)return null;image.scrollIntoView({block:'center'});return {naturalWidth:image.naturalWidth,naturalHeight:image.naturalHeight}})()`)
-  if (!inlineImage || inlineImage.naturalWidth <= 0) throw new Error('小图未以内联 <img> 正常显示')
-  result.heavySession.inlineImage = inlineImage
+  if (options.suite === 'cellular') {
+    const saverState = await harness.client.evaluate(`({enabled:localStorage.getItem('proma-web-remote-data-saver')==='on',label:document.querySelector('[data-web-remote-data-saver]')?.innerText||''})`)
+    if (!saverState.enabled || copyProof.inlineMediaCount !== 0 || !saverState.label.includes('开')) throw new Error(`省流量模式未禁用所有图片内联：${JSON.stringify({ saverState, copyProof })}`)
+    result.heavySession.inlineImage = { skipped: 'cellular mode must not inline images', saverState }
+  } else {
+    if (!inlineImage || inlineImage.naturalWidth <= 0) throw new Error('小图未以内联 <img> 正常显示')
+    result.heavySession.inlineImage = inlineImage
+  }
   const imageButton = await harness.client.evaluate(`(() => {const node=[...document.querySelectorAll('button')].find(item=>(item.innerText||'').includes('图片 ·')&&(item.innerText||'').includes('点按加载'));if(!node)return null;node.scrollIntoView({block:'center'});const r=node.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`)
   if (!imageButton) throw new Error('无法定位大图按需加载卡片')
   await touchAt(harness.client, imageButton.x, imageButton.y)

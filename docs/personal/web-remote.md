@@ -99,7 +99,7 @@ tailscale serve --https=8443 off
 
 - `bash scripts/personal/mobile-preview.sh start`：检查 17889/5173 空闲、开启临时 8443 Tailscale Serve、后台启动开发实例并等待启动与分级覆盖率 100% 日志；PID/日志分别记于 `/tmp/proma-mobile-preview.pids` 与 `/tmp/proma-mobile-preview.log`。
 - `bash scripts/personal/mobile-preview.sh sim [--device <name|udid>]`：默认启动 iPhone 17 Pro 模拟器、打开 Simulator、生成配对码并通过 AXe 的辅助功能树定位配对控件，配对后打开 `/app/` 并以 `simctl` 截图确认界面。
-- `bash scripts/personal/mobile-preview.sh test [suites...]`：默认运行 8 个既有 iPhone/Android 回归套件，并追加 `iphone:heavy-session` 大会话套件；每套单独去掉代理变量并受 420 秒外层 watchdog 保护，终端只汇总结果，完整 harness 输出分别保存在 `/tmp/proma-mobile-preview-<ua>-<suite>.log`；结束核查无残留 `proma-mobile-chrome`。
+- `bash scripts/personal/mobile-preview.sh test [suites...]`：默认运行既有 iPhone/Android 回归套件并追加 `iphone:heavy-session` 大会话套件；另可显式运行 `iphone:cellular`，以 CDP 50 ms RTT / 0.5 Mbps 下行验证弱网历史首屏和省流量图像策略（静态资源在开启节流前已加载，因此不代表更新后资源冷启动）。每套单独去掉代理变量并受 420 秒外层 watchdog 保护，终端只汇总结果，完整 harness 输出分别保存在 `/tmp/proma-mobile-preview-<ua>-<suite>.log`；结束核查无残留 `proma-mobile-chrome`。
 - `bash scripts/personal/mobile-preview.sh status` 查看服务、模拟器与 harness 进程；`stop` 只按记录 PID 停止开发实例进程树，关闭 8443 并确认 Serve 路由状态。用户需要继续体验时，最后运行 `start` 与 `sim`，保持服务运行，不要执行 `stop`。
 
 ### 首屏资源拆分评估（2026-09-28）

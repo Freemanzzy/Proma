@@ -888,3 +888,11 @@
 - Service Worker 仅处理 push/通知，不缓存导航、静态文件、API 或 WebSocket。Wi-Fi 后台预取可以通过 install/activate 预缓存静态 hash 资源实现，但需先取得资源清单并处理版本激活、存储配额、过期资源清理与并发更新；若错误地 `cache.addAll` 大资源可能耗流量、占空间或延迟新版本使用。本批评估后未实现。
 - 验证：专项 28 pass；全量 `bun test` 629 pass / 0 fail；`bun run typecheck` 通过；`build:main`、`build:renderer`、`build:web-preload` 通过。`build:renderer` 仍报告既有大 chunk 警告；未修改 Vite 上游拆包配置。
 - 未运行安装、更新脚本、打包或 push；未触碰正式 `~/.proma` 与已安装 Proma 进程。开发实例 start/sim 与 cellular/mobile-preview 测试待本轮结束时执行。
+
+## 2026-09-29: 蜂窝降载开发实例验证补记
+
+- `mobile-preview.sh test` 默认套件通过：iPhone panel-probe/smoke/mobile-polish/layout/dead-socket/heavy-session，Android smoke/attachments/dead-socket；大会话首屏 8,028 ms，2.83 MB 解压 payload，0 JS exceptions。另 `iphone:cellular` 通过：CDP 50 ms / 下行 0.5 Mbps / 合成 32 MiB JSONL，弱网模式首屏历史 **4,754 ms**，WebSocket 解压 payload 共 276,617 B（最大帧 249,328 B），0 exceptions；省流量模式标识开启、所有图像均未内联，点按大图成功；加载更早消息 28→56。该测试进入会话时 app 静态资源已在 harness 前置加载，属于已缓存资源 + 低速历史 IPC 验证，不代表更新后清缓存的完整 `/app/` 冷启动耗时。
+- 冷启动 IPC 计量摘要中 `agent:list-sessions` 1 次 / 9,447 B（当前开发数据）；同时 harness 多步骤及周期活动产生的后续采样中 `agent:list-sessions` 6–7 次、总 56,942–64,261 B。后续重复调用有移动端存活/显示周期等来源；shim 已做并发合并但不缓存串行轮询。HTTP 静态计量跨 harness 连接汇总的一次记录：60 次、原始 8,224,870 B、实际发送 3,245,958 B；不是单次冷启动口径。`agent:get-sdk-messages` 的 `sentBytes` 是应用层序列化/分片帧估计，不是 WebSocket 压缩线缆字节；这轮 CDP `encodedDataLength` 对 IPC WebSocket 为 0。
+- `PROMA_WEB_REMOTE_HEAVY_SESSION_BASELINE=1` 环境对照在相同 50 ms / 0.5 Mbps 下等待 40.4 秒未显示历史，并有 WebSocket/renderer 连接中断；支持“旧式无历史窗口策略在弱网超时”的基线结论。baseline 对照在 IPC 中断后 harness teardown 无法完成，随后已通过独立的 harness 清理步骤移除自建会话与 JSONL；核实开发会话清单恢复原有条目，未触碰其它会话。为使启动脚本支持该试验，`mobile-preview.sh start` 现在透传该可选环境变量。
+- 首屏资源方面没有完成“更新后清缓存”与“静态资源缓存关闭”两组 under-throttle 对照；未证明完整 `/app/` 框架时间下降。旧 9.66 MB 的各项实际贡献仍不能由本次历史通道样本反推；新的 0.5 Mbps 套件只在会话数据阶段启用节流。
+- 上述计量/弱网回归与 build/typecheck 结果见上一节；`mobile-preview.sh start` 与 `sim` 在最终检查阶段保持运行（sim 状态待最终记录）。
