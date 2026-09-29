@@ -866,3 +866,7 @@
 
 - 复核 `5af07180`：上游文件 0 行改动；新通道 `web-remote:get-history-media` 分级 read/session；全量 623 pass。
 - 父会话修复：`mobile-js.ts` 中标记载荷解析失败时原样放回 `[[proma-web-remote-…]]` 文本，会被 MutationObserver 反复命中并替换（潜在死循环）；改为替换为“标记无法解析，请在桌面查看”提示。新增单测；全量 624 pass / 0 fail。
+
+## 2026-09-29: 手机大会话批次合并（待安装）
+
+- 合并 `fix/mobile-heavy-sessions`：尾部分页 + 加载更早、瘦身、保守压缩、分片按进度超时、小图直显 / 大图与长文本点按加载（`web-remote:get-history-media`）、continue_delegation 后重新可唤醒、标记解析失败防循环。用户 2026-09-29 12:49 同意打包。
