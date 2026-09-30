@@ -181,4 +181,10 @@ Web Remote WebSocket 为超过 16 KB 的消息启用 per-message deflate；服�
 - 导入过程中，JSONL 与元数据中对 `~/.proma/` 的路径引用改写为 `~/.proma-dev/`。新根与目录权限为 `0700`，文件为 `0600`。Web Remote 启动前必须设成 `workspaceScope: "allowlist"`，只列所需的一个工作区；未完成配置和审计前不得启用 Tailscale Serve。
 - 2026-09-30 本地受限导入结果：备份目标工作区索引 830 条会话、826 个匹配 JSONL（535,645,225 B）；目标真实会话 JSONL 为 41,914,743 B。安全审计确认导入根仅有会话/工作区数据及最小 Web Remote 配置，且没有遗留正式 `/.proma/` 路径引用。附件、Pi runtime artifact、项目文件及其他 4 个工作区的会话数据均未导入，因此历史中指向这些缺失资源的旧引用不保证可打开。
 - **0.5 Mbps 压力测试（不是当前网络代表值）**：iPhone UA Chromium，经开发 Serve；下行 524,288 bit/s、50 ms RTT、上行 1,048,576 bit/s。真实 830 条会话列表约 459,730 B responseUtf8、613,300 B 应用层发送，fresh-list 调用约 10,135 ms；41,914,743 B 真实会话历史首次显示约 4,349 ms。历史 IPC 约 197,907 B responseUtf8 / 应用层计量、CDP 解压 WebSocket payload 140,728 B；deflate 估算 58,844 B、bufferedPeak 2,796,190 B。CDP 解压 payload 与应用层计量都不是压缩线缆字节；`wireBytes` 为 `null`。
-- **当前链路验收目标（2026-09-30 用户提供）为 3 Mbps 中继**，0.5 Mbps 只作压力测试，不得用来代表当前使用体验。本轮未完成 3 Mbps 真实备份 E2E：开发应用端口没有监听，8443 Serve 路由存在但上游不可用；旧 `mobile-preview.sh start` 会间接调用不安全的按名清理，独立安全启动任务尚未完成，因此未重启、未以旧入口恢复服务。3 Mbps 列表/历史与180秒空闲专项待安全启动入口可用后测量。
+- **当前链路验收目标（2026-09-30 用户提供）为 3 Mbps 中继**，0.5 Mbps 只作压力测试，不得用来代表当前使用体验。本轮未完成 3 Mbps 真实备份 E2E：开发应用端口没有监听；独立安全启动任务尚未就绪，因此不运行旧 `mobile-preview.sh start`/`dev.sh` 链，也不把 Tailscale Serve 配置当成可用服务。已关闭无上游进程的临时 8443 路由。3 Mbps 列表/历史与180秒空闲专项待安全启动入口可用后测量。
+
+### 会话元数据增量事件契约（2026-09-30）
+
+- `agent-session-manager.ts` 的索引写入点是会话元数据增量的单一事件源；按每次持久化索引前后的安全投影生成 upsert/remove。投影含 renderer 实际用到的 `parentSessionId`、`rootSessionId`、`sourceDelegationId`、`delegationStatus`、`sourceAutomationId`，以保持子会话树、运行状态和自动任务分组；不读取这些字段的 `delegationRole`、`delegationDepth`、`automationGraduated` 不随事件下发。
+- 事件携带 main-process boot UUID `epoch` 与单调 `sequence`。可清除的列表分类字段通过 `clearedFields` 显式标记，防止客户端浅合并后残留旧关系/分组；不下发 `delegationGoal`、`piSessionFile`、`piEntryBindings`、凭据、secret、绝对路径或其他未列入投影的字段。
+- `agent:session-metadata-changed` 在 full-ui 分级表中是 `read/workspace`。服务器按当前 workspaces allowlist 定向过滤；会话移出已授权范围时只发送此前允许列表的 `remove` + session ID，不发送标题或目标工作区；目标工作区未授权的新增/更新、未授权会话删除均拒绝。

@@ -462,6 +462,16 @@ export class WebRemoteIpcBridge {
   private eventAllowed(channel: string, value: unknown): boolean {
     const policy = this.policy(channel)
     if (!policy || policy.level === 'denied') return false
+    if (channel === 'agent:session-metadata-changed') {
+      if (!value || typeof value !== 'object') return false
+      const change = value as { epoch?: unknown; sequence?: unknown; action?: unknown; workspaceId?: unknown; previousWorkspaceId?: unknown; session?: unknown }
+      const session = change.session && typeof change.session === 'object' ? change.session as { id?: unknown } : undefined
+      if (typeof change.epoch !== 'string' || !change.epoch || !Number.isSafeInteger(change.sequence)
+        || (change.action !== 'upsert' && change.action !== 'remove')
+        || typeof change.workspaceId !== 'string' || typeof session?.id !== 'string' || !session.id) return false
+      return this.workspaceAllowed(change.workspaceId)
+        || (change.action === 'upsert' && typeof change.previousWorkspaceId === 'string' && this.workspaceAllowed(change.previousWorkspaceId))
+    }
     if (policy.scope === 'session') {
       const sessionId = resolveSessionId([value], this.resolvers)
       return this.sessionAllowed(sessionId)
@@ -475,8 +485,28 @@ export class WebRemoteIpcBridge {
       if (!this.loggedUnknown.has(channel) && !this.policy(channel)) { this.loggedUnknown.add(channel); console.warn(`[Web Remote] 未登记事件默认拒绝: ${channel}`) }
       return
     }
+    let remoteValue = value
+    if (channel === 'agent:session-metadata-changed' && value && typeof value === 'object') {
+      const change = value as { epoch?: unknown; sequence?: unknown; action?: unknown; workspaceId?: unknown; previousWorkspaceId?: unknown; clearedFields?: unknown; session?: unknown }
+      const currentWorkspaceAllowed = typeof change.workspaceId === 'string' && this.workspaceAllowed(change.workspaceId)
+      const previousWorkspaceAllowed = typeof change.previousWorkspaceId === 'string' && this.workspaceAllowed(change.previousWorkspaceId)
+      const rawSession = change.session && typeof change.session === 'object' ? change.session as Record<string, unknown> : {}
+      if (!currentWorkspaceAllowed && previousWorkspaceAllowed && change.action === 'upsert') {
+        // A move out of scope is observable only as removal from the previously allowed list.
+        remoteValue = { epoch: change.epoch, sequence: change.sequence, action: 'remove', workspaceId: change.previousWorkspaceId, session: { id: rawSession.id } }
+      } else if (currentWorkspaceAllowed && (change.action === 'upsert' || change.action === 'remove')) {
+        const safeKeys = ['id', 'title', 'createdAt', 'updatedAt', 'workspaceId', 'channelId', 'modelId', 'pinned', 'starred', 'archived', 'isDraft', 'manualWorking', 'completedButUnconfirmed', 'stoppedByUser', 'parentSessionId', 'rootSessionId', 'sourceDelegationId', 'delegationStatus', 'sourceAutomationId']
+        const session = Object.fromEntries(safeKeys.filter((key) => rawSession[key] !== undefined).map((key) => [key, rawSession[key]]))
+        session.workspaceId = change.workspaceId
+        const clearable = ['channelId', 'modelId', 'pinned', 'starred', 'archived', 'isDraft', 'manualWorking', 'completedButUnconfirmed', 'stoppedByUser', 'parentSessionId', 'rootSessionId', 'sourceDelegationId', 'delegationStatus', 'sourceAutomationId']
+        const clearedFields = Array.isArray(change.clearedFields)
+          ? change.clearedFields.filter((field): field is string => typeof field === 'string' && clearable.includes(field))
+          : []
+        remoteValue = { epoch: change.epoch, sequence: change.sequence, action: change.action, workspaceId: change.workspaceId, ...(clearedFields.length ? { clearedFields } : {}), session }
+      } else return
+    }
     let payload: unknown
-    try { payload = encodeWebRemoteValue(value) } catch (error) {
+    try { payload = encodeWebRemoteValue(remoteValue) } catch (error) {
       console.error('[Web Remote full-ui] 事件序列化失败:', channel, error instanceof Error ? error.message : String(error))
       payload = { __proma_web_remote_error: 'serialization_failed', channel }
     }

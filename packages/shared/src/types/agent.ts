@@ -828,6 +828,27 @@ export interface AgentSessionMeta {
   updatedAt: number
 }
 
+/** Minimal, path-free metadata event used to synchronize session lists across clients. */
+export interface AgentSessionMetadataChange {
+  /** Per-main-process boot UUID; sequence numbers restart when the main process restarts. */
+  epoch: string
+  sequence: number
+  action: 'upsert' | 'remove'
+  workspaceId: string
+  previousWorkspaceId?: string
+  /** Optional metadata fields removed by this write; clients must delete rather than keep stale classifications. */
+  clearedFields?: Array<
+    'channelId' | 'modelId' | 'pinned' | 'starred' | 'archived' | 'isDraft' | 'manualWorking' |
+    'completedButUnconfirmed' | 'stoppedByUser' | 'parentSessionId' | 'rootSessionId' |
+    'sourceDelegationId' | 'delegationStatus' | 'sourceAutomationId'
+  >
+  session: Pick<AgentSessionMeta, 'id'> & Partial<Pick<AgentSessionMeta,
+    'title' | 'createdAt' | 'updatedAt' | 'workspaceId' | 'channelId' | 'modelId' |
+    'pinned' | 'starred' | 'archived' | 'isDraft' | 'manualWorking' |
+    'completedButUnconfirmed' | 'stoppedByUser' | 'parentSessionId' | 'rootSessionId' |
+    'sourceDelegationId' | 'delegationStatus' | 'sourceAutomationId'>>
+}
+
 /** Agent 委派子会话的任务角色 */
 export type AgentDelegationRole = 'explore' | 'research' | 'implement' | 'review' | 'custom'
 
@@ -2070,6 +2091,8 @@ export const AGENT_IPC_CHANNELS = {
   // 标题自动生成通知（主进程 → 渲染进程推送）
   /** 标题已更新（首次对话完成后自动生成） */
   TITLE_UPDATED: 'agent:title-updated',
+  /** 会话列表只读元数据增量（不含敏感路径、Pi artifact 或委派目标） */
+  SESSION_METADATA_CHANGED: 'agent:session-metadata-changed',
 
   // 工作区配置变化通知（主进程 → 渲染进程推送）
   /** 工作区能力变化（MCP/Skills 文件监听触发） */

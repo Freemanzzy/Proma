@@ -949,3 +949,10 @@
 - 真实负载压力测试（iPhone UA Chromium，经开发 Serve；下行 **524,288 bit/s（约0.5 Mbps）**、50 ms RTT、上行 1,048,576 bit/s）：列表 830 条，responseUtf8 **459,730 B**、应用发送 **613,300 B**、fresh-list **10,135 ms**；41,914,743 B 历史首次可见 **4,349 ms**。历史 IPC response/app **197,907 B**，CDP 解压 WebSocket payload **140,728 B**，deflate estimate **58,844 B**，bufferedPeak **2,796,190 B**；实际线缆字节未取得。该 0.5 Mbps 数值仅是压力测试，不代表当前中继带宽。
 - 用户截至本日给出的当前中继带宽为 **3 Mbps**。本轮未在3 Mbps下完成真实列表/历史/空闲专项：开发进程当时已无17889监听，8443 Serve 路由虽留存但上游不可用；旧 `mobile-preview.sh start` 会间接调用按名终止脚本，独立安全启动入口尚未就绪。未为继续测试而运行旧启动链或新增按名清理方案。后续需等安全启动入口完成，再记录3 Mbps当前条件结果。
 - 更新：本记录与 [`web-remote.md`](./web-remote.md) 中的受限导入、安全边界、压力测试与 3 Mbps 未完成状态同步。模型渠道未导入；手机界面显示“暂无可用模型”是有意隔离结果，未用于本批历史/元数据测试。
+
+## 2026-09-30: 会话索引写入发布脱敏增量事件
+
+- `agent-session-manager.ts` 在 `writeIndex()` 单一持久化点比较前后安全投影，覆盖创建、普通元数据更新、归档/恢复、置顶/星标、跨工作区迁移与删除。每进程使用随机 boot `epoch` + 单调 `sequence`；`clearedFields` 显式表达旧可选分类字段被移除，避免客户端浅合并保留陈旧关系。投影按 renderer 实际消费保留 `parentSessionId`、`rootSessionId`、`sourceDelegationId`、`delegationStatus`、`sourceAutomationId`；不读的 `delegationRole`、`delegationDepth`、`automationGraduated`、`delegationGoal` 及 Pi artifact/entry bindings、路径不发出。
+- `agent:session-metadata-changed` 明确登记为 `read/workspace`。服务端按授权 allowlist 裁剪并再次用安全字段白名单重建 payload；会话移出授权范围只发 session ID/remove，不含标题或目标工作区。Main IPC 与 Electron/web preload 添加只读订阅，桌面 IPC 原业务处理未改变。
+- 定向安全与主进程测试 **45 pass / 0 fail**；测试覆盖写入点单调事件、创建/更新/移动/删除、字段脱敏、未授权 workspace 事件屏蔽及移出授权范围的 remove 映射。`bun run typecheck` 全 workspace 通过。
+- 真实开发设备的 3 Mbps 验收仍因进程安全分支未就绪、17889 不监听而待办；相关 0.5 Mbps 数据只见上一节压力测试，不宣称已完成当前链路体验验证。更新 `docs/personal/web-remote.md` 会话元数据事件契约段。

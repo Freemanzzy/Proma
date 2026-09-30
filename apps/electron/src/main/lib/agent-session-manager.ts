@@ -31,6 +31,7 @@ import { resolvePiThinkingLevel } from './agent-thinking-level'
 import { getSettings } from './settings-service'
 import type {
   AgentSessionMeta,
+  AgentSessionMetadataChange,
   AgentMessage,
   SDKMessage,
   SDKUserMessage,
@@ -69,6 +70,52 @@ const INDEX_VERSION = 2
 // 删除中的会话 ID 在应用生命周期内不可复用。先写入墓碑可让尚在异步预检、
 // 终止或持久化阶段的旧运行安全收束，而不会在文件删除后重新创建该会话。
 const deletingAgentSessionIds = new Set<string>()
+
+type AgentSessionMetadataProjection = Pick<AgentSessionMeta, 'id' | 'title' | 'createdAt' | 'updatedAt'> & Partial<Pick<AgentSessionMeta,
+  'workspaceId' | 'channelId' | 'modelId' | 'pinned' | 'starred' | 'archived' | 'isDraft' |
+  'manualWorking' | 'completedButUnconfirmed' | 'stoppedByUser' | 'parentSessionId' | 'rootSessionId' |
+  'sourceDelegationId' | 'delegationStatus' | 'sourceAutomationId'>>
+
+const SESSION_METADATA_CLEARABLE_FIELDS: NonNullable<AgentSessionMetadataChange['clearedFields']> = [
+  'channelId', 'modelId', 'pinned', 'starred', 'archived', 'isDraft', 'manualWorking',
+  'completedButUnconfirmed', 'stoppedByUser', 'parentSessionId', 'rootSessionId',
+  'sourceDelegationId', 'delegationStatus', 'sourceAutomationId',
+]
+const sessionMetadataChangeEpoch = randomUUID()
+let sessionMetadataChangeSequence = 0
+let persistedSessionMetadataSnapshot: Map<string, AgentSessionMetadataProjection> | null = null
+const sessionMetadataChangeListeners = new Set<(change: AgentSessionMetadataChange) => void>()
+
+export function onAgentSessionMetadataChanged(listener: (change: AgentSessionMetadataChange) => void): () => void {
+  sessionMetadataChangeListeners.add(listener)
+  return () => sessionMetadataChangeListeners.delete(listener)
+}
+
+function publishSessionMetadataChange(
+  action: AgentSessionMetadataChange['action'],
+  session: AgentSessionMetadataProjection,
+  previousWorkspaceId?: string,
+  clearedFields?: AgentSessionMetadataChange['clearedFields'],
+): void {
+  if (!session.workspaceId) return
+  const { id, title, createdAt, updatedAt, workspaceId, channelId, modelId, pinned, starred, archived, isDraft,
+    manualWorking, completedButUnconfirmed, stoppedByUser, parentSessionId, rootSessionId, sourceDelegationId,
+    delegationStatus, sourceAutomationId } = session
+  const change: AgentSessionMetadataChange = {
+    epoch: sessionMetadataChangeEpoch,
+    sequence: ++sessionMetadataChangeSequence,
+    action,
+    workspaceId,
+    ...(previousWorkspaceId && previousWorkspaceId !== workspaceId ? { previousWorkspaceId } : {}),
+    ...(clearedFields?.length ? { clearedFields } : {}),
+    session: { id, title, createdAt, updatedAt, workspaceId, channelId, modelId, pinned, starred, archived, isDraft,
+      manualWorking, completedButUnconfirmed, stoppedByUser, parentSessionId, rootSessionId, sourceDelegationId,
+      delegationStatus, sourceAutomationId },
+  }
+  for (const listener of sessionMetadataChangeListeners) {
+    try { listener(change) } catch (error) { console.error('[Agent 会话] 元数据变更事件发送失败:', error) }
+  }
+}
 
 export function markAgentSessionDeleting(id: string): void {
   deletingAgentSessionIds.add(id)
@@ -234,6 +281,7 @@ function cacheIndex(data: AgentSessionsIndex): void {
   } catch {
     indexCache = null
   }
+  persistedSessionMetadataSnapshot = new Map(data.sessions.map((session) => [session.id, sessionMetadataProjection(session)]))
 }
 
 /**
@@ -255,6 +303,9 @@ function readIndex(): AgentSessionsIndex {
 
   const data = readJsonFileSafe<AgentSessionsIndex>(indexPath)
   if (data) {
+    if (persistedSessionMetadataSnapshot === null) {
+      persistedSessionMetadataSnapshot = new Map(data.sessions.map((session) => [session.id, sessionMetadataProjection(session)]))
+    }
     const permissionModeMigrated = migrateLegacyPermissionMode(data)
     const thinkingDefaultMigrated = migrateLegacyOpenAIThinkingDefault(data)
     const retiredClaudeRuntimeMigrated = migrateRetiredClaudeRuntime(data)
@@ -276,6 +327,7 @@ function readIndex(): AgentSessionsIndex {
     }
     return data
   }
+  if (persistedSessionMetadataSnapshot === null) persistedSessionMetadataSnapshot = new Map()
   return {
     version: INDEX_VERSION,
     sessions: [],
@@ -288,10 +340,27 @@ function readIndex(): AgentSessionsIndex {
  */
 function writeIndex(index: AgentSessionsIndex): void {
   const indexPath = getAgentSessionsIndexPath()
+  const nextSnapshot = new Map(index.sessions.map((session) => [session.id, sessionMetadataProjection(session)]))
+  const previousSnapshot = persistedSessionMetadataSnapshot ?? new Map<string, AgentSessionMetadataProjection>()
+  const changes: Array<{ action: AgentSessionMetadataChange['action']; session: AgentSessionMetadataProjection; previousWorkspaceId?: string; clearedFields?: AgentSessionMetadataChange['clearedFields'] }> = []
+
+  for (const [id, previous] of previousSnapshot) {
+    if (!nextSnapshot.has(id)) changes.push({ action: 'remove', session: previous })
+  }
+  for (const [id, next] of nextSnapshot) {
+    const previous = previousSnapshot.get(id)
+    if (!previous || JSON.stringify(previous) !== JSON.stringify(next)) {
+      const clearedFields = previous
+        ? SESSION_METADATA_CLEARABLE_FIELDS.filter((field) => previous[field] !== undefined && next[field] === undefined)
+        : undefined
+      changes.push({ action: 'upsert', session: next, ...(previous?.workspaceId ? { previousWorkspaceId: previous.workspaceId } : {}), ...(clearedFields?.length ? { clearedFields } : {}) })
+    }
+  }
 
   try {
     writeJsonFileAtomic(indexPath, index)
     cacheIndex(index)
+    for (const change of changes) publishSessionMetadataChange(change.action, change.session, change.previousWorkspaceId, change.clearedFields)
   } catch (error) {
     console.error('[Agent 会话] 写入索引文件失败:', error)
     throw new Error('写入 Agent 会话索引失败')
@@ -604,6 +673,31 @@ export function getAgentSessionSDKMessages(id: string): SDKMessage[] {
 /**
  * convertLegacyMessage 已迁移至 @proma/session-core（本文件从该包 import 使用）。
  */
+
+/** Fields safe and useful for list/sidebar synchronization; deliberately excludes paths and Pi/delegation internals. */
+function sessionMetadataProjection(session: AgentSessionMeta): AgentSessionMetadataProjection {
+  return {
+    id: session.id,
+    title: session.title,
+    workspaceId: session.workspaceId,
+    channelId: session.channelId,
+    modelId: session.modelId,
+    pinned: session.pinned,
+    starred: session.starred,
+    archived: session.archived,
+    isDraft: session.isDraft,
+    manualWorking: session.manualWorking,
+    completedButUnconfirmed: session.completedButUnconfirmed,
+    stoppedByUser: session.stoppedByUser,
+    parentSessionId: session.parentSessionId,
+    rootSessionId: session.rootSessionId,
+    sourceDelegationId: session.sourceDelegationId,
+    delegationStatus: session.delegationStatus,
+    sourceAutomationId: session.sourceAutomationId,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+  }
+}
 
 /**
  * 更新会话元数据

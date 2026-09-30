@@ -149,6 +149,7 @@ export const WEB_REMOTE_CHANNEL_POLICY: Readonly<Record<string, WebRemoteChannel
   "agent:save-mcp-oauth-client-secret": { level: "denied", scope: "none", rationale: "原生窗口、终端、凭据、设置写入或外部副作用，不向手机 renderer 暴露。" },
   "agent:search-messages": { level: "read", scope: "none", rationale: "只读结果或状态事件；列表和设置结果在返回前按允许范围/敏感字段过滤。" },
   "agent:search-session-references": { level: "read", scope: "none", rationale: "只读结果或状态事件；列表和设置结果在返回前按允许范围/敏感字段过滤。" },
+  "agent:session-metadata-changed": { level: "read", scope: "workspace", rationale: "只推送脱敏会话元数据；服务端按允许工作区过滤，工作区外迁移仅推送移除通知。" },
   "agent:search-workspace-files": { level: "workspace", scope: "workspace", rationale: "参数必须能解析出 sessionId 或 workspaceId/slug，并校验其在远程允许范围内。" },
   "agent:select-browser-tab": { level: "denied", scope: "none", rationale: "原生窗口、终端、凭据、设置写入或外部副作用，不向手机 renderer 暴露。" },
   "agent:send-message": { level: "session", scope: "session", rationale: "参数必须能解析出 sessionId 或 workspaceId/slug，并校验其在远程允许范围内。" },
