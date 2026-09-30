@@ -173,3 +173,12 @@ Web Remote WebSocket 为超过 16 KB 的消息启用 per-message deflate；服�
 - 当前证书到期：**2027-09-29 09:22:34 UTC（北京时间 17:22:34）**；客户端是否强制验证有效期尚未确认，不依赖该不确定性继续使用。已安排 2027-08-01 09:00（北京时间）续期日程与提醒。续期须同步更新 `CertName`、验证连接、更新备份，避免仅服务器换证导致客户端指纹不匹配。
 - Shadowrocket 内置 Tailscale **没有区域选择选项**。“始终使用 DERP”只禁止直连，不选择区域；保持关闭，避免 Wi-Fi 局域网也绕中继。当前规则分流设置不需改动。
 - 服务器 IP、证书指纹、部署端口等具体值以本机受保护配置及外置备份为准，不在公开仓库新增这些值。
+
+### 真实备份会话的受限开发导入（2026-09-30）
+
+- 工具：`scripts/personal/import-session-workspace.py`。默认只做 dry-run；显式 `--apply` 仅接受位于本机 `~/.proma-switch-backups/` 下的来源、唯一目标 `~/.proma-dev`，且目标目录必须不存在。应用前先将现有开发根改名保留，不能覆盖。
+- 数据范围：会话索引中单个指定工作区的条目、对应工作区元数据及匹配的会话 JSONL；不复制工作区项目文件、渠道、Settings、Automation、Bridge、MCP、OAuth、Keychain、授权设备或推送订阅。旧开发实例的既有测试设备仅从其保留目录选择性恢复，不从备份取授权数据。
+- 导入过程中，JSONL 与元数据中对 `~/.proma/` 的路径引用改写为 `~/.proma-dev/`。新根与目录权限为 `0700`，文件为 `0600`。Web Remote 启动前必须设成 `workspaceScope: "allowlist"`，只列所需的一个工作区；未完成配置和审计前不得启用 Tailscale Serve。
+- 2026-09-30 本地受限导入结果：备份目标工作区索引 830 条会话、826 个匹配 JSONL（535,645,225 B）；目标真实会话 JSONL 为 41,914,743 B。安全审计确认导入根仅有会话/工作区数据及最小 Web Remote 配置，且没有遗留正式 `/.proma/` 路径引用。附件、Pi runtime artifact、项目文件及其他 4 个工作区的会话数据均未导入，因此历史中指向这些缺失资源的旧引用不保证可打开。
+- **0.5 Mbps 压力测试（不是当前网络代表值）**：iPhone UA Chromium，经开发 Serve；下行 524,288 bit/s、50 ms RTT、上行 1,048,576 bit/s。真实 830 条会话列表约 459,730 B responseUtf8、613,300 B 应用层发送，fresh-list 调用约 10,135 ms；41,914,743 B 真实会话历史首次显示约 4,349 ms。历史 IPC 约 197,907 B responseUtf8 / 应用层计量、CDP 解压 WebSocket payload 140,728 B；deflate 估算 58,844 B、bufferedPeak 2,796,190 B。CDP 解压 payload 与应用层计量都不是压缩线缆字节；`wireBytes` 为 `null`。
+- **当前链路验收目标（2026-09-30 用户提供）为 3 Mbps 中继**，0.5 Mbps 只作压力测试，不得用来代表当前使用体验。本轮未完成 3 Mbps 真实备份 E2E：开发应用端口没有监听，8443 Serve 路由存在但上游不可用；旧 `mobile-preview.sh start` 会间接调用不安全的按名清理，独立安全启动任务尚未完成，因此未重启、未以旧入口恢复服务。3 Mbps 列表/历史与180秒空闲专项待安全启动入口可用后测量。

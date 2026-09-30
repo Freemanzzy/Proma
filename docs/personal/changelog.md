@@ -941,3 +941,11 @@
 - 新增 harness 套件 `session-sync`（只改本次新建会话）：本端改名 0.2 s 可见；外部（绕过本端渲染状态）改名/新建/删除**不实时**，断线重连后全部正确同步；归档从 active 列表移除；回复探索节点按需读取可用；0 JS 异常。复核代码：被移除的“在线状态上报”轮询从未把列表写入 renderer 状态，外部变更不实时是修复前即有的行为，本批未回退；如需实时应另加主进程会话变更推送事件。
 - 全量回归中 iphone smoke / android attachments（模型未回复）与 iphone heavy-session（加载更早未增加）在长时运行的开发实例上失败；开发实例随后收到外部“Polite quit”退出。重启后三套复跑全部通过。全量 634 pass / 0 fail；typecheck、main/renderer/web-preload 构建通过。
 - `mobile-preview.sh test` 单套超时由 420 s 调为 600 s（idle-session-sync 需 180 s 观察外加配对与清理）。
+
+## 2026-09-30: 受限导入真实备份工作区到开发实例
+
+- 新增 `scripts/personal/import-session-workspace.py`：默认 dry-run；`--apply` 只接受本机备份根中的单一来源工作区，且仅在 `~/.proma-dev` 不存在时写入会话索引、该工作区元数据与对应 JSONL。将 JSONL/元数据中的正式 `/.proma/` 路径引用改写为 dev 路径；新根目录权限 `0700`、数据文件 `0600`。不导入正式设置/渠道/密钥、Automation、Bridge、MCP、OAuth、Keychain、授权设备或推送订阅，不导入项目文件及其他工作区会话。
+- 执行前将已有 dev 根与导入路径修复前的副本分别改名保留；其内容未删除。Web Remote 配置只从原 dev 授权状态中选择性恢复，启动前改为单工作区 `allowlist`；备份来源本身只读。复核导入根没有正式 `/.proma/` 路径引用，且目标 `~/.proma-dev` 仅包含一个工作区的 830 条会话元数据、826 个对应 JSONL。真实目标 JSONL 为 **41,914,743 B**；缺失的 4 份 JSONL、旧 Pi runtime artifacts、附件文件和项目文件未从其他备份区域补齐。
+- 真实负载压力测试（iPhone UA Chromium，经开发 Serve；下行 **524,288 bit/s（约0.5 Mbps）**、50 ms RTT、上行 1,048,576 bit/s）：列表 830 条，responseUtf8 **459,730 B**、应用发送 **613,300 B**、fresh-list **10,135 ms**；41,914,743 B 历史首次可见 **4,349 ms**。历史 IPC response/app **197,907 B**，CDP 解压 WebSocket payload **140,728 B**，deflate estimate **58,844 B**，bufferedPeak **2,796,190 B**；实际线缆字节未取得。该 0.5 Mbps 数值仅是压力测试，不代表当前中继带宽。
+- 用户截至本日给出的当前中继带宽为 **3 Mbps**。本轮未在3 Mbps下完成真实列表/历史/空闲专项：开发进程当时已无17889监听，8443 Serve 路由虽留存但上游不可用；旧 `mobile-preview.sh start` 会间接调用按名终止脚本，独立安全启动入口尚未就绪。未为继续测试而运行旧启动链或新增按名清理方案。后续需等安全启动入口完成，再记录3 Mbps当前条件结果。
+- 更新：本记录与 [`web-remote.md`](./web-remote.md) 中的受限导入、安全边界、压力测试与 3 Mbps 未完成状态同步。模型渠道未导入；手机界面显示“暂无可用模型”是有意隔离结果，未用于本批历史/元数据测试。
