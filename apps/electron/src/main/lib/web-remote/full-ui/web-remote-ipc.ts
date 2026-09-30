@@ -13,6 +13,7 @@ import { getWebRemoteChannelPolicy, getDeclaredWebRemoteChannels, type WebRemote
 import { readWebRemoteHistoryMedia, selectWebRemoteHistoryWindow } from './sdk-history-window'
 
 const REQUEST_TIMEOUT_MS = 30_000
+const AGENT_SEND_ACCEPT_WINDOW_MS = 1_500
 const CONFIRM_TTL_MS = 60_000
 const WEB_REMOTE_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024
 const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024
@@ -264,6 +265,26 @@ function summarize(channel: string): string {
     'planning:delete-reminder': '确认删除提醒',
   }
   return labels[channel] ?? `确认执行远程操作：${channel}`
+}
+
+export async function waitForAgentSendAcceptance<T>(operation: () => T | Promise<T>, acceptWindowMs = AGENT_SEND_ACCEPT_WINDOW_MS): Promise<T | { accepted: true }> {
+  let timedOut = false
+  const operationResult = Promise.resolve().then(operation).then(
+    (value) => ({ kind: 'result' as const, value }),
+    (error: unknown) => {
+      if (timedOut) console.warn('[Web Remote full-ui] agent:send-message accepted; later execution failed:', error instanceof Error ? error.message : String(error))
+      return { kind: 'error' as const, error }
+    },
+  )
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<{ kind: 'accepted' }>((resolve) => {
+    timer = setTimeout(() => { timedOut = true; resolve({ kind: 'accepted' }) }, acceptWindowMs)
+  })
+  const result = await Promise.race([operationResult, timeout])
+  if (timer) clearTimeout(timer)
+  if (result.kind === 'accepted') return { accepted: true }
+  if (result.kind === 'error') throw result.error
+  return result.value
 }
 
 export class WebRemoteIpcBridge {
@@ -543,7 +564,9 @@ export class WebRemoteIpcBridge {
     const metricStart = Date.now()
     let metricRawBytes = 0
     try {
-      const value = await Promise.race([Promise.resolve(handler(fakeEvent(sender), ...args)), new Promise<never>((_, reject) => setTimeout(() => reject(new Error('IPC 请求超时')), REQUEST_TIMEOUT_MS))])
+      const value = channel === 'agent:send-message'
+        ? await waitForAgentSendAcceptance(() => handler(fakeEvent(sender), ...args))
+        : await Promise.race([Promise.resolve(handler(fakeEvent(sender), ...args)), new Promise<never>((_, reject) => setTimeout(() => reject(new Error('IPC 请求超时')), REQUEST_TIMEOUT_MS))])
       const result = encodeWebRemoteValue(this.filterResult(channel, SLIM_SESSION_LIST_CHANNELS.has(channel) ? slimWebRemoteSessionMeta(value) : value, args))
       const response = JSON.stringify({ type: 'response', id, ok: true, value: result })
       metricRawBytes = Buffer.byteLength(response)

@@ -6,6 +6,7 @@ import { getWebRemoteDeniedError } from './denied-channels'
 import { WebRemoteRegistrationTable } from './registration-table'
 import { prepareWebRemoteFullUi } from './prepare'
 import { decodeWebRemoteValue, encodeWebRemoteValue } from './serialization'
+import { waitForAgentSendAcceptance } from './web-remote-ipc'
 
 /** 临时改写 process.resourcesPath，运行完毕后还原（个人版标记检测依赖它）。 */
 function withResourcesPath(value: string | undefined, run: () => void): void {
@@ -48,6 +49,23 @@ describe('web remote full-ui spike', () => {
       expect(getWebRemoteDeniedError(channel)).toEqual({ denied: true, channel })
     }
     expect(getWebRemoteDeniedError('agent:list-sessions')).toBeNull()
+  })
+
+  test('手机发送立即拒绝时返回原错误', async () => {
+    const expected = new Error('会话正在启动或运行中')
+    await expect(waitForAgentSendAcceptance(() => { throw expected }, 1_500)).rejects.toBe(expected)
+  })
+
+  test('手机发送在确认窗口内完成时返回原结果', async () => {
+    await expect(waitForAgentSendAcceptance(async () => 'done', 1_500)).resolves.toBe('done')
+  })
+
+  test('手机发送超出确认窗口时先 accepted，后续拒绝有处理器', async () => {
+    let rejectOperation!: (error: Error) => void
+    const operation = new Promise<never>((_resolve, reject) => { rejectOperation = reject })
+    await expect(waitForAgentSendAcceptance(() => operation, 20)).resolves.toEqual({ accepted: true })
+    rejectOperation(new Error('later failure'))
+    await new Promise((resolve) => setTimeout(resolve, 0))
   })
 
   test('keeps an invoke and event registration table', () => {

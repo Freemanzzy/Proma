@@ -1050,3 +1050,9 @@
 - iPhone 出现 2 次 1006 异常断开后自动重连，体验未受影响，继续观察。
 - 调度器重启后首次到点触发（10-01 01:00 / 02:00）用户选择先安装；已建一次性只读核对任务 02:40 执行，结论写入本机交接 `scheduler-check-2026-10-01.md`。
 - 详见本机交接 `install-result-2026-10-01.md`。
+
+## 2026-10-01: 手机发送 1.5 秒内确认接收
+
+- Web Remote full-ui 对 `agent:send-message` 特殊处理：调用原 handler 后，1.5 秒内结束则照常返回；1.5 秒内 reject 原样返回；仍运行则返回 `{ accepted: true }`，并消费后续 rejection、记 `[WARN]`。其他 IPC 通道维持原 30 秒超时。
+- 未改 `ipc.ts` 或桌面 renderer。核对 `AgentView.tsx`：`sendAgentMessage()` 的 resolve 值未读取，仅挂接 `.catch()` 处理发送错误，因此不依赖成功返回值；长运行错误继续由既有 Agent 事件呈现。
+- 定向单测 `apps/electron/src/main/lib/web-remote/full-ui/full-ui.test.ts`：**10 pass / 0 fail**，覆盖立即拒绝、窗口内完成及窗口外迟到拒绝；后续拒绝被消费。`git diff --check` 通过。未运行全量测试（留待收尾）。
