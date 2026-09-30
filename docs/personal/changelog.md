@@ -980,3 +980,9 @@
 - **3 Mbps 真实备份/双端 E2E 未完成**：已安全确认开发实例端口 17889/5173 不监听；临时 8443 Serve 路由已关闭。独立开发进程安全启动任务仍未就绪；根据用户指示没有调用旧 `mobile-preview.sh start`/`dev.sh` 链，没有修改或清理该独立任务。不得将此前 0.5 Mbps压力数据或 Chromium raw-IPC harness 当作当前3 Mbps双端实测。
 - **本轮未测**：独立桌面进程/实体手机各操作的3 Mbps传播延迟、真实跨 workspace move E2E、Smoke/附件回答（隔离 dev 未导入模型渠道/钥匙串）、源备份外部附件/旧 Pi artifact 可用性、真机 iOS Safari。workspace 越权由 full-ui security 单测和单工作区端到端拒绝探针覆盖；子会话/自动任务分类字段由投影与 renderer reducer 单测覆盖。
 - 将新增触碰的上游文件、逐文件增减行数与理由追加至本机 `.context/proma-personal/upstream-surface/phase1-2026-09-29.md`（不入库）；`docs/personal/web-remote.md` 更新为 3 Mbps 是当前目标、0.5 Mbps仅为压力测试。
+
+## 2026-09-30: 开发入口临时移除按名进程清理
+
+- 安全链路审计确认仅删顶层 `dev` 的 `dev-kill.ts --vite` 仍会从 `dev:electron` 间接执行 `dev:kill`。因此在 `apps/electron/package.json` 临时移除 `dev` 与其子项 `dev:electron` 中的两处自动 `dev-kill` 调用，保留 `concurrently` 和后续构建/监视流程；`scripts/dev-kill.ts`、`scripts/personal/dev.sh` 与独立进程安全分支均未改。
+- 静态链路核对：`mobile-preview.sh start` → `scripts/personal/dev.sh` → `bun run dev` → `dev:vite`/`dev:electron` 的实际脚本值不再引用 `dev-kill`/`pkill`/`killall`/`taskkill`。`dev.sh` 原有“发现已运行 Personal Electron 即拒绝启动”检查保留。该临时措施只避免自动按名终止，不替代下个版本的PID/身份核验启动器。
+- 开发实例与桌面正式 Proma 共享同一台机器的运行环境；后续测试期间不得为了重启 dev 退出/结束正式版。此步骤只做静态脚本链检查、package JSON 语法检查及 typecheck；未启动/停止任何进程、未执行测试 E2E，也未改 `~/.proma-dev`、Tailscale Serve 或端口。
