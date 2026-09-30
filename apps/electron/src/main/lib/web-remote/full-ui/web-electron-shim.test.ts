@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import { verifySentAgentMessage } from './web-electron-shim'
+import { reassembleTextChunks, verifySentAgentMessage } from './web-electron-shim'
 
 describe('mobile send acknowledgement fallback', () => {
+  test('reassembles text chunks containing CJK and emoji exactly', () => {
+    const source = '中文边界🙂🚀'
+    expect(reassembleTextChunks(['中文', '边界', '🙂', '🚀'])).toBe(source)
+  })
   test('finds the submitted text in a recent user message', async () => {
     const text = '用户发送的内容'.repeat(30)
     const result = await verifySentAgentMessage(text, async () => [

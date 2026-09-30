@@ -60,10 +60,7 @@ function consumeChunk(message: { id?: string; requestId?: string; seq?: number; 
   if (request) { window.clearTimeout(request.timer); request.timer = window.setTimeout(() => { pending.delete(message.requestId!); responseChunks.delete(message.id!); request.reject(new Error('IPC 请求超时: response chunks stalled')) }, request.timeoutMs ?? RESPONSE_TIMEOUT_MS) }
   if (transfer.received !== transfer.total) return null
   responseChunks.delete(message.id)
-  const binary = atob(transfer.parts.join(''))
-  const bytes = new Uint8Array(binary.length)
-  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index)
-  return new TextDecoder().decode(bytes)
+  return reassembleTextChunks(transfer.parts)
 }
 
 function encode(value: unknown): unknown {
@@ -254,6 +251,10 @@ function userMessageText(message: unknown): string {
   if (Array.isArray(record.content)) return userMessageText(record.content)
   if (Array.isArray(record.parts)) return userMessageText(record.parts)
   return ''
+}
+
+export function reassembleTextChunks(parts: string[]): string {
+  return parts.join('')
 }
 
 export type AgentSendVerification = 'found' | 'not-found' | 'check-failed'

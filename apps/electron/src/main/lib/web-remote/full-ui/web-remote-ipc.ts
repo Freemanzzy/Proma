@@ -267,6 +267,19 @@ function summarize(channel: string): string {
   return labels[channel] ?? `确认执行远程操作：${channel}`
 }
 
+export function splitUtf8BufferAtBoundaries(bytes: Buffer, maxBytes: number): Buffer[] {
+  if (!Number.isInteger(maxBytes) || maxBytes < 4) throw new Error('UTF-8 chunk size must be at least four bytes')
+  const chunks: Buffer[] = []
+  for (let offset = 0; offset < bytes.byteLength;) {
+    let end = Math.min(offset + maxBytes, bytes.byteLength)
+    if (end < bytes.byteLength) while (end > offset && (bytes[end]! & 0xc0) === 0x80) end--
+    if (end === offset) throw new Error('UTF-8 character exceeds chunk size')
+    chunks.push(bytes.subarray(offset, end))
+    offset = end
+  }
+  return chunks
+}
+
 export async function waitForAgentSendAcceptance<T>(operation: () => T | Promise<T>, acceptWindowMs = AGENT_SEND_ACCEPT_WINDOW_MS): Promise<T | { accepted: true }> {
   let timedOut = false
   const operationResult = Promise.resolve().then(operation).then(
@@ -581,7 +594,7 @@ export class WebRemoteIpcBridge {
   private send(client: IpcClient, message: unknown): void { if (client.ws.readyState === WebSocket.OPEN) this.sendRaw(client.ws, JSON.stringify(message)) }
   private recordIpcMetric(client: IpcClient, channel: string, message: string, rawBytes: number, elapsedMs: number, bufferedPeak: number): void {
     const bytes = Buffer.from(message, 'utf8')
-    const chunkCount = bytes.byteLength > 256 * 1024 ? Math.ceil(bytes.byteLength / (180 * 1024)) : 1
+    let chunkCount = 1
     let appSentBytes = bytes.byteLength
     let appFramingBytes = 0
     let base64PayloadBytes = 0
@@ -589,12 +602,13 @@ export class WebRemoteIpcBridge {
       appSentBytes = 0
       let requestId: string | undefined
       try { requestId = (JSON.parse(message) as { id?: string }).id } catch {}
+      const chunks = splitUtf8BufferAtBoundaries(bytes, 180 * 1024)
+      chunkCount = chunks.length
       for (let index = 0; index < chunkCount; index++) {
-        const data = bytes.subarray(index * 180 * 1024, Math.min((index + 1) * 180 * 1024, bytes.byteLength)).toString('base64')
+        const data = chunks[index]!.toString('utf8')
         const frame = JSON.stringify({ type: 'chunk', id: '000000000000000000000000', requestId, seq: index, total: chunkCount, data })
         const frameBytes = Buffer.byteLength(frame)
         const dataBytes = Buffer.byteLength(data)
-        base64PayloadBytes += dataBytes
         appFramingBytes += frameBytes - dataBytes
         appSentBytes += frameBytes
       }
@@ -620,10 +634,11 @@ export class WebRemoteIpcBridge {
     let requestId: string | undefined
     try { requestId = (JSON.parse(message) as { id?: string }).id } catch {}
     const transferId = randomBytes(12).toString('hex')
-    const total = Math.ceil(bytes.byteLength / chunkBytes)
+    const chunks = splitUtf8BufferAtBoundaries(bytes, chunkBytes)
+    const total = chunks.length
     let bufferedPeak = getBufferedAmount()
     for (let seq = 0; seq < total; seq++) {
-      const data = bytes.subarray(seq * chunkBytes, Math.min((seq + 1) * chunkBytes, bytes.byteLength)).toString('base64')
+      const data = chunks[seq]!.toString('utf8')
       const frame = JSON.stringify({ type: 'chunk', id: transferId, requestId, seq, total, data })
       ;(ws as unknown as { send(data: string): void }).send(frame)
       bufferedPeak = Math.max(bufferedPeak, getBufferedAmount())

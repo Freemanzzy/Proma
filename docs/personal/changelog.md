@@ -1062,3 +1062,10 @@
 - 手机 shim 将 `agent:send-message` 的 IPC 响应与分块停滞超时单独延长到 **60 秒**；其他通道保持 **35 秒**。WebSocket 断开仍立即拒绝在途请求。
 - 发送因超时/连接不确定而失败时，先显示“发送确认较慢，正在核对…”，然后对本会话调用一次 `agent:get-sdk-messages`（尾部预算 **128 KiB**），只检查最近返回的用户消息是否包含本次文本前 **200** 字。找到则撤掉提示并按已接收处理；未找到或核对失败则提示“可能未送达，请刷新确认后再重发”。确定性拒绝仍保留原错误提示，`denied` / `needsConfirm` 分支不变。
 - 新增 `web-electron-shim.test.ts` 覆盖找到、未找到、核对失败三种路径；连同步骤 A 定向测试 **13 pass / 0 fail**。全量测试与构建留待收尾。
+
+## 2026-10-01: Web Remote 大响应分块改为 UTF-8 文本帧
+
+- 侧栏核对：`LeftSidebar.tsx` 首屏/活跃视图已调用 `listActiveAgentSessions()` 与归档计数；归档视图才追加 `listArchivedAgentSessions()`，且已复用 `refreshAgentSidebarSessions(includeArchived)`。因此 C1 无需代码改动，也未触碰 `LeftSidebar.tsx`。
+- 对超过 **256 KiB** 的 full-ui IPC 响应，仍按约 **180 KiB** 块大小发送，但现在按 UTF-8 字符边界切分并以文本帧传输；shim 直接按序拼接文本，不再 base64 解码。发送与计量使用相同切块函数，`base64PayloadBytes` 对新文本帧为 0，`appSentBytes` 包含帧开销。
+- 单测覆盖 CJK/emoji 边界分块、帧重组一致及上限；Web Remote 定向测试 **37 pass / 0 fail**。`git diff --check` 与全量 typecheck/构建留待后续收尾。
+- 改前 830 会话 3 Mbps 基准采用 2026-09-30 已记录的 `agent:list-sessions`：responseUtf8 **459,810 B**、appSent **613,404 B**。本机当前 dev 未运行，改后真实 830 会话 metrics/harness 测量安排在后续 dev 启动验证中采集；不得以模拟估算冒充实测。

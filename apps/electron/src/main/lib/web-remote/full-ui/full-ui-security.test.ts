@@ -10,7 +10,7 @@ mock.module('../../main-window-store', () => ({
   getMainWindow: () => fakeMainWindow,
 }))
 
-const { WebRemoteIpcBridge, getWebRemoteMetricsSnapshot, slimWebRemoteSessionMeta } = await import('./web-remote-ipc')
+const { WebRemoteIpcBridge, getWebRemoteMetricsSnapshot, slimWebRemoteSessionMeta, splitUtf8BufferAtBoundaries } = await import('./web-remote-ipc')
 
 class FakeWebSocket extends EventEmitter {
   readyState = 1
@@ -37,6 +37,16 @@ async function invoke(ws: FakeWebSocket, channel: string, args: unknown[] = [], 
 }
 
 describe('Web Remote full-ui security policy', () => {
+  test('UTF-8 text chunk boundaries preserve CJK and emoji without replacement', () => {
+    const source = '边界中文🙂🚀'.repeat(50_000)
+    const chunks = splitUtf8BufferAtBoundaries(Buffer.from(source, 'utf8'), 180 * 1024)
+    const decoder = new TextDecoder('utf-8', { fatal: true })
+    const parts = chunks.map((chunk) => decoder.decode(chunk))
+    const frames = parts.map((data, seq) => JSON.stringify({ type: 'chunk', seq, total: parts.length, data }))
+    expect(parts.length).toBeGreaterThan(1)
+    expect(frames.map((frame) => JSON.parse(frame).data).join('')).toBe(source)
+    expect(chunks.every((chunk) => chunk.byteLength <= 180 * 1024)).toBe(true)
+  })
   const resolvers = {
     getSessionMeta: (id: string) => id === 's-1' ? { workspaceId: 'ws-1' } : id === 's-2' ? { workspaceId: 'ws-2' } : undefined,
     listWorkspaces: () => [{ id: 'ws-1', slug: 'one' }, { id: 'ws-2', slug: 'two' }],
@@ -127,7 +137,7 @@ describe('Web Remote full-ui security policy', () => {
     const chunks = ws.sent.map((frame) => JSON.parse(frame)).filter((frame) => frame.type === 'chunk').sort((a, b) => a.seq - b.seq)
     expect(chunks.length).toBeGreaterThan(1)
     expect(chunks.every((frame) => frame.total === chunks.length && frame.requestId === 'chunked')).toBe(true)
-    const assembled = Buffer.from(chunks.map((frame) => frame.data).join(''), 'base64').toString('utf8')
+    const assembled = chunks.map((frame) => frame.data).join('')
     const response = JSON.parse(assembled)
     expect(response.type).toBe('response')
     expect(response.ok).toBe(true)
