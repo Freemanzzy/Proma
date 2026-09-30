@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { evaluateHarnessExceptionWindow, isHttp429Signal, measureHarnessExceptionWindow, resolveHarnessNetworkProfile, waitForHarnessExceptionQuietPeriod } from './mobile-harness.mjs'
+import { evaluateHarnessExceptionWindow, isHttp429Signal, measureHarnessExceptionWindow, resolveHarnessNetworkProfile, waitForHarnessExceptionQuietPeriod, waitForHarnessWebSocketQuietPeriod } from './mobile-harness.mjs'
 
 test('only the pre-action prefix is baseline; later CSP and other exceptions remain failures', () => {
   const wasmCsp = {
@@ -36,6 +36,14 @@ test('delayed initialization exceptions settle before the action baseline is cap
   const baseline = await waitForHarnessExceptionQuietPeriod(harness, 30, 300)
   expect(baseline.baselineCount).toBe(2)
   expect(baseline.settledAfterMs).toBeGreaterThanOrEqual(100)
+})
+
+test('reconnect timing waits for the final WebSocket response frame to drain', async () => {
+  const harness = { websocketFramesReceived: [] }
+  setTimeout(() => harness.websocketFramesReceived.push({}), 30)
+  const result = await waitForHarnessWebSocketQuietPeriod(harness, 50, 500)
+  expect(result.receivedFrames).toBe(1)
+  expect(result.settledAfterMs).toBeGreaterThanOrEqual(150)
 })
 
 test('429 detection only accepts HTTP status fields or explicit status/error phrases', () => {

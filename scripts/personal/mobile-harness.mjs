@@ -75,6 +75,24 @@ export async function waitForHarnessExceptionQuietPeriod(harness, quietMs = 800,
   return { baselineCount: harness.exceptions.length, settledAfterMs: Date.now() - startedAt }
 }
 
+/** Wait until in-flight WebSocket frames have drained after a reconnect snapshot. */
+export async function waitForHarnessWebSocketQuietPeriod(harness, quietMs = 800, maxWaitMs = 30_000) {
+  const startedAt = Date.now()
+  let frameCount = harness.websocketFramesReceived.length
+  let lastChangedAt = startedAt
+  while (Date.now() - startedAt < maxWaitMs) {
+    await delay(100)
+    if (harness.websocketFramesReceived.length !== frameCount) {
+      frameCount = harness.websocketFramesReceived.length
+      lastChangedAt = Date.now()
+    }
+    if (Date.now() - lastChangedAt >= quietMs) {
+      return { settledAfterMs: Date.now() - startedAt, receivedFrames: frameCount }
+    }
+  }
+  throw new Error(`WebSocket 接收帧在 ${maxWaitMs} ms 内未静默`)
+}
+
 /** Match only structured HTTP status fields or explicit 429 status/error phrases, never bare digits. */
 export function isHttp429Signal(value) {
   if (value && typeof value === 'object') {
@@ -1290,7 +1308,9 @@ async function runSessionSync(harness, options, result) {
   const titleB = `web-remote-sync-b-${stamp}`
   const titleC = `web-remote-sync-c-${stamp}`
   const titleD = `web-remote-sync-d-${stamp}`
-  const steps = {}
+  const steps = { reconnectRecoveryMs: [] }
+  const actionExceptionCounts = {}
+  const recordActionExceptionCount = (stage) => { actionExceptionCounts[stage] = Math.max(0, harness.exceptions.length - exceptionsBeforeSessionSync) }
   await harness.openDrawer()
   const workspaces = await harness.client.evaluate('window.electronAPI.listAgentWorkspaces()')
   const workspace = Array.isArray(workspaces) ? workspaces[0] : null
@@ -1300,34 +1320,50 @@ async function runSessionSync(harness, options, result) {
   const exceptionsBeforeSessionSync = actionBaseline.baselineCount
   steps.baselineSettledAfterMs = actionBaseline.settledAfterMs
   steps.unauthorizedWorkspaceCreateDenied = await harness.client.evaluate(`window.__PROMA_WEB_REMOTE_INVOKE('agent:create-session', ${quoteJs('web-remote-unauthorized-workspace-probe')}, undefined, 'workspace-not-allowlisted').then(()=>false,error=>error?.denied===true)`)
+  recordActionExceptionCount('afterUnauthorizedWorkspaceProbe')
   const created = await harness.createHarnessSessionRaw(titleA, workspace.id, true)
+  recordActionExceptionCount('afterDraftCreate')
   // 新建草稿直到明确晋升前不应在侧栏出现；之后只对本次新建的测试会话做可逆 pin/unpin。
   steps.draftHiddenBeforePromotion = !(await sidebarHas(titleA))
   assertOwnedSessionMutation(created.id, harness.getCreatedSessionIds(), '晋升测试会话')
   await harness.invokeRaw('agent:toggle-pin', [created.id])
   await harness.invokeRaw('agent:toggle-pin', [created.id])
   steps.promotedToVisible = (await waitSidebar(titleA, true, 10_000)) !== null
+  recordActionExceptionCount('afterDraftPromotion')
   // 通过应用公开标题更新路径，检查元数据事件在不重连时刷新侧栏。
   assertOwnedSessionMutation(created.id, harness.getCreatedSessionIds(), '改名')
   await harness.invokeApi('updateAgentSessionTitle', [created.id, titleB])
   await harness.client.evaluate(`window.dispatchEvent(new Event('focus'))`)
   steps.renameVisibleMs = await waitSidebar(titleB, true, 10_000)
+  recordActionExceptionCount('afterLocalRename')
   // 外部改名 + 外部新建（绕过本端渲染状态，模拟桌面/其他设备的操作），随后断线重连恢复
   await harness.invokeRaw('agent:update-title', [created.id, titleC])
   const external = await harness.createHarnessSessionRaw(titleD, workspace.id, false)
   result.externalSessionId = external?.id
+  recordActionExceptionCount('afterExternalMutations')
   const reconnect = async () => {
     // 关闭当前 /api/ipc 连接，触发 shim 自动重连与 renderer 的 proma-web-remote-reconnected 恢复同步
     await harness.client.evaluate(`(() => {if(!window.__syncSocketHooked){window.__syncSocketHooked=true;const orig=WebSocket.prototype.send;WebSocket.prototype.send=function(d){if(String(this.url).includes('/api/ipc'))window.__syncIpcSocket=this;return orig.call(this,d)}}return true})()`)
+    const recoveryInstalled = await harness.client.evaluate(`(() => {const original=window.__PROMA_WEB_REMOTE_RECOVER;if(typeof original!=='function')return false;if(window.__PROMA_SYNC_RECOVERY_TRACKER)return true;const tracker={active:0,completed:0,error:null};window.__PROMA_SYNC_RECOVERY_TRACKER=tracker;window.__PROMA_WEB_REMOTE_RECOVER=async()=>{tracker.active++;try{return await original()}catch(error){tracker.error=String(error);throw error}finally{tracker.active--;tracker.completed++}};return true})()`)
+    if (!recoveryInstalled) throw new Error('无法安装 Web Remote 重连恢复完成探针')
+    const expectedRecovery = await harness.client.evaluate('window.__PROMA_SYNC_RECOVERY_TRACKER.completed + 1')
     await harness.client.evaluate(`window.__PROMA_WEB_REMOTE_INVOKE('agent:count-archived-sessions').catch(()=>null)`)
+    const receivedFramesBeforeRecovery = harness.websocketFramesReceived.length
     const closed = await harness.client.evaluate(`(() => {const ws=window.__syncIpcSocket;if(!ws)return false;ws.close();return true})()`)
     if (!closed) throw new Error('未捕获到 /api/ipc 连接，无法模拟重连')
-    await delay(1_500)
+    const recoveryStartedAt = Date.now()
+    await waitUntil(harness.client, `window.__PROMA_SYNC_RECOVERY_TRACKER?.completed >= ${expectedRecovery} && window.__PROMA_SYNC_RECOVERY_TRACKER?.active === 0`, 40_000)
+    const recoveryError = await harness.client.evaluate('window.__PROMA_SYNC_RECOVERY_TRACKER?.error ?? null')
+    if (recoveryError) throw new Error(`Web Remote 重连恢复失败: ${recoveryError}`)
+    await waitForHarnessWebSocketQuietPeriod(harness)
+    steps.reconnectRecoveryMs.push(Date.now() - recoveryStartedAt)
+    steps.reconnectFramesReceived = [...(steps.reconnectFramesReceived ?? []), harness.websocketFramesReceived.length - receivedFramesBeforeRecovery]
     await harness.openDrawer().catch(() => undefined)
   }
   steps.liveRenameVisibleMs = await waitSidebar(titleC, true, 10_000)
   steps.liveCreateVisibleMs = await waitSidebar(titleD, true, 10_000)
   await reconnect()
+  recordActionExceptionCount('afterFirstReconnectRecovery')
   steps.afterReconnectRenameVisible = (await waitSidebar(titleC, true, 30_000)) !== null
   steps.afterReconnectCreateVisible = (await waitSidebar(titleD, true, 30_000)) !== null
   // 外部删除 + 重连后应从列表消失
@@ -1337,7 +1373,9 @@ async function runSessionSync(harness, options, result) {
     try { await harness.invokeApi('deleteAgentSession', [external.id]); steps.externalDeleted = true } catch (error) { steps.externalDeleteError = String(error) }
     harness.client.off('Page.javascriptDialogOpening', acceptConfirm)
     steps.liveDeleteGoneMs = await waitSidebar(titleD, false, 10_000)
+    recordActionExceptionCount('afterExternalDelete')
     await reconnect()
+    recordActionExceptionCount('afterSecondReconnectRecovery')
     steps.afterReconnectDeleteGone = (await waitSidebar(titleD, false, 30_000)) !== null
   }
   // 本端归档：侧栏 active 视图应不再显示
@@ -1359,15 +1397,19 @@ async function runSessionSync(harness, options, result) {
     receivedFramePayloadBytes: archiveReceivedFrames.reduce((sum, frame) => sum + frame.payloadBytes, 0),
   }
   steps.archiveRemovedMs = await waitSidebar(titleB, false, 10_000)
+  recordActionExceptionCount('afterArchive')
   const archived = (await harness.client.evaluate('window.electronAPI.listActiveAgentSessions()')).some((item) => item?.id === created.id)
   steps.archivedRemovedFromActiveList = !archived
   const restoreStartedAt = Date.now()
   await harness.invokeApi('toggleArchiveAgentSession', [created.id])
   steps.restoreVisibleMs = await waitSidebar(titleC, true, 10_000)
   steps.restoreCommandMs = Date.now() - restoreStartedAt
+  recordActionExceptionCount('afterRestore')
   // 回复探索节点按需读取
   const bindings = await harness.invokeRaw('web-remote:get-session-entry-bindings', [{ sessionId: created.id }]).catch((error) => ({ error: String(error) }))
   steps.entryBindingsReadable = !!bindings && typeof bindings === 'object' && !bindings.error
+  recordActionExceptionCount('afterEntryBindings')
+  steps.actionExceptionCounts = actionExceptionCounts
   const exceptionWindow = evaluateHarnessExceptionWindow(harness.exceptions, exceptionsBeforeSessionSync)
   result.sessionSync = { ...steps, network: { latencyMs: networkProfile.latencyMs, downloadBitsPerSecond: networkProfile.downloadBitsPerSecond, uploadBitsPerSecond: networkProfile.uploadBitsPerSecond }, exceptions: exceptionWindow.newActionExceptions, newActionExceptions: exceptionWindow.newActionExceptions, newActionExceptionCategories: exceptionWindow.actionCategories, exceptionsBeforeSessionSync: exceptionWindow.baselineCount }
   steps.listCallsDuringSuite = (await harness.client.evaluate("fetch('/api/dev/metrics',{credentials:'include'}).then(r=>r.ok?r.json():null)"))?.ipc?.devices ? 'see-metrics' : 'n/a'

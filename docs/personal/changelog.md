@@ -1020,3 +1020,4 @@
 
 - 两次既有 3 Mbps session-sync 结果的 `archiveCommandMs` 分别为 **7,687 ms、7,684 ms**，而 `archiveRemovedMs` 分别为 **25 ms、26 ms**，恢复调用为 **49 ms、55 ms**；这不像一次性抖动。启动后的 `agent-sessions.json` 为 **3,061,848 B**，3 Mbps 若完整传输该大小约需 **8,165 ms**，但该数值仅为相关性，不足以证明实际传输了全量索引。
 - 代码路径确认 `agent:toggle-archive` handler 会读取全会话列表、更新并重写索引，再返回单条会话元数据。为区分主进程 handler 时间、是否重调全量列表以及 WebSocket 收发帧字节，Harness 增加 archive 前后 `/api/dev/metrics` 与帧体积差分；尚未得出根因或改动主进程路径。
+- session-sync harness 现等待 `__PROMA_WEB_REMOTE_RECOVER()` 完成，并等重连后的 WebSocket 接收帧静默后才开始归档计时；恢复时延/帧数另行记录，避免把仍在途的权威快照误计为归档调用耗时。定向单测 **6 pass / 0 fail**，node/bash 语法与 diff 检查通过；实际重测尚未完成。
