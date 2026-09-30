@@ -1090,3 +1090,8 @@
 
 - **bufferedAmount / 背压结论草稿**：当前只能取得 IPC response 发送路径同步采样出的峰值（列表 **2,545,869 B**、历史 **2,170,069 B**），没有每 5 秒采样数据；不能用该值推断持续事件流积压。本轮因此没有复现或排除 agent-event 积压。代码审阅确认 `full-ui` 的 `broadcast()` 与 invoke response 均直接 `sendRaw()`，没有 `bufferedAmount` 上限、队列限流或丢弃策略；另一个 `web-remote-events.ts` Hub 有独立的 **1,000,000 B** 阈值、文本 delta 合并及超限丢弃/刷新策略，但不能视为 full-ui 的保护。`bufferedAmountPeak` 存在于每个 `IpcClient` 的独立 metrics 对象，故内存累积按连接分别进行；但快照以 `deviceId` 为键，同设备新连接会覆盖旧连接快照，日志也没有稳定连接 ID，外部观测不能可靠比较同设备多个并发窗口。建议后续另行批准加入只读采样/事件回放能力后再做完整归因；本轮未修工具或 harness。
 - 3 个初始化期既有 WebAssembly/CSP 异常为基线，real-history 动作期新增 **0**；HTTP 429 状态响应 **0**。`/tmp` harness 日志显示授权设备已撤销、Chrome/profile 已清理；开发 `~/.proma-dev` 最终仍为 **830** 条。dev 保持运行，供用户体验；未关闭临时 8443。
+
+## 2026-10-01: 手机发送与弱网调整收尾验证
+
+- 全量 `bun test`：**657 pass / 0 fail**（98 files，1,600 assertions）；workspace `bun run typecheck` 通过；Electron `build:main`、`build:renderer`、`build:web-preload` 均通过。Renderer 构建保留已有 >500 KB chunk 警告。
+- 最终 `git diff --check` 通过，分支工作树干净。未 merge、未 push、未打包或安装；正式 Proma PID `28971` 未变。开发启动器仍运行，17889/5173 在线，临时 Serve 8443 仍指向 17889；`~/.proma-dev` 会话数核对为 **830**。
