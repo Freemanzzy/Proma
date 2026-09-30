@@ -992,3 +992,9 @@
 - Session metadata cursor 现记住 retired epochs：新 main-process epoch 即使从 sequence `1` 开始也接受；切换到新 epoch 后，迟到的旧 epoch 增量被拒绝，不能把 cursor 回滚。IPC 重连仍触发权威快照，不重置已识别的当前 epoch 顺序。
 - 删除或移出授权范围均建立会话 tombstone；同一 session ID 在之后新 epoch 中重新 upsert 时解除 tombstone。相关状态保留以验证“移出授权工作区 → 同 ID 重新进入授权工作区”不会错误消失。
 - 定向验证：`agent-session-list.test.ts` **8 pass / 0 fail**，`full-ui-security.test.ts` **30 pass / 0 fail**；全 workspace typecheck 通过。未启动开发实例/E2E，遵守进程安全分支的等待条件。
+
+## 2026-09-30: Harness 网络条件默认对齐 3 Mbps 中继
+
+- `mobile-harness.mjs` 的 `real-history`、`idle-session-sync`、`session-sync` 与大会话套件统一使用参数化 CDP 网络 profile；默认十进制速率为下行 **3,000,000 bit/s**、上行 **1,000,000 bit/s**、延迟 **50 ms**。结果 JSON 与 `mobile-preview.sh test` 汇总会回报实际 profile。
+- 参数可通过 `--download-mbps`、`--upload-mbps`、`--latency-ms` 指定，或通过 `PROMA_WEB_REMOTE_DOWNLOAD_MBPS`、`PROMA_WEB_REMOTE_UPLOAD_MBPS`、`PROMA_WEB_REMOTE_LATENCY_MS` 环境变量传给 `mobile-preview.sh test`。0.5 Mbps 压力测试仍可显式选择，例如设置 `PROMA_WEB_REMOTE_DOWNLOAD_MBPS=0.5`；不再作为默认。
+- 验证：Harness 单测 **2 pass / 0 fail**（覆盖 3/1 Mbps 默认及 0.5 Mbps 压力换算）；`node --check`、`bash -n`、`git diff --check` 通过。此为参数化实现与本地验证，尚非真实 `~/.proma-dev` 3 Mbps E2E 结果。

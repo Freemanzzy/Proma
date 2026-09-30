@@ -53,8 +53,30 @@ export function measureHarnessExceptionWindow(exceptions, baselineCount) {
   }
 }
 
+/** Network profile is parameterized in decimal bits/s; default matches the current 3 Mbps relay. */
+export function resolveHarnessNetworkProfile(options = {}) {
+  const downloadMbps = Number(options.downloadMbps ?? 3)
+  const uploadMbps = Number(options.uploadMbps ?? 1)
+  const latencyMs = Number(options.latencyMs ?? 50)
+  if (!Number.isFinite(downloadMbps) || downloadMbps <= 0 || !Number.isFinite(uploadMbps) || uploadMbps <= 0 || !Number.isFinite(latencyMs) || latencyMs < 0) {
+    throw new Error('网络参数无效；download/upload Mbps 必须大于 0，latencyMs 不得为负数')
+  }
+  const downloadBitsPerSecond = Math.round(downloadMbps * 1_000_000)
+  const uploadBitsPerSecond = Math.round(uploadMbps * 1_000_000)
+  return {
+    downloadMbps,
+    uploadMbps,
+    latencyMs,
+    downloadBitsPerSecond,
+    uploadBitsPerSecond,
+    downloadThroughput: downloadBitsPerSecond / 8,
+    uploadThroughput: uploadBitsPerSecond / 8,
+    connectionType: downloadMbps <= 1 ? 'cellular2g' : downloadMbps <= 10 ? 'cellular3g' : 'cellular4g',
+  }
+}
+
 function parseArgs(argv) {
-  const result = { url: process.env.PROMA_WEB_REMOTE_URL ?? '', suite: 'smoke', session: process.env.PROMA_WEB_REMOTE_SESSION ?? '独立站/test', width: 412, height: 915, deviceScaleFactor: 3, userAgent: 'android', outputDir: DEFAULT_OUTPUT_DIR, chromePath: process.env.CHROME_PATH ?? '', pairScript: join(REPO_ROOT, 'scripts/personal/web-remote.sh') }
+  const result = { url: process.env.PROMA_WEB_REMOTE_URL ?? '', suite: 'smoke', session: process.env.PROMA_WEB_REMOTE_SESSION ?? '独立站/test', width: 412, height: 915, deviceScaleFactor: 3, userAgent: 'android', outputDir: DEFAULT_OUTPUT_DIR, chromePath: process.env.CHROME_PATH ?? '', pairScript: join(REPO_ROOT, 'scripts/personal/web-remote.sh'), downloadMbps: Number(process.env.PROMA_WEB_REMOTE_DOWNLOAD_MBPS ?? 3), uploadMbps: Number(process.env.PROMA_WEB_REMOTE_UPLOAD_MBPS ?? 1), latencyMs: Number(process.env.PROMA_WEB_REMOTE_LATENCY_MS ?? 50) }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     const value = () => argv[++i]
@@ -67,10 +89,13 @@ function parseArgs(argv) {
     else if (arg === '--user-agent') result.userAgent = value()
     else if (arg === '--output-dir') result.outputDir = resolve(value())
     else if (arg === '--timeout-ms') result.timeoutMs = Number(value())
+    else if (arg === '--download-mbps') result.downloadMbps = Number(value())
+    else if (arg === '--upload-mbps') result.uploadMbps = Number(value())
+    else if (arg === '--latency-ms') result.latencyMs = Number(value())
     else if (arg === '--chrome-path') result.chromePath = value()
     else if (arg === '--pair-script') result.pairScript = resolve(value())
     else if (arg === '--help' || arg === '-h') {
-      console.log('用法: mobile-harness.mjs --url <https://host> [--suite smoke] [--session 独立站/test] [--output-dir /tmp/out]')
+      console.log('用法: mobile-harness.mjs --url <https://host> [--suite smoke] [--session <session>] [--download-mbps 3] [--upload-mbps 1] [--latency-ms 50] [--output-dir /tmp/out]')
       process.exit(0)
     } else throw new Error(`未知参数: ${arg}`)
   }
@@ -81,6 +106,7 @@ function parseArgs(argv) {
   if (!['android', 'iphone', 'desktop'].includes(result.userAgent)) throw new Error('--user-agent 仅支持 android|iphone|desktop')
   if (result.timeoutMs === undefined) result.timeoutMs = 300_000
   if (!Number.isInteger(result.timeoutMs) || result.timeoutMs < 1000 || result.timeoutMs > 1_800_000) throw new Error('--timeout-ms 必须是 1000 到 1800000 之间的整数')
+  result.networkProfile = resolveHarnessNetworkProfile(result)
   return result
 }
 
@@ -1126,7 +1152,9 @@ async function waitForVisibleHistoryMarker(client, marker, timeoutMs) {
 }
 
 async function runIdleSessionSync(harness, options, result, deviceId) {
-  await harness.client.command('Network.emulateNetworkConditions', { offline: false, latency: 50, downloadThroughput: 0.5 * 1024 * 1024 / 8, uploadThroughput: 1 * 1024 * 1024 / 8, connectionType: 'cellular2g' })
+  const networkProfile = options.networkProfile
+  await harness.client.command('Network.enable')
+  await harness.client.command('Network.emulateNetworkConditions', { offline: false, latency: networkProfile.latencyMs, downloadThroughput: networkProfile.downloadThroughput, uploadThroughput: networkProfile.uploadThroughput, connectionType: networkProfile.connectionType })
   const fetchMetrics = () => harness.client.evaluate("fetch('/api/dev/metrics',{credentials:'include'}).then(r=>r.ok?r.json():{status:r.status})")
   const initial = await fetchMetrics()
   // Let initial mount/presence resolution finish before starting the true idle window.
@@ -1167,7 +1195,7 @@ async function runIdleSessionSync(harness, options, result, deviceId) {
       bufferedAmountPeak: initialList?.bufferedAmountPeak ?? 0,
     },
     elapsedMs: Date.now() - startedAt,
-    network: { latencyMs: 50, downloadBitsPerSecond: 0.5 * 1024 * 1024, uploadBitsPerSecond: 1 * 1024 * 1024 },
+    network: { latencyMs: networkProfile.latencyMs, downloadBitsPerSecond: networkProfile.downloadBitsPerSecond, uploadBitsPerSecond: networkProfile.uploadBitsPerSecond },
     listRequests: entries.reduce((sum, item) => sum + item.calls, 0),
     responseUtf8Bytes: entries.reduce((sum, item) => sum + item.responseUtf8Bytes, 0),
     appSentBytes: entries.reduce((sum, item) => sum + item.appSentBytes, 0),
@@ -1182,6 +1210,9 @@ async function runIdleSessionSync(harness, options, result, deviceId) {
 }
 
 async function runSessionSync(harness, options, result) {
+  const networkProfile = options.networkProfile
+  await harness.client.command('Network.enable')
+  await harness.client.command('Network.emulateNetworkConditions', { offline: false, latency: networkProfile.latencyMs, downloadThroughput: networkProfile.downloadThroughput, uploadThroughput: networkProfile.uploadThroughput, connectionType: networkProfile.connectionType })
   const exceptionsBeforeSessionSync = harness.exceptions.length
   // 验证停止周期拉取后，会话列表在本端操作与断线重连后仍正确同步（只操作本次新建的会话）。
   const sidebarHas = (text) => harness.client.evaluate(`(() => {const root=document.querySelector('[data-web-remote-sidebar="left"]');return !!root&&(root.innerText||'').includes(${JSON.stringify(text)})})()`)
@@ -1256,7 +1287,7 @@ async function runSessionSync(harness, options, result) {
   // 回复探索节点按需读取
   const bindings = await harness.invokeRaw('web-remote:get-session-entry-bindings', [{ sessionId: created.id }]).catch((error) => ({ error: String(error) }))
   steps.entryBindingsReadable = !!bindings && typeof bindings === 'object' && !bindings.error
-  result.sessionSync = { ...steps, exceptions: Math.max(0, harness.exceptions.length - exceptionsBeforeSessionSync), exceptionsBeforeSessionSync }
+  result.sessionSync = { ...steps, network: { latencyMs: networkProfile.latencyMs, downloadBitsPerSecond: networkProfile.downloadBitsPerSecond, uploadBitsPerSecond: networkProfile.uploadBitsPerSecond }, exceptions: Math.max(0, harness.exceptions.length - exceptionsBeforeSessionSync), exceptionsBeforeSessionSync }
   steps.listCallsDuringSuite = (await harness.client.evaluate("fetch('/api/dev/metrics',{credentials:'include'}).then(r=>r.ok?r.json():null)"))?.ipc?.devices ? 'see-metrics' : 'n/a'
   const failed = !steps.draftHiddenBeforePromotion || !steps.promotedToVisible || steps.renameVisibleMs === null || steps.liveRenameVisibleMs === null || steps.liveCreateVisibleMs === null || steps.liveDeleteGoneMs === null || steps.archiveRemovedMs === null || steps.restoreVisibleMs === null || !steps.afterReconnectRenameVisible || !steps.afterReconnectCreateVisible || (external?.id && !steps.afterReconnectDeleteGone) || !steps.archivedRemovedFromActiveList || !steps.entryBindingsReadable || steps.visibleWorkspaceCount !== 1 || !steps.unauthorizedWorkspaceCreateDenied || result.sessionSync.exceptions > 0
   if (failed) throw new Error(`会话列表同步验收失败：${JSON.stringify(result.sessionSync)}`)
@@ -1264,6 +1295,7 @@ async function runSessionSync(harness, options, result) {
 
 async function runRealHistory(harness, options, result, deviceId) {
   const sessionId = options.session
+  const networkProfile = options.networkProfile
   if (!/^[A-Za-z0-9-]{16,128}$/.test(sessionId)) throw new Error('real-history 需要通过 PROMA_WEB_REMOTE_SESSION 指定真实会话 ID')
   const root = join(homedir(), '.proma-dev', 'agent-sessions')
   const messagesPath = join(root, `${sessionId}.jsonl`)
@@ -1277,8 +1309,8 @@ async function runRealHistory(harness, options, result, deviceId) {
   const channelMetric = (snapshot, name) => snapshot?.ipc?.devices?.[deviceId]?.byChannel?.[name] ?? {}
   await harness.client.command('Network.enable')
   await harness.client.command('Network.emulateNetworkConditions', {
-    offline: false, latency: 50, downloadThroughput: 0.5 * 1024 * 1024 / 8,
-    uploadThroughput: 1 * 1024 * 1024 / 8, connectionType: 'cellular2g',
+    offline: false, latency: networkProfile.latencyMs, downloadThroughput: networkProfile.downloadThroughput,
+    uploadThroughput: networkProfile.uploadThroughput, connectionType: networkProfile.connectionType,
   })
   // Force a fresh full-list IPC after the shim's short coalescing window so the
   // 830-session payload is measured on the slow link; keep initialization CSP errors outside the action window.
@@ -1352,7 +1384,7 @@ async function runRealHistory(harness, options, result, deviceId) {
   result.realHistory = {
     sessionCount: list.length,
     sessionFileBytes,
-    network: { latencyMs: 50, downloadBitsPerSecond: 0.5 * 1024 * 1024, uploadBitsPerSecond: 1 * 1024 * 1024 },
+    network: { latencyMs: networkProfile.latencyMs, downloadBitsPerSecond: networkProfile.downloadBitsPerSecond, uploadBitsPerSecond: networkProfile.uploadBitsPerSecond },
     list: listMetrics,
     firstHistoryMs,
     historyVisible,
@@ -1389,10 +1421,8 @@ async function runHeavySession(harness, options, result, onSyntheticFileCreated)
   if (syntheticBytes < 30 * 1024 * 1024) throw new Error(`合成大会话不足 30 MiB：${syntheticBytes}`)
   // Move away from the just-created empty snapshot, then reopen it after network throttling is active.
   await harness.createHarnessSessionRaw(awayTitle)
-  const cellularProfile = options.suite === 'cellular'
-    ? { latency: 50, downloadThroughput: 0.5 * 1024 * 1024 / 8, uploadThroughput: 1 * 1024 * 1024 / 8, connectionType: 'cellular2g' }
-    : { latency: 300, downloadThroughput: 3 * 1024 * 1024 / 8, uploadThroughput: 1 * 1024 * 1024 / 8, connectionType: 'cellular3g' }
-  await harness.client.command('Network.emulateNetworkConditions', { offline: false, ...cellularProfile })
+  const cellularProfile = options.networkProfile
+  await harness.client.command('Network.emulateNetworkConditions', { offline: false, latency: cellularProfile.latencyMs, downloadThroughput: cellularProfile.downloadThroughput, uploadThroughput: cellularProfile.uploadThroughput, connectionType: cellularProfile.connectionType })
   if (options.suite === 'cellular') await harness.client.evaluate("localStorage.removeItem('proma-web-remote-data-saver');document.querySelector('[data-web-remote-data-saver]')?.click()")
   const firstFrameIndex = harness.websocketFramesReceived.length
   const firstNetworkIndex = harness.websocketDataReceived.length
@@ -1415,7 +1445,7 @@ async function runHeavySession(harness, options, result, onSyntheticFileCreated)
     syntheticSessionId: heavy.id,
     syntheticJsonlBytes: syntheticBytes,
     baselineMode,
-    network: { latencyMs: cellularProfile.latency, downloadBitsPerSecond: cellularProfile.downloadThroughput * 8, uploadBitsPerSecond: cellularProfile.uploadThroughput * 8 },
+    network: { latencyMs: cellularProfile.latencyMs, downloadBitsPerSecond: cellularProfile.downloadBitsPerSecond, uploadBitsPerSecond: cellularProfile.uploadBitsPerSecond },
     firstHistoryMs,
     observedThroughMs: Date.now() - startedAt,
     historyVisible,
@@ -1597,7 +1627,7 @@ async function runSmoke(harness, options, result) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2))
-  const result = { startedAt: new Date().toISOString(), options: { url: options.url, suite: options.suite, session: options.session, width: options.width, height: options.height, deviceScaleFactor: options.deviceScaleFactor, userAgent: options.userAgent, outputDir: options.outputDir }, steps: [], screenshots: [], consoleErrors: [], exceptions: [], pairedDeviceId: null, revoked: false, chromeExited: false, profileRemoved: false }
+  const result = { startedAt: new Date().toISOString(), options: { url: options.url, suite: options.suite, session: options.session, width: options.width, height: options.height, deviceScaleFactor: options.deviceScaleFactor, userAgent: options.userAgent, outputDir: options.outputDir, network: options.networkProfile }, steps: [], screenshots: [], consoleErrors: [], exceptions: [], pairedDeviceId: null, revoked: false, chromeExited: false, profileRemoved: false }
   let harness
   try {
     harness = await createHarness(options)
