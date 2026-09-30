@@ -135,7 +135,6 @@ import {
   applyAgentSessionMetadataChange,
   getAgentSessionMetadataRevision,
   mergeAgentSessionSnapshotWithChanges,
-  resetAgentSessionMetadataEventCursor,
   collectAgentSessionTreeIds,
   countSettledDelegatedChildren,
   getAgentSessionTreeIndicatorStatus,
@@ -731,7 +730,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   const setSearchDialogOpen = useSetAtom(searchDialogOpenAtom)
   const newChatShortcutLabel = getAcceleratorDisplay(getActiveAccelerator('new-session'))
 
-  const sessionMetadataCursor = React.useRef({ epoch: null as string | null, sequence: 0 })
+  const sessionMetadataCursor = React.useRef({ epoch: null as string | null, sequence: 0, retiredEpochs: new Set<string>() })
   const sessionMetadataRefreshInFlight = React.useRef(false)
   const bufferedSessionMetadataChanges = React.useRef<AgentSessionMetadataChange[]>([])
   const sessionMetadataRefreshQueue = React.useRef<Promise<void>>(Promise.resolve())
@@ -800,7 +799,6 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     const resync = (): void => {
       // Main-process epoch/sequence restarts on app relaunch. Discard the old cursor and
       // refresh the full active/archived lists; events arriving during that snapshot replay afterward.
-      resetAgentSessionMetadataEventCursor(sessionMetadataCursor.current)
       void refreshAgentSidebarSessions(viewMode === 'archived').catch(console.error)
     }
     window.addEventListener('proma-web-remote-reconnected', resync)

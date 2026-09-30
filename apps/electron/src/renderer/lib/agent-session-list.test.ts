@@ -6,7 +6,6 @@ import {
   getAgentSessionMetadataRevision,
   mergeAgentSessionSnapshotWithChanges,
   recordAgentSessionMetadataChange,
-  resetAgentSessionMetadataEventCursor,
   upsertAgentSession,
   type AgentSessionMetadataEventCursor,
 } from './agent-session-list'
@@ -21,15 +20,16 @@ const change = (overrides: Partial<AgentSessionMetadataChange> = {}): AgentSessi
 })
 
 describe('Agent session metadata synchronization', () => {
-  test('accepts increasing sequence numbers, resets on a new main-process epoch, and resets for authority refresh', () => {
-    const cursor: AgentSessionMetadataEventCursor = { epoch: null, sequence: 0 }
-    expect(acceptAgentSessionMetadataChange(cursor, change({ sequence: 12 }))).toBe(true)
-    expect(acceptAgentSessionMetadataChange(cursor, change({ sequence: 11 }))).toBe(false)
+  test('accepts a new boot at sequence 1 but rejects delayed events from a retired epoch', () => {
+    const cursor: AgentSessionMetadataEventCursor = { epoch: null, sequence: 0, retiredEpochs: new Set() }
+    expect(acceptAgentSessionMetadataChange(cursor, change({ epoch: 'boot-a', sequence: 12 }))).toBe(true)
+    expect(acceptAgentSessionMetadataChange(cursor, change({ epoch: 'boot-a', sequence: 11 }))).toBe(false)
     expect(acceptAgentSessionMetadataChange(cursor, change({ epoch: 'boot-b', sequence: 1 }))).toBe(true)
-    expect(cursor).toEqual({ epoch: 'boot-b', sequence: 1 })
-    resetAgentSessionMetadataEventCursor(cursor)
-    expect(cursor).toEqual({ epoch: null, sequence: 0 })
-    expect(acceptAgentSessionMetadataChange(cursor, change({ epoch: 'boot-c', sequence: 1 }))).toBe(true)
+    expect(cursor).toMatchObject({ epoch: 'boot-b', sequence: 1 })
+    expect(cursor.retiredEpochs.has('boot-a')).toBe(true)
+    expect(acceptAgentSessionMetadataChange(cursor, change({ epoch: 'boot-a', sequence: 13 }))).toBe(false)
+    expect(cursor).toMatchObject({ epoch: 'boot-b', sequence: 1 })
+    expect(acceptAgentSessionMetadataChange(cursor, change({ epoch: 'boot-b', sequence: 2 }))).toBe(true)
   })
 
   test('upsert/archive/restore/remove deltas update the complete local sidebar cache', () => {
@@ -64,21 +64,23 @@ describe('Agent session metadata synchronization', () => {
     expect(reconciled.find((item) => item.id === 'session-1')?.title).toBe('new title')
   })
 
-  test('replaying changes received during a stale full snapshot preserves a later deletion', () => {
+  test('workspace-scope remove tombstone clears when the same session is restored', () => {
     const snapshotRevision = getAgentSessionMetadataRevision()
-    recordAgentSessionMetadataChange(change({ action: 'remove', session: { id: 'session-1' }, sequence: 4 }))
+    recordAgentSessionMetadataChange(change({ epoch: 'move-out-boot', sequence: 1, action: 'remove', workspaceId: 'workspace-a', session: { id: 'session-1' } }))
     const staleSnapshot = [session()]
     const reconciled = mergeAgentSessionSnapshotWithChanges(staleSnapshot, staleSnapshot, snapshotRevision, false)
     expect(reconciled.some((item) => item.id === 'session-1')).toBe(false)
     expect(upsertAgentSession(staleSnapshot, session({ title: 'late stale upsert' })).some((item) => item.id === 'session-1')).toBe(false)
-    recordAgentSessionMetadataChange(change({ epoch: 'retention-boot', sequence: 8_201, session: { ...change().session, title: 'recreated after authority event' } }))
-    expect(upsertAgentSession([], session({ title: 'recreated after authority event' })).some((item) => item.id === 'session-1')).toBe(true)
+    recordAgentSessionMetadataChange(change({ epoch: 'move-back-boot', sequence: 1, session: { ...change().session, title: 'restored in authorized workspace' } }))
+    const restored = mergeAgentSessionSnapshotWithChanges([], [], snapshotRevision, false)
+    expect(restored.find((item) => item.id === 'session-1')?.title).toBe('restored in authorized workspace')
+    expect(upsertAgentSession([], session({ title: 'restored in authorized workspace' })).some((item) => item.id === 'session-1')).toBe(true)
   })
 
   test('LeftSidebar cursor and global journal accept the same event in either listener order', () => {
     const replayInOrder = (epoch: string, recordFirst: boolean): string | undefined => {
       const snapshotRevision = getAgentSessionMetadataRevision()
-      const cursor: AgentSessionMetadataEventCursor = { epoch: null, sequence: 0 }
+      const cursor: AgentSessionMetadataEventCursor = { epoch: null, sequence: 0, retiredEpochs: new Set() }
       const event = change({ epoch, sequence: 1, session: { ...change().session, title: `title-${epoch}`, updatedAt: 2 } })
       if (recordFirst) {
         recordAgentSessionMetadataChange(event)

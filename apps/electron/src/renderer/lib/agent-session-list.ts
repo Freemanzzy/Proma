@@ -28,27 +28,32 @@ export function sortAgentSessionsByUpdatedAtDesc(
 export interface AgentSessionMetadataEventCursor {
   epoch: string | null
   sequence: number
+  /** Epochs already retired in this renderer process; delayed frames from them are rejected. */
+  retiredEpochs: Set<string>
 }
 
-/** Accept ordered deltas within one main-process boot and reset when its epoch changes. */
+/** Accept ordered deltas within one boot; a retired epoch can never roll the cursor back. */
 export function acceptAgentSessionMetadataChange(
   cursor: AgentSessionMetadataEventCursor,
   change: AgentSessionMetadataChange,
 ): boolean {
   if (!change || typeof change.epoch !== 'string' || !change.epoch || !Number.isSafeInteger(change.sequence) || change.sequence < 1) return false
-  if (cursor.epoch !== change.epoch) {
+  if (cursor.epoch === null) {
+    if (cursor.retiredEpochs.has(change.epoch)) return false
     cursor.epoch = change.epoch
-    cursor.sequence = 0
+    cursor.sequence = change.sequence
+    return true
   }
-  if (change.sequence <= cursor.sequence) return false
+  if (cursor.epoch === change.epoch) {
+    if (change.sequence <= cursor.sequence) return false
+    cursor.sequence = change.sequence
+    return true
+  }
+  if (cursor.retiredEpochs.has(change.epoch)) return false
+  cursor.retiredEpochs.add(cursor.epoch)
+  cursor.epoch = change.epoch
   cursor.sequence = change.sequence
   return true
-}
-
-/** Reconnect starts a fresh authority snapshot; the next boot's deltas must be accepted. */
-export function resetAgentSessionMetadataEventCursor(cursor: AgentSessionMetadataEventCursor): void {
-  cursor.epoch = null
-  cursor.sequence = 0
 }
 
 /** Apply a path-free session delta to the current active/archive sidebar cache. */
@@ -72,7 +77,7 @@ interface RevisionedAgentSessionMetadataChange {
 }
 
 let agentSessionMetadataRevision = 0
-const agentSessionMetadataJournalCursor: AgentSessionMetadataEventCursor = { epoch: null, sequence: 0 }
+const agentSessionMetadataJournalCursor: AgentSessionMetadataEventCursor = { epoch: null, sequence: 0, retiredEpochs: new Set() }
 const agentSessionMetadataChangeJournal: RevisionedAgentSessionMetadataChange[] = []
 const deletedAgentSessionRevisions = new Map<string, number>()
 const MAX_SESSION_METADATA_JOURNAL = 8192

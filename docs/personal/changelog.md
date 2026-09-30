@@ -986,3 +986,9 @@
 - 安全链路审计确认仅删顶层 `dev` 的 `dev-kill.ts --vite` 仍会从 `dev:electron` 间接执行 `dev:kill`。因此在 `apps/electron/package.json` 临时移除 `dev` 与其子项 `dev:electron` 中的两处自动 `dev-kill` 调用，保留 `concurrently` 和后续构建/监视流程；`scripts/dev-kill.ts`、`scripts/personal/dev.sh` 与独立进程安全分支均未改。
 - 静态链路核对：`mobile-preview.sh start` → `scripts/personal/dev.sh` → `bun run dev` → `dev:vite`/`dev:electron` 的实际脚本值不再引用 `dev-kill`/`pkill`/`killall`/`taskkill`。`dev.sh` 原有“发现已运行 Personal Electron 即拒绝启动”检查保留。该临时措施只避免自动按名终止，不替代下个版本的PID/身份核验启动器。
 - 开发实例与桌面正式 Proma 共享同一台机器的运行环境；后续测试期间不得为了重启 dev 退出/结束正式版。此步骤只做静态脚本链检查、package JSON 语法检查及 typecheck；未启动/停止任何进程、未执行测试 E2E，也未改 `~/.proma-dev`、Tailscale Serve 或端口。
+
+## 2026-09-30: 拒绝退役 main-process epoch 的迟到事件
+
+- Session metadata cursor 现记住 retired epochs：新 main-process epoch 即使从 sequence `1` 开始也接受；切换到新 epoch 后，迟到的旧 epoch 增量被拒绝，不能把 cursor 回滚。IPC 重连仍触发权威快照，不重置已识别的当前 epoch 顺序。
+- 删除或移出授权范围均建立会话 tombstone；同一 session ID 在之后新 epoch 中重新 upsert 时解除 tombstone。相关状态保留以验证“移出授权工作区 → 同 ID 重新进入授权工作区”不会错误消失。
+- 定向验证：`agent-session-list.test.ts` **8 pass / 0 fail**，`full-ui-security.test.ts` **30 pass / 0 fail**；全 workspace typecheck 通过。未启动开发实例/E2E，遵守进程安全分支的等待条件。
