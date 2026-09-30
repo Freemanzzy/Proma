@@ -143,6 +143,10 @@ function connect(): Promise<WebSocket> {
       try {
         lastInboundAt = Date.now()
         let message = JSON.parse(typeof event.data === 'string' ? event.data : '') as { type?: string; id?: string; requestId?: string; seq?: number; total?: number; data?: string; ok?: boolean; value?: unknown; error?: unknown; channel?: string }
+        if (message.type === 'resync') {
+          window.dispatchEvent(new CustomEvent('proma-web-remote-reconnected'))
+          return
+        }
         if (message.type === 'chunk') {
           const assembled = consumeChunk(message)
           if (assembled === null) return

@@ -1102,3 +1102,9 @@
 - 新增 `useGlobalAgentListeners.recovery.test.ts`，验证恢复函数只还原运行快照、排队消息与待处理请求，不调用 full/active/archive 列表；**1 pass / 0 fail**。一次 `iphone:session-sync`（3 Mbps/1 Mbps/50 ms）通过：两次断线重连均恢复成功，耗时 **4,596 ms / 4,353 ms**，UI 的外部改名/新建/删除恢复断言通过；suite 结束配对撤销、Chrome/profile 清理通过。
 - harness 对同一设备的完整 session-sync 生命周期按 metrics 窗口汇总，而不是按重连动作切片：全 suite 的 `agent:list-sessions` 共 **6 次**、每次约 **459.8–460.5 KB**；`agent:list-active-sessions` 共 **18 次**、每次约 **66.2–66.9 KB**。这些列表调用含 session-sync 的初始读取、测试操作及未知会话等既有路径，不能全部归因给重连；本次无法从 harness 汇总值单独分离每个重连瞬间的请求数。代码路径已确认恢复函数本身列表调用 **0 次**，sidebar 的 reconnect listener 每次只触发当前视图的一次权威刷新。
 - **830 条 dev 数据 active 投影仅测量**：未归档 **105** 条；删除 `delegationGoal`、`piSessionFile`、`piEntryBindings` 后，字段投影共 **65,992 B**（按每项 JSON UTF-8 字节求和，不含数组逗号/外层 IPC envelope），平均 **628.50 B/会话**。按实际发送投影逐字段累计 key/value UTF-8 字节的前五名：`title` **6,587 B**、`workspaceId` **5,460 B**、`sdkSessionId` **5,406 B**、`channelId` **5,250 B**、`id` **4,515 B**。运行 metrics 的多次 active 请求每次 responseUtf8 约 **66.2–66.9 KB**，与投影计算相符。正式版简报基准是 934 条数据下每次 1 次全量列表（约 520 KB）+ 1 次 active（约 340 KB）；不同数据集不作精确百分比比较。`~/.proma-dev` 会话索引测试前后仍为 **830**。
+
+## 2026-10-01: full-ui 高积压时丢弃可重建流增量
+
+- full-ui 按连接检查 `bufferedAmount`。超过 **1,000,000 B** 时只丢弃 `chat:stream:chunk` 与 `agent:stream:event` 中 `payload.kind === 'sdk_delta'`（兼容旧式 `event.type === 'text_delta'`），并为该连接置 `needsResync`。不丢弃 `sdk_message`、`proma_event`（含 AskUser/计划/权限交互）、`agent:stream:complete/error`、`agent:session-metadata-changed` 或任意 invoke 响应。
+- 连接缓冲低于 **256 KiB** 时发送一次 WebSocket `resync` 控制帧；手机 shim 将它映射到已有 `proma-web-remote-reconnected` 事件，复用 `__PROMA_WEB_REMOTE_RECOVER` 与 LeftSidebar resync，无新增 IPC channel/权限分级。
+- 单测覆盖 droppable 分类、超阈值增量丢弃、完整/错误/AskUser/metadata 状态帧与 invoke response 保留，以及缓冲回落后只发送一次 resync；`full-ui-security.test.ts` **26 pass / 0 fail**，`git diff --check` 通过。该步骤未增加或修改 channel-policy 项。

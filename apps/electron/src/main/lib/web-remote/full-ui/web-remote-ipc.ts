@@ -14,6 +14,9 @@ import { readWebRemoteHistoryMedia, selectWebRemoteHistoryWindow } from './sdk-h
 
 const REQUEST_TIMEOUT_MS = 30_000
 const AGENT_SEND_ACCEPT_WINDOW_MS = 1_500
+export const EVENT_BACKPRESSURE_BYTES = 1_000_000
+export const EVENT_RESYNC_LOW_WATER_BYTES = 256 * 1024
+const EVENT_RESYNC_POLL_MS = 100
 const CONFIRM_TTL_MS = 60_000
 const WEB_REMOTE_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024
 const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024
@@ -27,6 +30,8 @@ interface IpcClient {
   ws: WebSocket
   deviceId: string
   confirmations: Map<string, { token: string; expiresAt: number }>
+  needsResync: boolean
+  resyncTimer?: ReturnType<typeof setTimeout>
   metrics: { startedAt: number; byChannel: Record<string, { calls: number; responseUtf8Bytes: number; appFramingBytes: number; base64PayloadBytes: number; appSentBytes: number; estimatedDeflateRawBytes: number; elapsedMs: number; chunks: number; bufferedAmountPeak: number }> }
 }
 
@@ -267,6 +272,13 @@ function summarize(channel: string): string {
   return labels[channel] ?? `确认执行远程操作：${channel}`
 }
 
+export function isReconstructibleStreamDelta(channel: string, value: unknown): boolean {
+  if (channel === 'chat:stream:chunk') return true
+  if (channel !== 'agent:stream:event' || !value || typeof value !== 'object') return false
+  const record = value as { payload?: { kind?: unknown } | null; event?: { type?: unknown } | null }
+  return record.payload?.kind === 'sdk_delta' || record.event?.type === 'text_delta'
+}
+
 export function splitUtf8BufferAtBoundaries(bytes: Buffer, maxBytes: number): Buffer[] {
   if (!Number.isInteger(maxBytes) || maxBytes < 4) throw new Error('UTF-8 chunk size must be at least four bytes')
   const chunks: Buffer[] = []
@@ -331,7 +343,7 @@ export class WebRemoteIpcBridge {
 
   attachWebSocket(ws: WebSocket, deviceId: string): void {
     const metrics: IpcClient['metrics'] = { startedAt: Date.now(), byChannel: {} }
-    const client: IpcClient = { ws, deviceId, confirmations: new Map(), metrics }
+    const client: IpcClient = { ws, deviceId, confirmations: new Map(), needsResync: false, metrics }
     this.clients.add(client)
     remoteMetrics.devices[deviceId] = metrics
     const flushMetrics = () => {
@@ -352,6 +364,7 @@ export class WebRemoteIpcBridge {
     ws.once('close', (code: number, reason: Buffer) => {
       flushMetrics()
       clearInterval(metricsTimer)
+      if (client.resyncTimer) clearTimeout(client.resyncTimer)
       recordPersonalInfo('Web Remote 计量', JSON.stringify({ deviceId, event: 'close', code, reason: reason.toString().slice(0, 120) }))
     })
     this.ensureWrapped()
@@ -514,6 +527,25 @@ export class WebRemoteIpcBridge {
     return true
   }
 
+  private bufferedAmount(client: IpcClient): number {
+    return (client.ws as unknown as { bufferedAmount?: number }).bufferedAmount ?? 0
+  }
+
+  private scheduleResync(client: IpcClient): void {
+    if (client.resyncTimer || client.ws.readyState !== WebSocket.OPEN) return
+    client.resyncTimer = setTimeout(() => {
+      client.resyncTimer = undefined
+      if (client.ws.readyState !== WebSocket.OPEN || !client.needsResync) return
+      if (this.bufferedAmount(client) < EVENT_RESYNC_LOW_WATER_BYTES) {
+        this.sendRaw(client.ws, JSON.stringify({ type: 'resync' }))
+        client.needsResync = false
+        return
+      }
+      this.scheduleResync(client)
+    }, EVENT_RESYNC_POLL_MS)
+    client.resyncTimer.unref?.()
+  }
+
   private broadcast(channel: string, value: unknown): void {
     if (!this.eventAllowed(channel, value)) {
       if (!this.loggedUnknown.has(channel) && !this.policy(channel)) { this.loggedUnknown.add(channel); console.warn(`[Web Remote] 未登记事件默认拒绝: ${channel}`) }
@@ -547,7 +579,17 @@ export class WebRemoteIpcBridge {
       payload = { __proma_web_remote_error: 'serialization_failed', channel }
     }
     const message = JSON.stringify({ type: 'event', channel, value: payload })
-    for (const client of this.clients) if (client.ws.readyState === WebSocket.OPEN) this.sendRaw(client.ws, message)
+    const droppableDelta = isReconstructibleStreamDelta(channel, value)
+    for (const client of this.clients) {
+      if (client.ws.readyState !== WebSocket.OPEN) continue
+      const bufferedAmount = this.bufferedAmount(client)
+      if (droppableDelta && bufferedAmount > EVENT_BACKPRESSURE_BYTES) {
+        client.needsResync = true
+        this.scheduleResync(client)
+        continue
+      }
+      this.sendRaw(client.ws, message)
+    }
   }
 
   private async handleMessage(client: IpcClient, raw: string): Promise<void> {
