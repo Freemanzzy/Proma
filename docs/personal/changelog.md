@@ -1040,3 +1040,10 @@
 - `forwardMobileControl` 未改；Todo、定时任务、MCP/Skills、项目记忆、日程、设置和新建会话仍沿用原有转发/收起路径。未改 `LeftSidebar.tsx` 等上游组件；补丁不比较 `innerHTML` 或 SVG 内容。
 - 回归测试覆盖箭头点击、更多菜单、分组折叠不收回；会话选择与 Chat/Agent 模式状态变化收回。`mobile-patch.test.ts` **5 pass / 0 fail**；全 workspace typecheck 与 `build:main` 通过。
 - dev 自动重载后状态核验：启动器 PID `82401` 运行，17889 由 PID `8911` 监听，5173 由 PID `82429` 监听，Serve 8443→17889；正式版 PID `83615` 与 443→17888 未变。`~/.proma-dev` 保持 830 条，会话与 JSONL 集合 hash 未变。未运行 harness、未 merge/push/打包/安装。
+
+## 2026-10-01: 安装 2f13f490（手机会话实时同步批次）
+
+- Claude Code 00:24 用 `install-update.sh` 安装 `2f13f490`（0.19.58），EXIT=0，备份校验通过，前后快照一致；钥匙串弹窗 1 次。previous 轮换为 `9b956f2b`。
+- 健康检查：17888 监听、Serve 仅 443 → 17888、main.log 无 `[FATAL]`/`[ERROR]`、17 个启用任务无过期 `nextRunAt`、会话与渠道数与安装前一致。
+- 待补：手机实机（列表速度、Mac 侧会话变更即时同步、侧栏展开不收起）与空闲期无周期性 `agent:list-sessions`；调度器重启后首次到点触发（10-01 01:00 / 02:00）用户选择先安装、之后核对。
+- 详见本机交接 `install-result-2026-10-01.md`。
