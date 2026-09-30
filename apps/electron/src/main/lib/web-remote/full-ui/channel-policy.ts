@@ -18,7 +18,7 @@ const EXPORTED_CHANNELS = new Set<string>([
   ...channelValues(UPDATER_IPC_CHANNELS),
 ])
 
-const RUNTIME_LITERAL_CHANNELS = new Set(['file:exists-batch', 'file:office-to-html', 'file:prepare-pdf-preview', 'file:read-binary-base64', 'file:resolve-and-read', 'file:resolve-html-preview-path', 'file:resolve-markdown-media', 'file:resolve-path', 'file:write-text', 'migration:open-data-folder', 'web-remote:admin-get', 'web-remote:admin-save', 'web-remote:admin-pair', 'web-remote:admin-revoke', 'web-remote:admin-push-test', 'web-remote:admin-push-delete', 'web-remote:get-history-media'])
+const RUNTIME_LITERAL_CHANNELS = new Set(['file:exists-batch', 'file:office-to-html', 'file:prepare-pdf-preview', 'file:read-binary-base64', 'file:resolve-and-read', 'file:resolve-html-preview-path', 'file:resolve-markdown-media', 'file:resolve-path', 'file:write-text', 'migration:open-data-folder', 'web-remote:admin-get', 'web-remote:admin-save', 'web-remote:admin-pair', 'web-remote:admin-revoke', 'web-remote:admin-push-test', 'web-remote:admin-push-delete', 'web-remote:get-history-media', 'web-remote:get-session-entry-bindings'])
 
 /** Explicit reviewed table. Do not replace this with runtime regex inference. */
 export const WEB_REMOTE_CHANNEL_POLICY: Readonly<Record<string, WebRemoteChannelPolicyEntry>> = Object.freeze({
@@ -29,6 +29,7 @@ export const WEB_REMOTE_CHANNEL_POLICY: Readonly<Record<string, WebRemoteChannel
   "web-remote:admin-push-test": { level: "denied", scope: "none", rationale: "仅桌面设置发送测试通知，手机桥接禁止调用。" },
   "web-remote:admin-push-delete": { level: "denied", scope: "none", rationale: "仅桌面设置删除手机推送订阅，手机桥接禁止调用。" },
   "web-remote:get-history-media": { level: "read", scope: "session", rationale: "只读取指定已授权会话内、经消息摘要与路径校验的单张图片或完整 tool_result 文本。" },
+  "web-remote:get-session-entry-bindings": { level: "read", scope: "session", rationale: "仅按需读取指定已授权会话的 Pi 回复节点 ID 映射，用于手机端回复探索。" },
   "simulator:list": { level: "denied", scope: "none", rationale: "读取本机 macOS 模拟器设备信息，仅桌面可用。" },
   "simulator:start": { level: "denied", scope: "none", rationale: "控制本机模拟器并启动本地预览服务，手机端禁止。" },
   "simulator:stop": { level: "denied", scope: "none", rationale: "停止本机模拟器预览服务，手机端禁止。" },
@@ -148,6 +149,7 @@ export const WEB_REMOTE_CHANNEL_POLICY: Readonly<Record<string, WebRemoteChannel
   "agent:save-mcp-oauth-client-secret": { level: "denied", scope: "none", rationale: "原生窗口、终端、凭据、设置写入或外部副作用，不向手机 renderer 暴露。" },
   "agent:search-messages": { level: "read", scope: "none", rationale: "只读结果或状态事件；列表和设置结果在返回前按允许范围/敏感字段过滤。" },
   "agent:search-session-references": { level: "read", scope: "none", rationale: "只读结果或状态事件；列表和设置结果在返回前按允许范围/敏感字段过滤。" },
+  "agent:session-metadata-changed": { level: "read", scope: "workspace", rationale: "只推送脱敏会话元数据；服务端按允许工作区过滤，工作区外迁移仅推送移除通知。" },
   "agent:search-workspace-files": { level: "workspace", scope: "workspace", rationale: "参数必须能解析出 sessionId 或 workspaceId/slug，并校验其在远程允许范围内。" },
   "agent:select-browser-tab": { level: "denied", scope: "none", rationale: "原生窗口、终端、凭据、设置写入或外部副作用，不向手机 renderer 暴露。" },
   "agent:send-message": { level: "session", scope: "session", rationale: "参数必须能解析出 sessionId 或 workspaceId/slug，并校验其在远程允许范围内。" },

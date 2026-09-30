@@ -921,3 +921,122 @@
 - iPhone 最初蜂窝失败，交接补充二确认：tailnet 改为 `OmitDefaultRegions: true`、仅自建区域后恢复；不再安排重复的官方 iOS App 对照。无官方中继后备的风险由用户接受。此前文档“故障自动回落官方”的说法已在手机 SSOT 和回退手册纠正。
 - 备份在外置硬盘“proma 自建中继/”，仅含 derpMap、Mac pf 与恢复说明，不含服务器证书/私钥/derper 配置/安全组。证书到期 2027-09-29；已创建北京时间 2027-08-01 09:00 的续期日程及提醒。
 - 应用待办仍有效：每约 15 秒全量取会话列表；正式单次列表原文约 2.67 MB（未达此前合成数据估算）；分片 base64 膨胀、真实压缩与缓存待复核；计量日志过长被截断。此前“列表必降到 0.5 MB 以下”不适用于本次正式数据，不能以合成测试替代真实负载验收。
+
+## 2026-09-29: 手机会话列表空闲降载、按需字段与完整计量
+
+- **正式数据只读统计**：只读取 `~/.proma/agent-sessions.json` 的 JSON 结构与字段长度统计，没有输出/复制会话正文，也未改写正式数据。文件 3,964,154 B，925 条 session；`sessions` compact JSON 3,336,840 B。旧 `slimWebRemoteSessionMeta` 删除 `delegationGoal`、`piSessionFile` 并把 `piEntryBindings` 值改为 `true` 后仍为 **2,673,351 B**：699 个 `piEntryBindings` 字段共 2,437,800 B、合计 48,754 个键（键数 min 0 / median 19 / p95 240 / max 2,372）；194 个 `delegationGoal` 值共 275,773 B；700 个 `piSessionFile` 值共 79,800 B。仅改 `piEntryBindings` 的值不能缩短保留的键；此前 900 条测试夹具每 session 固定 5 个短键，没复现正式数据的长尾键数量，因此 0.29 MB 结论失真。
+- **合成字段体量验证**：安全测试构造 925 条全合成索引，按正式 count/长度分布覆盖超长 binding keys、delegationGoal、路径、ID/标题/工作区及常见运行字段。紧凑 JSON：未瘦身 **3,302,755 B**；旧瘦身仍 **2,720,817 B**；现在删掉 `delegationGoal`、`piSessionFile`、整张 `piEntryBindings` 后 **459,407 B**。正式数据按同一新瘦身得到 **514,194 B**。该字段级测量是本机合成/本机只读结果，不冒充真实网络测量；编解码与分片还会增加应用层字节。
+- **根因与修复**：从 `mobile-patch/mobile-js.ts` 实际追到每 5 秒 push-presence 心跳调用 `listAgentSessions()`；既有同参复用只有 3 秒，无法抑制串行 5 秒轮询（安装记录约每 15 秒的窗口实测与该根因吻合）。心跳现在首次解析、标题/请求会话改变、回前台时才读取列表，其余心跳复用已解析 session ID；查不到 session 也会缓存解析结果，避免无会话页面反复全量取数。手机隐藏时不强制重查；桌面路径不变。原 3 秒合并/短缓存仍仅用于互斥和邻近重复请求，不再作为长期轮询方案。
+- **列表字段与授权**：`agent:list-sessions`、`agent:list-active-sessions`、`agent:list-archived-sessions` 都不再向 Web Remote 返回 `delegationGoal`、`piSessionFile`、`piEntryBindings`；仍返回完整列表，保留搜索、筛选、归档与定位能力，不作“最近 30 条”截断。回复探索在用户触发时才通过新增 `web-remote:get-session-entry-bindings` 取目标 session 的键→true 映射；该通道显式分级为 `read/session`，既有 session→workspace 授权检查拒绝其他工作区。测试覆盖活动/归档列表瘦身、敏感字段不存在以及授权/越权结果。
+- **计量**：不改变通用错误日志 240 字符限长。IPC 每个通道现在写短结构 JSON 行（短窗口 ID、SHA-256 截断设备伪名、channel、calls/耗时；UTF-8 response、应用 framing、Base64、应用层总发送；deflateRaw 估算、`wireBytes:null`、chunks、bufferedAmountPeak）。分行后单体 JSON 仍完整落入 INFO writer；`personal-main-log.test.ts` 从实际主日志文件读回并解析三类完整行。应用层分片/编码字节、压缩估算与真实线上字节明确分开；`ws` 未提供压缩后的线缆计数，真实 wire 记为不可测，不再把估算称为实测。
+- **经 Serve / 空闲与弱网验证**：iPhone UA Chromium harness 经开发实例 Tailscale Serve 访问，WebSocket 握手 HTTP 101，实际协商 `permessage-deflate; server_no_context_takeover; client_no_context_takeover`。0.5 Mbps / 50 ms 下 32 MiB 大会话合成历史首屏 **4,364 ms**、CDP 解压 payload 251,164 B、线缆编码量未取得、0 JS exceptions；默认 iPhone/Android 9 套件 **9/9 通过**。单独 180 秒空闲同步套件经 Serve 与 0.5 Mbps 节流运行 183,411 ms：初始页面当前真实开发数据列表 `agent:list-sessions` **1 次 / responseUtf8 3,761 B**；计量基线之后 180 秒该通道 **0 次 / 0 B response / 0 B appSent / 0 B buffered peak**，0 JS exceptions。初始列表为开发实例现有数据，不是 925 条合成列表；925 条 fixture 尚未经 Serve 做全量索引端到端测量。
+- **编码与静态缓存核查**：不改 WebSocket 二进制协议，理由是当前已确认客户端按序重组、UTF-8/中文分片和连接失败回归均通过，且没有测得实际线缆带宽可证明改二进制收益大于风险；既有本机线缆探针记录的压缩帧结果不等于 Serve 线上实测。hash 静态 JS 由 server 设置 immutable Cache-Control 与 ETag，已有 server 测试验证 If-None-Match 返回 304。客户端 reload 来源是用户点击刷新，或生命周期恢复回调缺失/失败时的兜底 reload；本次未复现一个可修复的无谓 reload。iOS Safari 真机未测，CDP 解压帧不作线缆计量。
+- **验证**：定向 Web Remote、安全分级、移动补丁与日志测试通过；全量 Bun 测试 **634 pass / 0 fail / 0 error**（96 files、1,472 assertions）；`bun run typecheck`、`build:main`、`build:renderer`、`build:web-preload` 通过；`node --check scripts/personal/mobile-harness.mjs`、`bash -n scripts/personal/mobile-preview.sh`、`git diff --check` 通过。Renderer 构建保留已有 500 KB 大 chunk 警告。
+- **尚未证明/未完成的验收边界**：本机合成 925 条索引未注入/经 Serve 端到端测试；本轮未逐项操作“新建/改名/归档/删除”并测量每类变更可见延迟，也未做跨 workspace 的真浏览器列表切换 E2E；已有 9 套手机回归、列表权限单测和断线重连套件通过，不能替代以上专项验证。更新延迟目前没有实测数值；正式设备真实 iOS Safari 未测试；实际 WebSocket 线缆字节无法由当前指标取得。
+- **保留开发实例**：`mobile-preview.sh start`、开发端口 17889/8443 与 iPhone 17 Pro 模拟器已启动并配对，供用户体验；harness 自身临时 Chrome/设备授权已清理。未运行打包、安装、合并或 push；未停止正式 Proma，也未修改 Tailscale/DERP/pf。
+
+## 2026-09-29: 手机会话列表同步验收补齐（父会话复核）
+
+- 925 条合成会话（按正式索引字段分布：`piEntryBindings` 48,754 键、`delegationGoal`、`piSessionFile` 等）临时注入开发实例（测试后按标记移除，开发索引与备份逐 ID 一致）。经 Tailscale Serve、0.5 Mbps / 50 ms：首屏 `agent:list-sessions` 1 次，原文 409,409 B、应用层实发 546,201 B（base64 分片 ×4/3）；此后 183.4 s 空闲 0 次、0 B。
+- 新增 harness 套件 `session-sync`（只改本次新建会话）：本端改名 0.2 s 可见；外部（绕过本端渲染状态）改名/新建/删除**不实时**，断线重连后全部正确同步；归档从 active 列表移除；回复探索节点按需读取可用；0 JS 异常。复核代码：被移除的“在线状态上报”轮询从未把列表写入 renderer 状态，外部变更不实时是修复前即有的行为，本批未回退；如需实时应另加主进程会话变更推送事件。
+- 全量回归中 iphone smoke / android attachments（模型未回复）与 iphone heavy-session（加载更早未增加）在长时运行的开发实例上失败；开发实例随后收到外部“Polite quit”退出。重启后三套复跑全部通过。全量 634 pass / 0 fail；typecheck、main/renderer/web-preload 构建通过。
+- `mobile-preview.sh test` 单套超时由 420 s 调为 600 s（idle-session-sync 需 180 s 观察外加配对与清理）。
+
+## 2026-09-30: 受限导入真实备份工作区到开发实例
+
+- 新增 `scripts/personal/import-session-workspace.py`：默认 dry-run；`--apply` 只接受本机备份根中的单一来源工作区，且仅在 `~/.proma-dev` 不存在时写入会话索引、该工作区元数据与对应 JSONL。将 JSONL/元数据中的正式 `/.proma/` 路径引用改写为 dev 路径；新根目录权限 `0700`、数据文件 `0600`。不导入正式设置/渠道/密钥、Automation、Bridge、MCP、OAuth、Keychain、授权设备或推送订阅，不导入项目文件及其他工作区会话。
+- 执行前将已有 dev 根与导入路径修复前的副本分别改名保留；其内容未删除。Web Remote 配置只从原 dev 授权状态中选择性恢复，启动前改为单工作区 `allowlist`；备份来源本身只读。复核导入根没有正式 `/.proma/` 路径引用，且目标 `~/.proma-dev` 仅包含一个工作区的 830 条会话元数据、826 个对应 JSONL。真实目标 JSONL 为 **41,914,743 B**；缺失的 4 份 JSONL、旧 Pi runtime artifacts、附件文件和项目文件未从其他备份区域补齐。
+- 真实负载压力测试（iPhone UA Chromium，经开发 Serve；下行 **524,288 bit/s（约0.5 Mbps）**、50 ms RTT、上行 1,048,576 bit/s）：列表 830 条，responseUtf8 **459,730 B**、应用发送 **613,300 B**、fresh-list **10,135 ms**；41,914,743 B 历史首次可见 **4,349 ms**。历史 IPC response/app **197,907 B**，CDP 解压 WebSocket payload **140,728 B**，deflate estimate **58,844 B**，bufferedPeak **2,796,190 B**；实际线缆字节未取得。该 0.5 Mbps 数值仅是压力测试，不代表当前中继带宽。
+- 用户截至本日给出的当前中继带宽为 **3 Mbps**。本轮未在3 Mbps下完成真实列表/历史/空闲专项：开发进程当时已无17889监听，8443 Serve 路由虽留存但上游不可用；旧 `mobile-preview.sh start` 会间接调用按名终止脚本，独立安全启动入口尚未就绪。未为继续测试而运行旧启动链或新增按名清理方案。后续需等安全启动入口完成，再记录3 Mbps当前条件结果。
+- 更新：本记录与 [`web-remote.md`](./web-remote.md) 中的受限导入、安全边界、压力测试与 3 Mbps 未完成状态同步。模型渠道未导入；手机界面显示“暂无可用模型”是有意隔离结果，未用于本批历史/元数据测试。
+
+## 2026-09-30: 会话索引写入发布脱敏增量事件
+
+- `agent-session-manager.ts` 在 `writeIndex()` 单一持久化点比较前后安全投影，覆盖创建、普通元数据更新、归档/恢复、置顶/星标、跨工作区迁移与删除。每进程使用随机 boot `epoch` + 单调 `sequence`；`clearedFields` 显式表达旧可选分类字段被移除，避免客户端浅合并保留陈旧关系。投影按 renderer 实际消费保留 `parentSessionId`、`rootSessionId`、`sourceDelegationId`、`delegationStatus`、`sourceAutomationId`；不读的 `delegationRole`、`delegationDepth`、`automationGraduated`、`delegationGoal` 及 Pi artifact/entry bindings、路径不发出。
+- `agent:session-metadata-changed` 明确登记为 `read/workspace`。服务端按授权 allowlist 裁剪并再次用安全字段白名单重建 payload；会话移出授权范围只发 session ID/remove，不含标题或目标工作区。Main IPC 与 Electron/web preload 添加只读订阅，桌面 IPC 原业务处理未改变。
+- 定向安全与主进程测试 **45 pass / 0 fail**；测试覆盖写入点单调事件、创建/更新/移动/删除、字段脱敏、未授权 workspace 事件屏蔽及移出授权范围的 remove 映射。`bun run typecheck` 全 workspace 通过。
+- 真实开发设备的 3 Mbps 验收仍因进程安全分支未就绪、17889 不监听而待办；相关 0.5 Mbps 数据只见上一节压力测试，不宣称已完成当前链路体验验证。更新 `docs/personal/web-remote.md` 会话元数据事件契约段。
+
+## 2026-09-30: Renderer 增量与权威快照原子合并
+
+- `LeftSidebar` 按 `epoch`/`sequence` 接收事件；main-process 重启的新 epoch 可从 sequence 1 继续，不会被旧 ref 永久丢弃。重连时重置本地游标并触发权威 active/archive 快照。
+- Renderer 全局 revision journal 记录被接受的增量。每个全量列表请求在发起前记 revision；快照返回后，只合并其基准之后发生的增量，避免旧快照覆盖较新标题/归档状态或复活已删除会话。侧栏 refresh 本身串行执行，期间事件缓冲并在快照提交后重放；global recover、自动任务刷新、Tab 恢复、工作区/会话表单/快捷菜单的全量 session snapshot 均复用同一合并 helper。
+- 删除会话/移出 workspace 会关闭相关本地 Tab 并移除列表项；`clearedFields` 删除旧的父子、delegation、automation 分类属性而不是保留浅合并残值。删除墓碑与事件 journal 均限制为 **8,192** 条；超过 journal 保留窗口的 stale snapshot fail-closed（不覆盖当前缓存），待下一次权威快照。相同 session ID 的后续合法 upsert 会解除 tombstone。
+- 新增 cursor epoch/sequence、两种事件消费者顺序、快照期间 rename/delete、同 ID remove→upsert 恢复、分类清除与 retention-floor 测试。相关测试 **50 pass / 0 fail**（按 main manager、full-ui security、agent-session-list 三文件），全 workspace typecheck 通过；全量 `bun test` 后续最终验证。
+- E2E 仅依赖此前 0.5 Mbps 本地 harness 证据，session-sync raw IPC 操作测试 (非独立桌面进程控制) 实测创建 **0–202 ms**、改名 **0–1 ms**、归档 **1 ms**、恢复 **3 ms**、删除 **3 ms**，断线回补全部成功；限单工作区实际请求越权创建被拒。跨 workspace 的 manager move 与 server 移出授权 remove 由单测覆盖，**没有**为E2E临时开放第二个工作区。
+- 本 commit 无 3 Mbps 真实 E2E：开发安全启动入口尚未交付，17889/5173 没有监听且 8443 临时 Serve 已关闭。当前链路结果必须等待独立安全任务；模型渠道与历史附件文件仍未导入。
+
+## 2026-09-30: Harness 异常按动作开始基线计量
+
+- `mobile-harness.mjs` 对每个专项显式记录动作前 exceptionCount；结果拆成 `preActionExceptionCategories` 与 `newActionExceptions`。只用精确的 WebAssembly/CSP 类别标注既有初始化异常；**没有**按异常文本过滤动作期间的任何异常。新增单测证明动作期间再次出现相同 WebAssembly/CSP 异常仍计为新异常，并与其他 JS 异常一起失败。
+- 已保存的 0.5 Mbps stress 结果显示真实目标历史加载期间新增异常为 0；执行前页面存在 1–2 个已知 WebAssembly.instantiate/CSP 初始化异常。它们未通过 `unsafe-eval` 或放宽 CSP 绕过；当前开发服务不可安全启动，故本 commit 不重复运行 E2E、不将该历史结果标为 3 Mbps 验收。
+- 验证：`bun test scripts/personal/mobile-harness.test.mjs` **1 pass / 0 fail**；`node --check` 与 `bash -n` 通过。仅调整 harness/test 汇总，不改开发进程清理或启动/停止逻辑。
+
+## 2026-09-30: 会话同步离线收尾与验证边界
+
+- 分阶段提交（均保留在 `fix/mobile-session-sync-20260929`，未合并/push）：受限导入 `a0c97d09`、metadata epoch/classification/clearedFields `4543e554`、revision journal/tombstone/snapshot merge `55d4d4ae`、harness exception baseline `273d9b3b`。
+- 最终离线验证：全量 `bun test` **643 pass / 0 fail**（97 files，1,560 assertions）；`bun run typecheck` 全 workspace 通过；`build:main`、`build:renderer`、`build:web-preload` 通过。Renderer 保留已知 >500 KB chunk 警告；`git diff --check` 通过。
+- 新版 harness 单测验证：仅按动作开始前计数确定基线；所有之后异常（含同类 WebAssembly/CSP）都计为 action exception。项目当前已知初始化类目为 `WebAssembly.instantiate` 被现有 `script-src` CSP 拒绝；不加 `unsafe-eval`、不改变 CSP。
+- **3 Mbps 真实备份/双端 E2E 未完成**：已安全确认开发实例端口 17889/5173 不监听；临时 8443 Serve 路由已关闭。独立开发进程安全启动任务仍未就绪；根据用户指示没有调用旧 `mobile-preview.sh start`/`dev.sh` 链，没有修改或清理该独立任务。不得将此前 0.5 Mbps压力数据或 Chromium raw-IPC harness 当作当前3 Mbps双端实测。
+- **本轮未测**：独立桌面进程/实体手机各操作的3 Mbps传播延迟、真实跨 workspace move E2E、Smoke/附件回答（隔离 dev 未导入模型渠道/钥匙串）、源备份外部附件/旧 Pi artifact 可用性、真机 iOS Safari。workspace 越权由 full-ui security 单测和单工作区端到端拒绝探针覆盖；子会话/自动任务分类字段由投影与 renderer reducer 单测覆盖。
+- 将新增触碰的上游文件、逐文件增减行数与理由追加至本机 `.context/proma-personal/upstream-surface/phase1-2026-09-29.md`（不入库）；`docs/personal/web-remote.md` 更新为 3 Mbps 是当前目标、0.5 Mbps仅为压力测试。
+
+## 2026-09-30: 开发入口临时移除按名进程清理
+
+- 安全链路审计确认仅删顶层 `dev` 的 `dev-kill.ts --vite` 仍会从 `dev:electron` 间接执行 `dev:kill`。因此在 `apps/electron/package.json` 临时移除 `dev` 与其子项 `dev:electron` 中的两处自动 `dev-kill` 调用，保留 `concurrently` 和后续构建/监视流程；`scripts/dev-kill.ts`、`scripts/personal/dev.sh` 与独立进程安全分支均未改。
+- 静态链路核对：`mobile-preview.sh start` → `scripts/personal/dev.sh` → `bun run dev` → `dev:vite`/`dev:electron` 的实际脚本值不再引用 `dev-kill`/`pkill`/`killall`/`taskkill`。`dev.sh` 原有“发现已运行 Personal Electron 即拒绝启动”检查保留。该临时措施只避免自动按名终止，不替代下个版本的PID/身份核验启动器。
+- 开发实例与桌面正式 Proma 共享同一台机器的运行环境；后续测试期间不得为了重启 dev 退出/结束正式版。此步骤只做静态脚本链检查、package JSON 语法检查及 typecheck；未启动/停止任何进程、未执行测试 E2E，也未改 `~/.proma-dev`、Tailscale Serve 或端口。
+
+## 2026-09-30: 拒绝退役 main-process epoch 的迟到事件
+
+- Session metadata cursor 现记住 retired epochs：新 main-process epoch 即使从 sequence `1` 开始也接受；切换到新 epoch 后，迟到的旧 epoch 增量被拒绝，不能把 cursor 回滚。IPC 重连仍触发权威快照，不重置已识别的当前 epoch 顺序。
+- 删除或移出授权范围均建立会话 tombstone；同一 session ID 在之后新 epoch 中重新 upsert 时解除 tombstone。相关状态保留以验证“移出授权工作区 → 同 ID 重新进入授权工作区”不会错误消失。
+- 定向验证：`agent-session-list.test.ts` **8 pass / 0 fail**，`full-ui-security.test.ts` **30 pass / 0 fail**；全 workspace typecheck 通过。未启动开发实例/E2E，遵守进程安全分支的等待条件。
+
+## 2026-09-30: Harness 网络条件默认对齐 3 Mbps 中继
+
+- `mobile-harness.mjs` 的 `real-history`、`idle-session-sync`、`session-sync` 与大会话套件统一使用参数化 CDP 网络 profile；默认十进制速率为下行 **3,000,000 bit/s**、上行 **1,000,000 bit/s**、延迟 **50 ms**。结果 JSON 与 `mobile-preview.sh test` 汇总会回报实际 profile。
+- 参数可通过 `--download-mbps`、`--upload-mbps`、`--latency-ms` 指定，或通过 `PROMA_WEB_REMOTE_DOWNLOAD_MBPS`、`PROMA_WEB_REMOTE_UPLOAD_MBPS`、`PROMA_WEB_REMOTE_LATENCY_MS` 环境变量传给 `mobile-preview.sh test`。0.5 Mbps 压力测试仍可显式选择，例如设置 `PROMA_WEB_REMOTE_DOWNLOAD_MBPS=0.5`；不再作为默认。
+- 验证：Harness 单测 **2 pass / 0 fail**（覆盖 3/1 Mbps 默认及 0.5 Mbps 压力换算）；`node --check`、`bash -n`、`git diff --check` 通过。此为参数化实现与本地验证，尚非真实 `~/.proma-dev` 3 Mbps E2E 结果。
+
+## 2026-09-30: 真实 3 Mbps 验收继续受安全启动门控
+
+- 本轮新增提交：`b7e128b1` 临时移除启动链的按名清理调用；`20386656` 拒绝已退役 epoch 迟到增量并覆盖工作区移出后同 ID 恢复；`97066aa2` 将 Harness 网络条件参数化。提交均在 `fix/mobile-session-sync-20260929`，没有 merge、push、打包或安装。
+- 上述安全计划 `dev-process-cleanup-safety.md` 仍标记“待执行”，完整 PID/进程归属安全启动入口尚未审查就绪。虽然临时 package 改动和静态 grep 已证明启动链不再调用 `dev-kill`、`pkill`、`killall`、`taskkill`，按用户约束仍未调用 `mobile-preview.sh start`/`dev.sh`，未启动或停止任何进程、未改端口/Tailscale Serve、未触碰正式版或 `~/.proma-dev`。
+- 因启动门控未解除，未执行 830 会话列表、41.9 MB 历史、180 秒空闲、双端实时同步、越权隔离、临时会话清理/hash 核对；也未在本轮运行全量 `bun test` 与三个 build。定向验证仍以各前置条目所记录结果为准。此前最后一次环境快照显示 17889/5173 无监听、8443 Serve 关闭；本轮没有重新采集快照，也未改变该状态。
+
+## 2026-09-30: Harness 仅按动作新增异常判定并精确识别 HTTP 429
+
+- `evaluateHarnessExceptionWindow()` 统一将动作开始前的异常作为单独基线，只有动作期间新增异常使 session-sync、real-history、idle-session-sync 与大会话 suite 失败。结果 JSON 分开记录基线数量/类别与新增数量/类别；新增同类 WebAssembly/CSP 异常仍算失败。
+- CDP `Network.responseReceived` 仅按结构化 HTTP status=429 记录服务响应；可读文本识别仅接受明确的 `HTTP 429`、`status 429` 或 `Too Many Requests`，不再用裸 `429` 子串。新增回归证明含 `429` 子串的会话 UUID 不会误报。
+- 验证：Harness 单测 **4 pass / 0 fail**（含“基线 1、新增 0→通过；基线 1、新增 1 个同类 WASM→失败”）；`node --check`、`bash -n`、`git diff --check` 通过。实际 3 Mbps suite 尚待重跑。
+
+## 2026-09-30: 等待初始化异常静默后再开始动作计量
+
+- 修复后首个 3 Mbps 重跑观察到 2 条动作前 CSP 类异常及 1 条出现在过早基线之后的同类异常。没有按异常文本豁免；将 session-sync 的动作基线移至侧栏/工作区设置完成后，并在 real-history、idle-session-sync 与大会话 suite 的动作前等待有界异常静默期。任何静默期后出现的同类 CSP 异常仍然失败。
+- 新增单测验证延迟到达的初始化异常会纳入动作基线；Harness 单测 **5 pass / 0 fail**，`node --check`、`bash -n` 与 `git diff --check` 通过。
+
+## 2026-09-30: 补充归档命令的服务端/传输计量
+
+- 两次既有 3 Mbps session-sync 结果的 `archiveCommandMs` 分别为 **7,687 ms、7,684 ms**，而 `archiveRemovedMs` 分别为 **25 ms、26 ms**，恢复调用为 **49 ms、55 ms**；这不像一次性抖动。启动后的 `agent-sessions.json` 为 **3,061,848 B**，3 Mbps 若完整传输该大小约需 **8,165 ms**，但该数值仅为相关性，不足以证明实际传输了全量索引。
+- 代码路径确认 `agent:toggle-archive` handler 会读取全会话列表、更新并重写索引，再返回单条会话元数据。为区分主进程 handler 时间、是否重调全量列表以及 WebSocket 收发帧字节，Harness 增加 archive 前后 `/api/dev/metrics` 与帧体积差分；尚未得出根因或改动主进程路径。
+- session-sync harness 现等待 `__PROMA_WEB_REMOTE_RECOVER()` 完成，并等重连后的 WebSocket 接收帧静默后才开始归档计时；恢复时延/帧数另行记录，避免把仍在途的权威快照误计为归档调用耗时。定向单测 **6 pass / 0 fail**，node/bash 语法与 diff 检查通过；实际重测尚未完成。
+
+## 2026-09-30: 更正 77e2a992 的 3 Mbps 验收状态
+
+- **历史更正（不改写 `77e2a992`）**：20:34 父会话更正，完整进程归属方案推迟到下个版本；本批临时提交 `b7e128b1` 已获批准，安全启动门槛解除。随后 `mobile-preview.sh start` 成功。启动前后正式版 PID `83615`、17888、Tailscale 443→17888 不变；开发启动器 PID `82401`、Vite PID `82429`，Web Remote 17889 最初由 PID `83386` 监听；8443→17889。全量 build 后 Electron 子进程重启为 PID `97427`，开发启动器仍运行，17889/5173 与 Serve 路由都保持在线。
+- 本轮新增提交：`540a3249`、`db96babd`（异常基线）、`9c44054d`、`f2793e3c`（归档/重连计时诊断）；均未修改主进程代码、未 merge/push。
+- **3 Mbps 实测**（下行 3,000,000 bit/s / 上行 1,000,000 bit/s / 50 ms）：`iphone:real-history` **通过**，授权列表 830 条，目标历史 JSONL **41,914,743 B**；列表 responseUtf8 **459,810 B**、appSent **613,404 B**、IPC **1,785 ms**；历史首屏 **4,346 ms**，history responseUtf8 **2,096,331 B**、appSent **2,796,367 B**。`wireBytes` 不可测。
+- `iphone:idle-session-sync` **通过**，观测 **182,556 ms**，空闲窗口列表请求 **0**、响应 **0 B**、appSent **0 B**；初始化列表 2 次、responseUtf8 **919,619 B**、appSent **1,226,805 B**。
+- `iphone:session-sync` 的完整 run 中草稿隐藏/推广、新建、改名、外部更新、删除/重连后消失、归档/恢复、entryBindings、单工作区视图、越权创建拒绝均为 true；完整 run 中 `archiveCommandMs=8,007`、列表移除可见 `1 ms`、恢复 `67 ms`。`agent:toggle-archive` 服务端 handler **24 ms**，该计时窗口同时完成了 1 次全量列表传输（responseUtf8 **460,162 B**、appSent **613,873 B**，WebSocket decoded frames **2,864,075 B**）。采纳父会话结论：约 8 秒是重连权威全量快照在 3 Mbps 下与计时重叠，归档本身不是回归；重连全量快照是本批设计，成本留待下版优化，本轮不改主进程。其后按新 Harness 边界的最终一次 suite 尝试在 `liveDeleteGoneMs` 等待时发生 CDP `Runtime.evaluate` **3,500 ms `page_unresponsive`**，未完整结束；按父会话要求不再重跑或继续调试。
+- CSP 异常如实分开统计：real-history、idle-session-sync 各为基线 **2** 条已知 `WebAssembly.instantiate`/现有 `script-src` CSP 异常、新增 **0**；此前完整 session-sync run 为基线 2、新增同类 1。父会话确认此 CSP 缺陷在安装版也存在且不阻塞发版；Harness 仍计数，未放宽 CSP、未加 `unsafe-eval`。实际 HTTP 429 状态响应数 **0**；先前把会话 UUID 中的 `429` 子串误判为状态码，已在 Harness 修正。
+- 清理：最终 CDP 超时 run 遗留的两个 `web-remote-sync-*` harness 会话按该 run 基线与标题前缀核实后，使用应用 `deleteAgentSession` API 删除；cleanup suite 明确删除 **2** 条、无错误，之后回到 **830** 条。after-start 与 after-cleanup canonical session SHA-256 均为 `090d9a28…467c7149`；826 个 JSONL 总字节 **535,970,089 B**，JSONL 集合 SHA-256 前后均为 `71688f45…43a53cac`。启动前原始索引 hash 为 `62a5992e…513f1c59`，启动后为 `bc0d6e2c…d875f977`；启动时索引指纹变化原因本轮未再追查。正式 `~/.proma`、备份和导入源未写入。
+- 0.5 Mbps **旧压力对照**（非本轮）：830 列表 responseUtf8 **459,730 B**、appSent **613,300 B**、fresh-list **10,135 ms**；同一 41,914,743 B 历史首屏 **4,349 ms**。Smoke/attachments 未跑（隔离 dev 无渠道）；独立桌面 UI/真机 iOS Safari 和真实跨工作区移动也未 E2E。子任务/自动化分组、移出授权范围只发 ID-only remove、迟到旧快照不复活由本轮全量单测覆盖。
+- 收尾验证：全量 `bun test` **648 pass / 0 fail**（97 files，1,581 assertions）；workspace typecheck 通过；`build:main`、`build:renderer`、`build:web-preload` 均通过。Renderer 仍有 >500 KB chunk 警告。未 merge/push/打包/安装；dev 与 8443 保持运行。
+
+## 2026-09-30: 手机左侧栏仅在导航状态变化后收起
+
+- 移除 mobile-patch document capture handler 对左栏任意点击都删除 `webRemoteSidebarOpen` 的行为。现在比较点击前后的导航状态：左栏中活跃会话的 `data-session-switch-id`/会话类型变化，或 Chat/Agent 模式 rail 的当前选中状态变化时才收起。活跃行暂时消失（如折叠分组）不视为导航；箭头、分组折叠、更多菜单/菜单项和输入操作保持抽屉打开。
+- `forwardMobileControl` 未改；Todo、定时任务、MCP/Skills、项目记忆、日程、设置和新建会话仍沿用原有转发/收起路径。未改 `LeftSidebar.tsx` 等上游组件；补丁不比较 `innerHTML` 或 SVG 内容。
+- 回归测试覆盖箭头点击、更多菜单、分组折叠不收回；会话选择与 Chat/Agent 模式状态变化收回。`mobile-patch.test.ts` **5 pass / 0 fail**；全 workspace typecheck 与 `build:main` 通过。
+- dev 自动重载后状态核验：启动器 PID `82401` 运行，17889 由 PID `8911` 监听，5173 由 PID `82429` 监听，Serve 8443→17889；正式版 PID `83615` 与 443→17888 未变。`~/.proma-dev` 保持 830 条，会话与 JSONL 集合 hash 未变。未运行 harness、未 merge/push/打包/安装。

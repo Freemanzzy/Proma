@@ -131,6 +131,10 @@ import {
   type AgentSessionTreeItem,
 } from '@/lib/collapsed-agent-rail'
 import {
+  acceptAgentSessionMetadataChange,
+  applyAgentSessionMetadataChange,
+  getAgentSessionMetadataRevision,
+  mergeAgentSessionSnapshotWithChanges,
   collectAgentSessionTreeIds,
   countSettledDelegatedChildren,
   getAgentSessionTreeIndicatorStatus,
@@ -169,7 +173,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
-import type { ConversationMeta, AgentSessionMeta, AgentWorkspace, WorkspaceCapabilities } from '@proma/shared'
+import type { ConversationMeta, AgentSessionMeta, AgentSessionMetadataChange, AgentWorkspace, WorkspaceCapabilities } from '@proma/shared'
 
 function formatAutomationCount(count: number): string {
   return count > 99 ? '99+' : String(count)
@@ -726,18 +730,83 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   const setSearchDialogOpen = useSetAtom(searchDialogOpenAtom)
   const newChatShortcutLabel = getAcceleratorDisplay(getActiveAccelerator('new-session'))
 
-  /** 归档会话只在用户打开归档视图时加载；active 视图只保留未归档元数据。 */
-  const refreshAgentSidebarSessions = React.useCallback(async (includeArchived: boolean): Promise<void> => {
-    const [activeSessions, archivedCount] = await Promise.all([
-      window.electronAPI.listActiveAgentSessions(),
-      window.electronAPI.countArchivedAgentSessions(),
-    ])
-    const sessions = includeArchived
-      ? [...activeSessions, ...(await window.electronAPI.listArchivedAgentSessions())]
-      : activeSessions
-    setAgentSessions(sessions)
-    setArchivedAgentSessionCount(archivedCount)
-  }, [setAgentSessions])
+  const sessionMetadataCursor = React.useRef({ epoch: null as string | null, sequence: 0, retiredEpochs: new Set<string>() })
+  const sessionMetadataRefreshInFlight = React.useRef(false)
+  const bufferedSessionMetadataChanges = React.useRef<AgentSessionMetadataChange[]>([])
+  const sessionMetadataRefreshQueue = React.useRef<Promise<void>>(Promise.resolve())
+
+  const applySessionMetadataChange = React.useCallback((change: AgentSessionMetadataChange): void => {
+    const allowedWorkspaces = store.get(agentWorkspacesAtom)
+    if (change.action === 'upsert' && allowedWorkspaces.length > 0 && !allowedWorkspaces.some((workspace) => workspace.id === change.workspaceId)) {
+      setAgentSessions((sessions) => sessions.filter((session) => session.id !== change.session.id))
+      return
+    }
+    setAgentSessions((sessions) => applyAgentSessionMetadataChange(sessions, change, viewMode === 'archived'))
+    if (change.action === 'remove') {
+      const tabResult = closeTab(store.get(tabsAtom), store.get(activeTabIdAtom), change.session.id)
+      setTabs(tabResult.tabs)
+      setActiveTabId(tabResult.activeTabId)
+      if (store.get(currentAgentSessionIdAtom) === change.session.id) setCurrentAgentSessionId(null)
+    } else if (typeof change.session.title === 'string') {
+      setTabs((tabs) => updateTabTitle(tabs, change.session.id, change.session.title!))
+    }
+    window.electronAPI.countArchivedAgentSessions().then(setArchivedAgentSessionCount).catch(console.error)
+  }, [setAgentSessions, setTabs, setActiveTabId, setCurrentAgentSessionId, store, viewMode])
+
+  /**
+   * Authoritative snapshots can race with incremental events. Serialize refreshes and
+   * buffer/replay every event received during a snapshot so stale fetches cannot erase
+   * a newer create/rename/archive/remove delta.
+   */
+  const refreshAgentSidebarSessions = React.useCallback((includeArchived: boolean): Promise<void> => {
+    const refresh = async (): Promise<void> => {
+      const snapshotRevision = getAgentSessionMetadataRevision()
+      let snapshotApplied = false
+      sessionMetadataRefreshInFlight.current = true
+      try {
+        const [activeSessions, archivedCount] = await Promise.all([
+          window.electronAPI.listActiveAgentSessions(),
+          window.electronAPI.countArchivedAgentSessions(),
+        ])
+        const sessions = includeArchived
+          ? [...activeSessions, ...(await window.electronAPI.listArchivedAgentSessions())]
+          : activeSessions
+        setAgentSessions((previous) => mergeAgentSessionSnapshotWithChanges(previous, sessions, snapshotRevision, includeArchived))
+        setArchivedAgentSessionCount(archivedCount)
+        snapshotApplied = true
+      } finally {
+        sessionMetadataRefreshInFlight.current = false
+        const buffered = bufferedSessionMetadataChanges.current.splice(0)
+        if (!snapshotApplied) {
+          for (const change of buffered) applySessionMetadataChange(change)
+        }
+      }
+    }
+    const queued = sessionMetadataRefreshQueue.current.then(refresh, refresh)
+    sessionMetadataRefreshQueue.current = queued.then(() => undefined, () => undefined)
+    return queued
+  }, [setAgentSessions, applySessionMetadataChange])
+
+  React.useEffect(() => {
+    const unsubscribe = window.electronAPI.onAgentSessionMetadataChanged((change) => {
+      if (!acceptAgentSessionMetadataChange(sessionMetadataCursor.current, change)) return
+      if (sessionMetadataRefreshInFlight.current) {
+        bufferedSessionMetadataChanges.current.push(change)
+        return
+      }
+      applySessionMetadataChange(change)
+    })
+    const resync = (): void => {
+      // Main-process epoch/sequence restarts on app relaunch. Discard the old cursor and
+      // refresh the full active/archived lists; events arriving during that snapshot replay afterward.
+      void refreshAgentSidebarSessions(viewMode === 'archived').catch(console.error)
+    }
+    window.addEventListener('proma-web-remote-reconnected', resync)
+    return () => {
+      unsubscribe()
+      window.removeEventListener('proma-web-remote-reconnected', resync)
+    }
+  }, [applySessionMetadataChange, refreshAgentSidebarSessions, viewMode])
 
   const handleOpenSettings = React.useCallback((): void => {
     setSettingsOpen(true)

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import * as os from 'node:os'
 import { join } from 'node:path'
+import type { AgentSessionMetadataChange } from '@proma/shared'
 
 type AgentSessionManager = typeof import('./agent-session-manager')
 type AgentSessionContextPrompt = typeof import('./agent-session-context-prompt')
@@ -589,6 +590,54 @@ describe('Agent 会话引用 prompt', () => {
         configurable: true,
         writable: true,
       })
+    }
+  })
+})
+
+describe('会话元数据增量事件', () => {
+  test('创建、更新、跨工作区移动和删除按单调序号发布最小脱敏元数据', () => {
+    writeAgentWorkspacesIndex([
+      { id: 'workspace-a', name: '工作区 A', slug: 'workspace-a', createdAt: 1, updatedAt: 1 },
+      { id: 'workspace-b', name: '工作区 B', slug: 'workspace-b', createdAt: 2, updatedAt: 2 },
+    ])
+    const events: AgentSessionMetadataChange[] = []
+    const unsubscribe = manager.onAgentSessionMetadataChanged((change) => events.push(change))
+    try {
+      const created = manager.createAgentSession('增量测试', undefined, 'workspace-a', undefined, undefined, undefined, true)
+      manager.updateAgentSessionMeta(created.id, {
+        title: '已确认会话', isDraft: false, archived: true, starred: true,
+        parentSessionId: 'parent-test', rootSessionId: 'root-test', sourceDelegationId: 'delegation-test',
+        delegationStatus: 'running', sourceAutomationId: 'automation-test',
+      })
+      manager.updateAgentSessionMeta(created.id, { sourceAutomationId: undefined })
+      manager.moveSessionToWorkspace(created.id, 'workspace-b')
+      manager.deleteAgentSession(created.id)
+
+      expect(events).toHaveLength(5)
+      expect(events.every((event) => event.epoch === events[0]?.epoch && /^[0-9a-f-]{36}$/i.test(event.epoch))).toBe(true)
+      expect(events.every((event, index) => index === 0 || event.sequence > events[index - 1]!.sequence)).toBe(true)
+      expect(events.map((event) => event.action)).toEqual(['upsert', 'upsert', 'upsert', 'upsert', 'remove'])
+      expect(events[0]?.session).toMatchObject({ id: created.id, title: '增量测试', isDraft: true, workspaceId: 'workspace-a' })
+      expect(events[1]?.session).toMatchObject({
+        title: '已确认会话', isDraft: false, archived: true, starred: true,
+        parentSessionId: 'parent-test', rootSessionId: 'root-test', sourceDelegationId: 'delegation-test',
+        delegationStatus: 'running', sourceAutomationId: 'automation-test',
+      })
+      expect(events[2]?.clearedFields).toContain('sourceAutomationId')
+      expect(events[3]).toMatchObject({ workspaceId: 'workspace-b', previousWorkspaceId: 'workspace-a', session: { id: created.id } })
+      expect(events[4]).toMatchObject({ action: 'remove', workspaceId: 'workspace-b', session: { id: created.id } })
+      for (const event of events) {
+        expect(event.session).not.toHaveProperty('piEntryBindings')
+        expect(event.session).not.toHaveProperty('piSessionFile')
+        expect(event.session).not.toHaveProperty('delegationGoal')
+        expect(event.session).not.toHaveProperty('activeWorktree')
+        expect(event.session).not.toHaveProperty('attachedDirectories')
+        expect(event.session).not.toHaveProperty('delegationRole')
+        expect(event.session).not.toHaveProperty('delegationDepth')
+        expect(event.session).not.toHaveProperty('automationGraduated')
+      }
+    } finally {
+      unsubscribe()
     }
   })
 })

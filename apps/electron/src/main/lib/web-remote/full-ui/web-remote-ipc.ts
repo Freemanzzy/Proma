@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { realpath } from 'node:fs/promises'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type { IpcMainEvent, IpcMainInvokeEvent, WebContents } from 'electron'
@@ -26,7 +26,7 @@ interface IpcClient {
   ws: WebSocket
   deviceId: string
   confirmations: Map<string, { token: string; expiresAt: number }>
-  metrics: { startedAt: number; byChannel: Record<string, { calls: number; rawBytes: number; sentBytes: number; estimatedCompressedBytes: number; elapsedMs: number; chunks: number; bufferedAmountPeak: number }> }
+  metrics: { startedAt: number; byChannel: Record<string, { calls: number; responseUtf8Bytes: number; appFramingBytes: number; base64PayloadBytes: number; appSentBytes: number; estimatedDeflateRawBytes: number; elapsedMs: number; chunks: number; bufferedAmountPeak: number }> }
 }
 
 export interface WebRemoteMetricsSnapshot {
@@ -47,9 +47,7 @@ export function slimWebRemoteSessionMeta(value: unknown): unknown {
     const meta = { ...(item as Record<string, unknown>) }
     delete meta.delegationGoal
     delete meta.piSessionFile
-    if (meta.piEntryBindings && typeof meta.piEntryBindings === 'object' && !Array.isArray(meta.piEntryBindings)) {
-      meta.piEntryBindings = Object.fromEntries(Object.keys(meta.piEntryBindings as Record<string, unknown>).map((key) => [key, true]))
-    }
+    delete meta.piEntryBindings
     return meta
   })
 }
@@ -106,11 +104,21 @@ export interface WebRemoteScopeResolvers {
 }
 
 const EMPTY_SCOPE_RESOLVERS: WebRemoteScopeResolvers = { getSessionMeta: () => undefined, listWorkspaces: () => [], getPathRoots: () => [] }
+const SLIM_SESSION_LIST_CHANNELS = new Set(['agent:list-sessions', 'agent:list-active-sessions', 'agent:list-archived-sessions'])
 
 export function installWebRemoteIpcCapture(ipcMain: IpcMainCaptureTarget, config: WebRemoteConfig = {}, resolvers: WebRemoteScopeResolvers = EMPTY_SCOPE_RESOLVERS): WebRemoteIpcBridge {
   if (activeBridge) return activeBridge
   const bridge = new WebRemoteIpcBridge(config, resolvers)
   if (resolvers.getSessionMeta !== EMPTY_SCOPE_RESOLVERS.getSessionMeta) {
+    bridge.registerInvoke('web-remote:get-session-entry-bindings', async (_event, input) => {
+      const request = input as { sessionId?: unknown } | undefined
+      if (!request || typeof request.sessionId !== 'string' || !request.sessionId) throw new Error('会话参数无效')
+      const { getAgentSessionMeta } = await import('../../agent-session-manager')
+      const bindings = getAgentSessionMeta(request.sessionId)?.piEntryBindings
+      return bindings && typeof bindings === 'object'
+        ? Object.fromEntries(Object.keys(bindings).map((messageId) => [messageId, true]))
+        : {}
+    })
     bridge.registerInvoke('web-remote:get-history-media', async (_event, input) => {
       if (!input || typeof input !== 'object') throw new Error('历史媒体参数无效')
       const request = input as { sessionId?: unknown; uuid?: unknown; index?: unknown; messageHash?: unknown; path?: unknown; kind?: unknown; hash?: unknown }
@@ -293,8 +301,15 @@ export class WebRemoteIpcBridge {
     this.clients.add(client)
     remoteMetrics.devices[deviceId] = metrics
     const flushMetrics = () => {
-      if (Object.keys(metrics.byChannel).length === 0) return
-      recordPersonalInfo('Web Remote 计量', JSON.stringify({ deviceId, durationMs: Date.now() - metrics.startedAt, channels: metrics.byChannel }))
+      const channels = Object.entries(metrics.byChannel)
+      if (channels.length === 0) return
+      const windowId = randomBytes(6).toString('hex')
+      const deviceTag = createHash('sha256').update(deviceId).digest('hex').slice(0, 10)
+      for (const [channel, metric] of channels) {
+        recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 1, w: windowId, d: deviceTag, c: channel, n: metric.calls, ms: metric.elapsedMs }))
+        recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 1, w: windowId, d: deviceTag, c: channel, responseUtf8: metric.responseUtf8Bytes, appFraming: metric.appFramingBytes, base64: metric.base64PayloadBytes, appSent: metric.appSentBytes }))
+        recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 1, w: windowId, d: deviceTag, c: channel, estimatedDeflateRaw: metric.estimatedDeflateRawBytes, wireBytes: null, chunks: metric.chunks, bufferedPeak: metric.bufferedAmountPeak }))
+      }
       metrics.startedAt = Date.now()
       metrics.byChannel = {}
     }
@@ -447,6 +462,16 @@ export class WebRemoteIpcBridge {
   private eventAllowed(channel: string, value: unknown): boolean {
     const policy = this.policy(channel)
     if (!policy || policy.level === 'denied') return false
+    if (channel === 'agent:session-metadata-changed') {
+      if (!value || typeof value !== 'object') return false
+      const change = value as { epoch?: unknown; sequence?: unknown; action?: unknown; workspaceId?: unknown; previousWorkspaceId?: unknown; session?: unknown }
+      const session = change.session && typeof change.session === 'object' ? change.session as { id?: unknown } : undefined
+      if (typeof change.epoch !== 'string' || !change.epoch || !Number.isSafeInteger(change.sequence)
+        || (change.action !== 'upsert' && change.action !== 'remove')
+        || typeof change.workspaceId !== 'string' || typeof session?.id !== 'string' || !session.id) return false
+      return this.workspaceAllowed(change.workspaceId)
+        || (change.action === 'upsert' && typeof change.previousWorkspaceId === 'string' && this.workspaceAllowed(change.previousWorkspaceId))
+    }
     if (policy.scope === 'session') {
       const sessionId = resolveSessionId([value], this.resolvers)
       return this.sessionAllowed(sessionId)
@@ -460,8 +485,30 @@ export class WebRemoteIpcBridge {
       if (!this.loggedUnknown.has(channel) && !this.policy(channel)) { this.loggedUnknown.add(channel); console.warn(`[Web Remote] 未登记事件默认拒绝: ${channel}`) }
       return
     }
+    let remoteValue = value
+    if (channel === 'agent:session-metadata-changed' && value && typeof value === 'object') {
+      const change = value as { epoch?: unknown; sequence?: unknown; action?: unknown; workspaceId?: unknown; previousWorkspaceId?: unknown; clearedFields?: unknown; session?: unknown }
+      const currentWorkspaceAllowed = typeof change.workspaceId === 'string' && this.workspaceAllowed(change.workspaceId)
+      const previousWorkspaceAllowed = typeof change.previousWorkspaceId === 'string' && this.workspaceAllowed(change.previousWorkspaceId)
+      const rawSession = change.session && typeof change.session === 'object' ? change.session as Record<string, unknown> : {}
+      if (!currentWorkspaceAllowed && previousWorkspaceAllowed && change.action === 'upsert') {
+        // A move out of scope is observable only as removal from the previously allowed list.
+        remoteValue = { epoch: change.epoch, sequence: change.sequence, action: 'remove', workspaceId: change.previousWorkspaceId, session: { id: rawSession.id } }
+      } else if (currentWorkspaceAllowed && change.action === 'remove') {
+        remoteValue = { epoch: change.epoch, sequence: change.sequence, action: 'remove', workspaceId: change.workspaceId, session: { id: rawSession.id } }
+      } else if (currentWorkspaceAllowed && change.action === 'upsert') {
+        const safeKeys = ['id', 'title', 'createdAt', 'updatedAt', 'workspaceId', 'channelId', 'modelId', 'pinned', 'starred', 'archived', 'isDraft', 'manualWorking', 'completedButUnconfirmed', 'stoppedByUser', 'parentSessionId', 'rootSessionId', 'sourceDelegationId', 'delegationStatus', 'sourceAutomationId']
+        const session = Object.fromEntries(safeKeys.filter((key) => rawSession[key] !== undefined).map((key) => [key, rawSession[key]]))
+        session.workspaceId = change.workspaceId
+        const clearable = ['channelId', 'modelId', 'pinned', 'starred', 'archived', 'isDraft', 'manualWorking', 'completedButUnconfirmed', 'stoppedByUser', 'parentSessionId', 'rootSessionId', 'sourceDelegationId', 'delegationStatus', 'sourceAutomationId']
+        const clearedFields = Array.isArray(change.clearedFields)
+          ? change.clearedFields.filter((field): field is string => typeof field === 'string' && clearable.includes(field))
+          : []
+        remoteValue = { epoch: change.epoch, sequence: change.sequence, action: change.action, workspaceId: change.workspaceId, ...(clearedFields.length ? { clearedFields } : {}), session }
+      } else return
+    }
     let payload: unknown
-    try { payload = encodeWebRemoteValue(value) } catch (error) {
+    try { payload = encodeWebRemoteValue(remoteValue) } catch (error) {
       console.error('[Web Remote full-ui] 事件序列化失败:', channel, error instanceof Error ? error.message : String(error))
       payload = { __proma_web_remote_error: 'serialization_failed', channel }
     }
@@ -497,7 +544,7 @@ export class WebRemoteIpcBridge {
     let metricRawBytes = 0
     try {
       const value = await Promise.race([Promise.resolve(handler(fakeEvent(sender), ...args)), new Promise<never>((_, reject) => setTimeout(() => reject(new Error('IPC 请求超时')), REQUEST_TIMEOUT_MS))])
-      const result = encodeWebRemoteValue(this.filterResult(channel, channel === 'agent:list-sessions' ? slimWebRemoteSessionMeta(value) : value, args))
+      const result = encodeWebRemoteValue(this.filterResult(channel, SLIM_SESSION_LIST_CHANNELS.has(channel) ? slimWebRemoteSessionMeta(value) : value, args))
       const response = JSON.stringify({ type: 'response', id, ok: true, value: result })
       metricRawBytes = Buffer.byteLength(response)
       const bufferedPeak = this.sendRaw(client.ws, response)
@@ -512,15 +559,31 @@ export class WebRemoteIpcBridge {
   private recordIpcMetric(client: IpcClient, channel: string, message: string, rawBytes: number, elapsedMs: number, bufferedPeak: number): void {
     const bytes = Buffer.from(message, 'utf8')
     const chunkCount = bytes.byteLength > 256 * 1024 ? Math.ceil(bytes.byteLength / (180 * 1024)) : 1
-    const transmittedBytes = bytes.byteLength > 256 * 1024
-      ? Array.from({ length: chunkCount }, (_, index) => JSON.stringify({ type: 'chunk', id: '000000000000000000000000', requestId: '00000000', seq: index, total: chunkCount, data: bytes.subarray(index * 180 * 1024, Math.min((index + 1) * 180 * 1024, bytes.byteLength)).toString('base64') })).reduce((sum, frame) => sum + Buffer.byteLength(frame), 0)
-      : bytes.byteLength
+    let appSentBytes = bytes.byteLength
+    let appFramingBytes = 0
+    let base64PayloadBytes = 0
+    if (bytes.byteLength > 256 * 1024) {
+      appSentBytes = 0
+      let requestId: string | undefined
+      try { requestId = (JSON.parse(message) as { id?: string }).id } catch {}
+      for (let index = 0; index < chunkCount; index++) {
+        const data = bytes.subarray(index * 180 * 1024, Math.min((index + 1) * 180 * 1024, bytes.byteLength)).toString('base64')
+        const frame = JSON.stringify({ type: 'chunk', id: '000000000000000000000000', requestId, seq: index, total: chunkCount, data })
+        const frameBytes = Buffer.byteLength(frame)
+        const dataBytes = Buffer.byteLength(data)
+        base64PayloadBytes += dataBytes
+        appFramingBytes += frameBytes - dataBytes
+        appSentBytes += frameBytes
+      }
+    }
     const estimate = bytes.byteLength >= 16 * 1024 ? deflateRawSync(bytes).byteLength : bytes.byteLength
-    const entry = client.metrics.byChannel[channel] ??= { calls: 0, rawBytes: 0, sentBytes: 0, estimatedCompressedBytes: 0, elapsedMs: 0, chunks: 0, bufferedAmountPeak: 0 }
+    const entry = client.metrics.byChannel[channel] ??= { calls: 0, responseUtf8Bytes: 0, appFramingBytes: 0, base64PayloadBytes: 0, appSentBytes: 0, estimatedDeflateRawBytes: 0, elapsedMs: 0, chunks: 0, bufferedAmountPeak: 0 }
     entry.calls++
-    entry.rawBytes += rawBytes
-    entry.sentBytes += transmittedBytes
-    entry.estimatedCompressedBytes += estimate
+    entry.responseUtf8Bytes += rawBytes
+    entry.appFramingBytes += appFramingBytes
+    entry.base64PayloadBytes += base64PayloadBytes
+    entry.appSentBytes += appSentBytes
+    entry.estimatedDeflateRawBytes += estimate
     entry.elapsedMs += elapsedMs
     entry.chunks += chunkCount
     entry.bufferedAmountPeak = Math.max(entry.bufferedAmountPeak, bufferedPeak)

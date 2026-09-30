@@ -28,7 +28,8 @@ function createMobilePatchHarness() {
   Object.defineProperty(window, 'innerHeight', { value: 915, configurable: true })
   Object.defineProperty(window, 'screen', { value: { width: 412 }, configurable: true })
   Object.defineProperty(window, 'visualViewport', { value: null, configurable: true })
-  ;(window as any).setTimeout = () => 1
+  const pendingTimeouts: Array<() => void> = []
+  ;(window as any).setTimeout = (callback: () => void) => { pendingTimeouts.push(callback); return pendingTimeouts.length }
   ;(window as any).clearTimeout = () => {}
   ;(window as any).setInterval = () => 1
   ;(window as any).requestAnimationFrame = (callback: FrameRequestCallback) => callback(0)
@@ -78,7 +79,11 @@ function createMobilePatchHarness() {
   if (!ensureObserver || !syncRightObserver || !syncMenuObserver) throw new Error('expected ensure and state observers')
   const title = document.querySelector<HTMLButtonElement>('[data-web-remote-mobile-topbar-title]')!
   title.dispatchEvent(new window.Event('click', { bubbles: true }))
-  return { window, document, writes, observers: [ensureObserver, syncRightObserver, syncMenuObserver], resolveSubscription }
+  const flushTimeouts = () => {
+    let guard = 0
+    while (pendingTimeouts.length > 0 && guard++ < 100) pendingTimeouts.shift()?.()
+  }
+  return { window, document, writes, observers: [ensureObserver, syncRightObserver, syncMenuObserver], resolveSubscription, flushTimeouts, pendingTimeoutCount: () => pendingTimeouts.length }
 }
 
 describe('renderWebRemoteMobilePatch DOM write convergence', () => {
@@ -96,6 +101,82 @@ describe('renderWebRemoteMobilePatch DOM write convergence', () => {
     expect(mediaButton?.textContent).toContain('图片 · 293.0 KB · 点按加载')
     expect(textButton?.textContent).toContain('点按查看完整内容（原文 39.1 KB）')
     expect(document.querySelectorAll('[data-web-remote-history-media]')).toHaveLength(2)
+  })
+
+  test('侧栏内只有活跃会话/模式状态变化才关闭抽屉', () => {
+    const { window, document, flushTimeouts, pendingTimeoutCount } = createMobilePatchHarness()
+    const sidebar = document.querySelector<HTMLElement>('[data-web-remote-sidebar="left"]')!
+    const body = document.body
+    const current = document.createElement('div')
+    current.dataset.sessionSwitchId = 'session-a'
+    current.dataset.sessionSwitchType = 'agent'
+    current.classList.add('agent-session-item-active')
+    const arrow = document.createElement('button')
+    arrow.type = 'button'
+    arrow.setAttribute('aria-expanded', 'false')
+    arrow.addEventListener('click', () => arrow.setAttribute('aria-expanded', 'true'))
+    current.appendChild(arrow)
+    const moreItem = document.createElement('button')
+    moreItem.setAttribute('role', 'menuitem')
+    moreItem.textContent = '重命名'
+    moreItem.addEventListener('click', () => current.dataset.sessionSwitchTitle = 'renamed')
+    current.appendChild(moreItem)
+    const groupToggle = document.createElement('button')
+    groupToggle.setAttribute('aria-expanded', 'true')
+    groupToggle.addEventListener('click', () => current.classList.remove('agent-session-item-active'))
+    const next = document.createElement('div')
+    next.dataset.sessionSwitchId = 'session-b'
+    next.dataset.sessionSwitchType = 'agent'
+    next.addEventListener('click', () => window.setTimeout(() => {
+      current.classList.remove('agent-session-item-active')
+      next.classList.add('agent-session-item-active')
+    }, 0))
+    sidebar.append(groupToggle, current, next)
+
+    body.dataset.webRemoteSidebarOpen = 'true'
+    arrow.dispatchEvent(new window.Event('click', { bubbles: true }))
+    flushTimeouts()
+    expect(body.dataset.webRemoteSidebarOpen).toBe('true')
+    expect(arrow.getAttribute('aria-expanded')).toBe('true')
+    moreItem.dispatchEvent(new window.Event('click', { bubbles: true }))
+    flushTimeouts()
+    expect(body.dataset.webRemoteSidebarOpen).toBe('true')
+    groupToggle.dispatchEvent(new window.Event('click', { bubbles: true }))
+    flushTimeouts()
+    expect(body.dataset.webRemoteSidebarOpen).toBe('true')
+    current.classList.add('agent-session-item-active')
+
+    expect(next.closest('[data-web-remote-sidebar="left"]')).toBe(sidebar)
+    const pendingBeforeSessionClick = pendingTimeoutCount()
+    next.dispatchEvent(new window.Event('click', { bubbles: true }))
+    expect(pendingTimeoutCount()).toBeGreaterThan(pendingBeforeSessionClick)
+    flushTimeouts()
+    expect(sidebar.querySelector('[data-session-switch-id].agent-session-item-active')?.getAttribute('data-session-switch-id')).toBe('session-b')
+    expect(body.dataset.webRemoteSidebarOpen).toBeUndefined()
+
+    const agentMode = document.createElement('button')
+    agentMode.setAttribute('aria-label', '切换到 Agent 模式（悬停查看项目）')
+    const agentIcon = document.createElement('span')
+    agentIcon.classList.add('bg-primary/10')
+    agentMode.appendChild(agentIcon)
+    const chatMode = document.createElement('button')
+    chatMode.setAttribute('aria-label', '切换到 Chat 模式')
+    const chatIcon = document.createElement('span')
+    chatMode.appendChild(chatIcon)
+    sidebar.append(agentMode, chatMode)
+    agentMode.addEventListener('click', () => window.setTimeout(() => { agentIcon.classList.remove('bg-primary/10'); chatIcon.classList.add('bg-primary/10') }, 0))
+    body.dataset.webRemoteSidebarOpen = 'true'
+    agentMode.dispatchEvent(new window.Event('click', { bubbles: true }))
+    flushTimeouts()
+    expect(body.dataset.webRemoteSidebarOpen).toBeUndefined()
+  })
+
+  test('presence 定时心跳不再调用全量列表，解析后复用当前 session id', () => {
+    const source = renderWebRemoteMobilePatch()
+    expect(source).toContain('var presenceSession=null; var presenceTitle=\'\'; var presenceLookup=null; var presenceResolved=false;')
+    expect(source).toContain('var lookup=forceLookup||titleText!==presenceTitle||!presenceResolved;')
+    expect(source).toContain('window.setInterval(function(){reportPresence(false)},5000)')
+    expect(source).not.toContain('window.setInterval(reportPresence,5000)')
   })
 
   test('无法解析的媒体标记被替换为提示文本，不会在 observer 中反复处理', async () => {

@@ -88,7 +88,7 @@ import {
   shouldActivateExternalAgentRun,
   shouldRevealDelegatedSession,
 } from '@/lib/external-agent-run'
-import { upsertAgentSession, mergeFetchedAgentSessions, selectDelegatedSession } from '@/lib/agent-session-list'
+import { getAgentSessionMetadataRevision, mergeAgentSessionSnapshotWithChanges, recordAgentSessionMetadataChange, upsertAgentSession, selectDelegatedSession } from '@/lib/agent-session-list'
 import {
   getAgentCompletionMarkers,
   getDelegatedCompletionAttention,
@@ -1189,13 +1189,19 @@ export function useGlobalAgentListeners(): void {
       store.set(stoppedByUserSessionsAtom, stoppedIds)
     }
 
+    const fetchAndMergeAgentSessionSnapshot = async (): Promise<void> => {
+      const snapshotRevision = getAgentSessionMetadataRevision()
+      const sessions = await window.electronAPI.listAgentSessions()
+      store.set(agentSessionsAtom, (prev) => mergeAgentSessionSnapshotWithChanges(prev, sessions, snapshotRevision, true))
+    }
+
     const recoverWebRemoteState = async (): Promise<void> => {
       await Promise.all([
         restoreActiveSnapshots(),
         restoreQueuedMessages(),
         restorePendingRequests(),
         restoreStoppedSessions(),
-        window.electronAPI.listAgentSessions().then((sessions) => store.set(agentSessionsAtom, (prev) => mergeFetchedAgentSessions(prev, sessions))),
+        fetchAndMergeAgentSessionSnapshot(),
       ])
       const activeSessionId = store.get(activeSessionIdAtom)
       if (activeSessionId) {
@@ -1266,18 +1272,14 @@ export function useGlobalAgentListeners(): void {
         // 自动任务会话被用户接管（毕业）：向用户提示，后续定时运行将新建独立会话
         if (payload.kind === 'proma_event' && payload.event.type === 'automation_graduated') {
           toast('已接管自动任务会话，后续定时运行将创建新会话。', { duration: 3000 })
-          window.electronAPI.listAgentSessions()
-            .then((sessions) => store.set(agentSessionsAtom, (prev) => mergeFetchedAgentSessions(prev, sessions)))
-            .catch(console.error)
+          void fetchAndMergeAgentSessionSnapshot().catch(console.error)
         }
 
 
         // 如果收到未知会话的事件（跨工作区场景），立即刷新会话列表
         const knownSessions = store.get(agentSessionsAtom)
         if (!knownSessions.some((s) => s.id === sessionId)) {
-          window.electronAPI.listAgentSessions()
-            .then((sessions) => store.set(agentSessionsAtom, (prev) => mergeFetchedAgentSessions(prev, sessions)))
-            .catch(console.error)
+          void fetchAndMergeAgentSessionSnapshot().catch(console.error)
         }
 
         // Phase 2: 直接累积 SDKMessage 到 liveMessagesMapAtom（跳过 replay 消息，避免与持久化消息重复）
@@ -2044,6 +2046,12 @@ export function useGlobalAgentListeners(): void {
       }
     )
 
+    // Session metadata revision journal is the single renderer-side snapshot race guard.
+    // LeftSidebar consumes the same event to update its visible list.
+    const cleanupSessionMetadataChanged = window.electronAPI.onAgentSessionMetadataChanged((change) => {
+      recordAgentSessionMetadataChange(change)
+    })
+
     // ===== 4. 标题更新 =====
     const cleanupTitleUpdated = window.electronAPI.onAgentTitleUpdated(({ sessionId, title }) => {
       // 先使用事件 payload 立即同步标签页，避免依赖会话列表旧快照比较。
@@ -2060,10 +2068,7 @@ export function useGlobalAgentListeners(): void {
         return
       }
       // 外部桥接可能先发标题、后发 run-start；仅在本地未知该会话时走恢复性全量同步。
-      window.electronAPI
-        .listAgentSessions()
-        .then((sessions) => store.set(agentSessionsAtom, (prev) => mergeFetchedAgentSessions(prev, sessions)))
-        .catch(console.error)
+      void fetchAndMergeAgentSessionSnapshot().catch(console.error)
     })
 
     const cleanupActiveWorktreeUpdated = window.electronAPI.onAgentActiveWorktreeUpdated((session) => {
@@ -2195,6 +2200,7 @@ export function useGlobalAgentListeners(): void {
       cleanupComplete()
       cleanupError()
       cleanupTitleUpdated()
+      cleanupSessionMetadataChanged()
       cleanupActiveWorktreeUpdated()
       cleanupPlaySound()
       cleanupWatchedFileChanges()

@@ -276,6 +276,7 @@ import {
 import { runPlanningNativeSync } from './lib/planning-native-sync-coordinator'
 import {
   listAgentSessions,
+  onAgentSessionMetadataChanged,
   listActiveAgentSessions,
   listArchivedAgentSessions,
   countArchivedAgentSessions,
@@ -1390,7 +1391,15 @@ async function withOAuthDeviceCodeQr<T extends CodexOAuthDeviceCode | GithubCopi
   }
 }
 
+let stopSessionMetadataChangeSubscription: (() => void) | null = null
+
 export function registerIpcHandlers(): void {
+  if (!stopSessionMetadataChangeSubscription) {
+    stopSessionMetadataChangeSubscription = onAgentSessionMetadataChanged((change) => {
+      getMainWindow()?.webContents.send(AGENT_IPC_CHANNELS.SESSION_METADATA_CHANGED, change)
+    })
+  }
+
   // ===== iOS Simulator preview（仅桌面主 renderer） =====
   const assertMainSimulatorRenderer = (senderId: number): void => {
     const mainWindow = getMainWindow()

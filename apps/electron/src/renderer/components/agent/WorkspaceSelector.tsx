@@ -10,6 +10,7 @@ import { useAtom } from 'jotai'
 import { FolderOpen, FolderInput, Plus, Pencil, Trash2, GripVertical } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { getAgentSessionMetadataRevision, mergeAgentSessionSnapshotWithChanges } from '@/lib/agent-session-list'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -175,13 +176,14 @@ export function WorkspaceSelector(): React.ReactElement {
     if (!deleteTargetId) return
 
     try {
+      const snapshotRevision = getAgentSessionMetadataRevision()
       await window.electronAPI.deleteAgentWorkspace(deleteTargetId)
       const [remaining, sessions] = await Promise.all([
         window.electronAPI.listAgentWorkspaces(),
         window.electronAPI.listActiveAgentSessions(),
       ])
       setWorkspaces(remaining)
-      setAgentSessions(sessions)
+      setAgentSessions((previous) => mergeAgentSessionSnapshotWithChanges(previous, sessions, snapshotRevision, false))
 
       if (deleteTargetId === currentWorkspaceId && remaining.length > 0) {
         const defaultWorkspace = remaining.find((workspace) => workspace.slug === 'default')

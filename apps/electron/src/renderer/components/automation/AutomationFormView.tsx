@@ -13,6 +13,7 @@ import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
 import { AlertTriangle, ArrowLeft, Bell, Check, Clock, Loader2, Pencil, Play, Settings, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { getAgentSessionMetadataRevision, mergeAgentSessionSnapshotWithChanges } from '@/lib/agent-session-list'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import {
@@ -521,8 +522,9 @@ export function AutomationFormView({ embedded = false }: { embedded?: boolean } 
       if (!automationId) throw new Error('任务尚未创建')
       await window.electronAPI.runAutomationNow(automationId)
       await refreshAutomations()
+      const snapshotRevision = getAgentSessionMetadataRevision()
       const sessions = await window.electronAPI.listActiveAgentSessions()
-      setAgentSessions(sessions)
+      setAgentSessions((previous) => mergeAgentSessionSnapshotWithChanges(previous, sessions, snapshotRevision, false))
     } catch (err) {
       console.error('[定时任务] 立即运行失败:', err)
       toast.error('立即运行失败')
@@ -540,8 +542,9 @@ export function AutomationFormView({ embedded = false }: { embedded?: boolean } 
 
     let session = agentSessions.find((s) => s.id === run.sessionId)
     if (!session) {
+      const snapshotRevision = getAgentSessionMetadataRevision()
       const sessions = await window.electronAPI.listAgentSessions()
-      setAgentSessions(sessions)
+      setAgentSessions((previous) => mergeAgentSessionSnapshotWithChanges(previous, sessions, snapshotRevision, true))
       session = sessions.find((s) => s.id === run.sessionId)
     }
 

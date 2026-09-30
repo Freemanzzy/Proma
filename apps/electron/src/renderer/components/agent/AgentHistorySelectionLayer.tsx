@@ -407,7 +407,22 @@ export function AgentHistorySelectionLayer({
     }
 
     const parentSession = agentSessions.find((item) => item.id === sessionId)
-    if (!parentSession?.piEntryBindings?.[candidate.messageId]) {
+    let hasPiEntry = Boolean(parentSession?.piEntryBindings?.[candidate.messageId])
+    if ((window as Window & { __PROMA_WEB_REMOTE__?: boolean }).__PROMA_WEB_REMOTE__) {
+      const invoke = (window as Window & { __PROMA_WEB_REMOTE_INVOKE?: (channel: string, ...args: unknown[]) => Promise<unknown> }).__PROMA_WEB_REMOTE_INVOKE
+      if (!invoke) {
+        toast.warning('无法读取此回复的探索节点，请刷新后重试')
+        return
+      }
+      try {
+        const bindings = await invoke('web-remote:get-session-entry-bindings', { sessionId }) as Record<string, unknown>
+        hasPiEntry = Boolean(bindings?.[candidate.messageId])
+      } catch {
+        toast.warning('无法读取此回复的探索节点，请刷新后重试')
+        return
+      }
+    }
+    if (!hasPiEntry) {
       toast.warning('这个回复没有可用的 Pi 分叉节点，暂时无法从这里探索')
       return
     }

@@ -39,6 +39,7 @@ import type {
   MessageSearchResult,
   SessionMessageSearchResponse,
   AgentSessionMeta,
+  AgentSessionMetadataChange,
   AgentActiveSessionSnapshot,
   SetAgentSessionActiveWorktreeInput,
   SDKMessage,
@@ -854,6 +855,7 @@ export interface ElectronAPI {
 
   /** 订阅 Agent 标题自动更新事件 */
   onAgentTitleUpdated: (callback: (data: { sessionId: string; title: string }) => void) => () => void
+  onAgentSessionMetadataChanged: (callback: (change: AgentSessionMetadataChange) => void) => () => void
   /** 订阅 Agent 主动更新活动 Worktree 的事件 */
   onAgentActiveWorktreeUpdated: (callback: (session: AgentSessionMeta) => void) => () => void
 
@@ -2278,6 +2280,11 @@ const electronAPI = {
     const listener = (_: unknown, data: { sessionId: string; title: string }): void => callback(data)
     ipcRenderer.on(AGENT_IPC_CHANNELS.TITLE_UPDATED, listener)
     return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.TITLE_UPDATED, listener) }
+  },
+  onAgentSessionMetadataChanged: (callback: (change: AgentSessionMetadataChange) => void) => {
+    const listener = (_: unknown, change: AgentSessionMetadataChange): void => callback(change)
+    ipcRenderer.on(AGENT_IPC_CHANNELS.SESSION_METADATA_CHANGED, listener)
+    return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.SESSION_METADATA_CHANGED, listener) }
   },
   onAgentActiveWorktreeUpdated: (callback: (session: AgentSessionMeta) => void) => {
     const listener = (_: unknown, session: AgentSessionMeta): void => callback(session)
