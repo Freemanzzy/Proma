@@ -1114,3 +1114,8 @@
 - `/api/dev/metrics` 的 `devices` 映射改为以随机 `connectionId` 为键，每项保留 `deviceId`；同一设备的多个并发连接各自拥有独立计量对象。连接关闭时先 flush 最终窗口再删除快照，避免重连导致旧连接覆盖新连接，也避免长期保留断开连接。
 - 每个 30 秒窗口汇总窗口内 `bufferedAmountPeak`、事件通道发送字节 Top 5、`backpressureDroppedEvents` 与 `resyncCount`；现有 IPC 通道字节计量行新增 connectionId。只记 channel、字节与次数，不记事件内容或会话标题，仍写入 `[INFO] scope=Web Remote 计量`。
 - 更新 `docs/personal/web-remote.md` 计量契约。`full-ui-security.test.ts` **27 pass / 0 fail**，覆盖同 deviceId 的两个连接互不覆盖、各自峰值/事件字节/丢弃计数独立及断开后移除。测试输出样例：`{"v":2,"w":"…","d":"…","connectionId":"…","bufferedAmountPeak":1000001,"eventBytesTop5":[{"channel":"agent:session-metadata-changed","bytes":226},{"channel":"agent:stream:event","bytes":194}],"backpressureDroppedEvents":1,"resyncCount":0}`。`git diff --check` 通过。
+
+## 2026-10-01: 重连与事件背压第二部分收尾验证
+
+- 全量 `bun test`：**662 pass / 0 fail**（99 files，1,632 assertions）；workspace `bun run typecheck` 通过；Electron `build:main`、`build:renderer`、`build:web-preload` 均通过。Renderer 保留 >500 KB chunk warning。
+- 最终 `git diff --check` 通过，开发启动器运行、17889/5173 在线、临时 8443→17889 保持开启；`.proma-dev` 会话数 **830**，正式版 PID `28971` 未变。未 merge、未 push、未打包或安装。
