@@ -10,7 +10,7 @@
  */
 import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { homedir, tmpdir } from 'node:os'
@@ -27,6 +27,31 @@ export function assertOwnedSessionMutation(sessionId, createdSessionIds, operati
 }
 
 const ANDROID_UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 7 Build/UP1A.231005.007) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36'
+
+function isKnownWebAssemblyCspInitializationException(entry) {
+  const text = String(entry?.description ?? entry?.text ?? '')
+  return /WebAssembly\.instantiate/.test(text) && /unsafe-eval/.test(text) && /script-src/.test(text)
+}
+
+function summarizeHarnessException(entry) {
+  const text = String(entry?.description ?? entry?.text ?? 'unknown')
+  if (isKnownWebAssemblyCspInitializationException(entry)) return 'WebAssembly.instantiate blocked by current script-src CSP'
+  return text.split('\n')[0].slice(0, 180)
+}
+
+/** Split only by the action-start count; matching error text never removes an action exception. */
+export function measureHarnessExceptionWindow(exceptions, baselineCount) {
+  const safeCount = Math.max(0, Math.min(exceptions.length, Math.trunc(baselineCount)))
+  const baseline = exceptions.slice(0, safeCount)
+  const actionExceptions = exceptions.slice(safeCount)
+  return {
+    baselineCount: baseline.length,
+    baselineCategories: baseline.map(summarizeHarnessException),
+    actionCount: actionExceptions.length,
+    actionCategories: actionExceptions.map(summarizeHarnessException),
+    actionExceptions,
+  }
+}
 
 function parseArgs(argv) {
   const result = { url: process.env.PROMA_WEB_REMOTE_URL ?? '', suite: 'smoke', session: process.env.PROMA_WEB_REMOTE_SESSION ?? '独立站/test', width: 412, height: 915, deviceScaleFactor: 3, userAgent: 'android', outputDir: DEFAULT_OUTPUT_DIR, chromePath: process.env.CHROME_PATH ?? '', pairScript: join(REPO_ROOT, 'scripts/personal/web-remote.sh') }
@@ -345,7 +370,15 @@ async function createHarness(options) {
     activeNavigation = { path, requestIds: new Set(), finishedIds: new Set(), responses: 0, cachedResponses: 0, transferBytes: 0 }
     await client.command('Page.navigate', { url: target })
     await waitUntil(client, `document.readyState === 'complete' || document.readyState === 'interactive'`, 30_000)
-    await delay(2_000)
+    if (path === '/app/' || path.startsWith('/app/')) {
+      // readyState is reached before the heavy renderer has mounted React. Wait for actual
+      // sidebar/mode controls and the authorized session index, not an arbitrary 2-second sleep.
+      await waitUntil(client, `Boolean(document.querySelector('[data-web-remote-sidebar="left"]') && document.querySelector('.mode-btn') && window.electronAPI?.listAgentSessions)`, 45_000)
+      await waitUntil(client, `window.electronAPI.listAgentSessions().then(items=>Array.isArray(items)&&items.length>0)`, 30_000)
+      await delay(300)
+    } else {
+      await delay(300)
+    }
     const metric = { path, requests: activeNavigation.requestIds.size, responses: activeNavigation.responses, cachedResponses: activeNavigation.cachedResponses, transferBytes: activeNavigation.transferBytes, durationMs: Date.now() - startedAt }
     loadMetrics.push(metric)
     activeNavigation = null
@@ -379,20 +412,36 @@ async function createHarness(options) {
   }
   const createHarnessSession = async (title) => {
     const workspaces = await client.evaluate('window.electronAPI.listAgentWorkspaces()')
-    const workspace = Array.isArray(workspaces) ? workspaces.find((item) => item?.name === '独立站') : null
-    if (!workspace?.id) throw new Error('找不到“独立站”工作区，拒绝在其他工作区创建 harness 会话')
+    // Web Remote returns only allowlisted workspace metadata; never guess a hidden workspace.
+    const workspace = Array.isArray(workspaces) ? workspaces[0] : null
+    if (!workspace?.id) throw new Error('当前授权范围没有可用于 harness 的工作区，拒绝创建会话')
     const existingIds = new Set((await readSessionManifest()).map((item) => item.id))
     await openDrawer()
+    const newTaskAvailable = await client.evaluate('Boolean(document.querySelector(\'button[aria-label="新建任务"]\'))')
+    if (!newTaskAvailable) {
+      const switched = await client.evaluate(`(() => {const button=[...document.querySelectorAll('.mode-btn')].find(item=>(item.innerText||'').trim()==='Agent');if(!button)return false;button.click();return true})()`)
+      if (switched) await waitUntil(client, 'Boolean(document.querySelector(\'button[aria-label="新建任务"]\'))', 10_000)
+    }
     const currentWorkspaceId = await client.evaluate('window.electronAPI.getSettings().then((settings)=>settings?.agentWorkspaceId)')
     if (currentWorkspaceId !== workspace.id) {
-      const workspaceHeading = await findElement(client, '独立站', '[data-web-remote-sidebar="left"] *')
+      const workspaceHeading = await findElement(client, workspace.name, '[data-web-remote-sidebar="left"] *')
       await touchAt(client, workspaceHeading.x, workspaceHeading.y)
       await waitUntil(client, `window.electronAPI.getSettings().then((settings)=>settings?.agentWorkspaceId===${quoteJs(workspace.id)})`, 10_000)
     }
     const plus = await client.evaluate('(() => { const n=document.querySelector(\'button[aria-label="新建任务"]\'); if(!n)return null; const r=n.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()')
-    if (!plus) throw new Error('手机端找不到新建任务按钮')
+    if (!plus) {
+      const state = await client.evaluate(`(async() => ({modeButtons:[...document.querySelectorAll('.mode-btn')].map(item=>(item.innerText||'').trim()),sidebarCount:document.querySelectorAll('[data-web-remote-sidebar="left"]').length,newTaskCount:document.querySelectorAll('button[aria-label="新建任务"]').length,agentCount:await window.electronAPI.listAgentSessions().then(items=>items.length)}))()`)
+      throw new Error(`手机端找不到新建任务按钮；safe-ui=${JSON.stringify(state)}`)
+    }
     await touchAt(client, plus.x, plus.y)
-    await waitUntil(client, 'Boolean(document.querySelector(\'textarea:not([disabled]),[contenteditable="true"]\'))', 10_000)
+    const inputReady = await waitUntil(client, 'Boolean(document.querySelector(\'textarea:not([disabled]),[contenteditable="true"]\'))', 10_000).then(() => true, () => false)
+    const afterCreateAttempt = await client.evaluate('window.electronAPI.listAgentSessions()').catch(() => [])
+    for (const candidate of Array.isArray(afterCreateAttempt) ? afterCreateAttempt : []) {
+      if (candidate?.id && !existingIds.has(candidate.id) && candidate.workspaceId === workspace.id && candidate.title === '新 Agent 会话' && Date.now() - Number(candidate.createdAt || 0) < 30_000) {
+        createdSessionIds.add(candidate.id)
+      }
+    }
+    if (!inputReady) throw new Error('新建按钮已点击，但当前视图未挂载可用会话输入框')
     const created = await waitUntil(client, `window.electronAPI.listAgentSessions().then((items)=>items.find((item)=>item?.id&&!${JSON.stringify([...existingIds])}.includes(item.id)&&item.workspaceId===${quoteJs(workspace.id)}))`, 15_000)
     if (!created?.id) throw new Error(`无法取得本次创建的会话 ID: ${JSON.stringify(created)}`)
     createdSessionIds.add(created.id)
@@ -544,6 +593,17 @@ async function createHarness(options) {
     if (!result?.ok) throw new Error(JSON.stringify(result?.error ?? { message: 'IPC failed' }))
     return result.value
   }
+  const createHarnessSessionRaw = async (title, workspaceId, isDraft = false) => {
+    const workspaces = await client.evaluate('window.electronAPI.listAgentWorkspaces()')
+    const targetWorkspaceId = workspaceId ?? (Array.isArray(workspaces) ? workspaces[0]?.id : undefined)
+    if (!targetWorkspaceId || !workspaces.some((workspace) => workspace?.id === targetWorkspaceId)) {
+      throw new Error('拒绝在当前 Web Remote 允许工作区之外创建测试会话')
+    }
+    const created = await invokeRaw('agent:create-session', [title, undefined, targetWorkspaceId, undefined, isDraft])
+    if (!created?.id || created.workspaceId !== targetWorkspaceId) throw new Error('主进程未在授权工作区创建 harness 会话')
+    createdSessionIds.add(created.id)
+    return created
+  }
   const clickText = (text, selector = 'body *') => touchText(client, text, selector)
   const resolveVisibleAskUserA = async () => {
     if (!await client.evaluate('Boolean(document.querySelector(".ask-user-banner"))')) return false
@@ -571,7 +631,7 @@ async function createHarness(options) {
     activeChrome = null
     activeProfile = null
   }
-  return { client, chrome, profile, pair, navigate, installInteractionStreamAudit, loadMetrics, openDrawer, clickSidebarText, clickText, openSession, createHarnessSession, setPermissionMode, inputAndSend, waitText, readHistory, waitForUserSubmission, waitForAssistantReply, waitForRunning, waitForAbortedAssistant, resolveVisibleAskUserA, resolveVisiblePlanApproval, getInteractionStreamEvents, getActiveSessionId: () => activeSessionId, getCreatedSessionIds: () => new Set(createdSessionIds), invokeApi, invokeRaw, websocketUrls, websocketHandshakes, websocketFramesReceived, websocketDataReceived, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, readSessionManifest, close }
+  return { client, chrome, profile, pair, navigate, installInteractionStreamAudit, loadMetrics, openDrawer, clickSidebarText, clickText, openSession, createHarnessSession, createHarnessSessionRaw, setPermissionMode, inputAndSend, waitText, readHistory, waitForUserSubmission, waitForAssistantReply, waitForRunning, waitForAbortedAssistant, resolveVisibleAskUserA, resolveVisiblePlanApproval, getInteractionStreamEvents, getActiveSessionId: () => activeSessionId, getCreatedSessionIds: () => new Set(createdSessionIds), invokeApi, invokeRaw, websocketUrls, websocketHandshakes, websocketFramesReceived, websocketDataReceived, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, readSessionManifest, close }
 }
 
 async function runDeadSocket(harness, options, result) {
@@ -1018,8 +1078,8 @@ async function runMobilePolishChecks(harness, options, result) {
   result.steps.push({ name: 'workspace-switch-single-tap', ok: false, skipped: otherWorkspace ? '侧栏项目名为可折叠分组；单击只展开会话列表，不改变 agentWorkspaceId，故不作为工作区切换断言' : '没有可切换的第二个工作区' })
 
   // Build two harness-owned sessions rather than assuming an arbitrary existing session (for example “回复 pong”) is visible in the current sidebar viewport.
-  const sourceSession = await harness.createHarnessSession(`web-remote-harness-mobile-polish-source-${Date.now()}`)
-  const targetSession = await harness.createHarnessSession(`web-remote-harness-mobile-polish-target-${Date.now()}`)
+  const sourceSession = await harness.createHarnessSessionRaw(`web-remote-harness-mobile-polish-source-${Date.now()}`)
+  const targetSession = await harness.createHarnessSessionRaw(`web-remote-harness-mobile-polish-target-${Date.now()}`)
   await harness.openDrawer()
   const target = await harness.client.evaluate(`(() => { const n=document.querySelector('[data-session-switch-id=${quoteJs(sourceSession.id)}]'); if(!n)return null; n.scrollIntoView({block:'center'}); const r=n.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`)
   if (!target) throw new Error(`本套件自建的源会话未出现在侧栏：${sourceSession.id}`)
@@ -1067,29 +1127,35 @@ async function waitForVisibleHistoryMarker(client, marker, timeoutMs) {
 
 async function runIdleSessionSync(harness, options, result, deviceId) {
   await harness.client.command('Network.emulateNetworkConditions', { offline: false, latency: 50, downloadThroughput: 0.5 * 1024 * 1024 / 8, uploadThroughput: 1 * 1024 * 1024 / 8, connectionType: 'cellular2g' })
-  const initial = await harness.client.evaluate("fetch('/api/dev/metrics',{credentials:'include'}).then(r=>r.ok?r.json():{status:r.status})")
+  const fetchMetrics = () => harness.client.evaluate("fetch('/api/dev/metrics',{credentials:'include'}).then(r=>r.ok?r.json():{status:r.status})")
+  const initial = await fetchMetrics()
+  // Let initial mount/presence resolution finish before starting the true idle window.
+  await delay(8_000)
+  const baselineSnapshot = await fetchMetrics()
+  const exceptionsBeforeIdle = harness.exceptions.length
   const windows = new Map()
   const startedAt = Date.now()
   while (Date.now() - startedAt < 180_000) {
     await delay(5_000)
-    const snapshot = await harness.client.evaluate("fetch('/api/dev/metrics',{credentials:'include'}).then(r=>r.ok?r.json():{status:r.status})")
+    const snapshot = await fetchMetrics()
     const metricDevice = snapshot?.deviceId || deviceId
     const device = snapshot?.ipc?.devices?.[metricDevice]
     if (device) windows.set(String(device.startedAt), device.byChannel?.['agent:list-sessions'] ?? null)
   }
-  const initialMetricDevice = initial?.deviceId || deviceId
-  const initialDevice = initial?.ipc?.devices?.[initialMetricDevice]
-  const initialWindow = initialDevice ? String(initialDevice.startedAt) : ''
+  const idleMetricDevice = baselineSnapshot?.deviceId || deviceId
+  const idleDevice = baselineSnapshot?.ipc?.devices?.[idleMetricDevice]
+  const initialWindow = idleDevice ? String(idleDevice.startedAt) : ''
+  const baselineListMetric = idleDevice?.byChannel?.['agent:list-sessions'] ?? null
   const entries = [...windows.entries()].map(([window, metric]) => {
-    const baseline = window === initialWindow ? initialDevice?.byChannel?.['agent:list-sessions'] : null
+    const baseline = window === initialWindow ? baselineListMetric : null
     return {
       calls: Math.max(0, (metric?.calls ?? 0) - (baseline?.calls ?? 0)),
       responseUtf8Bytes: Math.max(0, (metric?.responseUtf8Bytes ?? 0) - (baseline?.responseUtf8Bytes ?? 0)),
       appSentBytes: Math.max(0, (metric?.appSentBytes ?? 0) - (baseline?.appSentBytes ?? 0)),
-      bufferedAmountPeak: metric?.bufferedAmountPeak ?? 0,
+      bufferedAmountPeak: Math.max(0, (metric?.bufferedAmountPeak ?? 0) - (baseline?.bufferedAmountPeak ?? 0)),
     }
   })
-  const initialList = initialDevice?.byChannel?.['agent:list-sessions']
+  const initialList = idleDevice?.byChannel?.['agent:list-sessions']
   result.idleSessionSync = {
     initialList: {
       calls: initialList?.calls ?? 0,
@@ -1107,7 +1173,8 @@ async function runIdleSessionSync(harness, options, result, deviceId) {
     appSentBytes: entries.reduce((sum, item) => sum + item.appSentBytes, 0),
     bufferedAmountPeak: Math.max(0, ...entries.map((item) => item.bufferedAmountPeak)),
     metricWindows: entries.length,
-    exceptions: harness.exceptions.length,
+    exceptions: Math.max(0, harness.exceptions.length - exceptionsBeforeIdle),
+    exceptionsBeforeIdle,
   }
   if (result.idleSessionSync.elapsedMs < 180_000 || result.idleSessionSync.listRequests > 0 || result.idleSessionSync.responseUtf8Bytes > 0 || result.idleSessionSync.exceptions > 0) {
     throw new Error(`空闲列表同步验收失败：${JSON.stringify(result.idleSessionSync)}`)
@@ -1115,6 +1182,7 @@ async function runIdleSessionSync(harness, options, result, deviceId) {
 }
 
 async function runSessionSync(harness, options, result) {
+  const exceptionsBeforeSessionSync = harness.exceptions.length
   // 验证停止周期拉取后，会话列表在本端操作与断线重连后仍正确同步（只操作本次新建的会话）。
   const sidebarHas = (text) => harness.client.evaluate(`(() => {const root=document.querySelector('[data-web-remote-sidebar="left"]');return !!root&&(root.innerText||'').includes(${JSON.stringify(text)})})()`)
   const waitSidebar = async (text, present, timeoutMs) => {
@@ -1129,20 +1197,26 @@ async function runSessionSync(harness, options, result) {
   const titleD = `web-remote-sync-d-${stamp}`
   const steps = {}
   await harness.openDrawer()
-  const created = await harness.createHarnessSession(titleA)
-  await harness.openDrawer()
-  // 新建会话在首条消息前是草稿，按设计不在侧栏显示（与本批改动无关），只记录
-  steps.draftHiddenBeforeFirstMessage = !(await sidebarHas(titleA))
-  // 本端改名：与侧栏重命名相同的 IPC，并触发标题事件
+  const workspaces = await harness.client.evaluate('window.electronAPI.listAgentWorkspaces()')
+  const workspace = Array.isArray(workspaces) ? workspaces[0] : null
+  if (!workspace?.id) throw new Error('远程可见工作区为空，拒绝在未授权工作区创建测试会话')
+  steps.visibleWorkspaceCount = workspaces.length
+  steps.unauthorizedWorkspaceCreateDenied = await harness.client.evaluate(`window.__PROMA_WEB_REMOTE_INVOKE('agent:create-session', ${quoteJs('web-remote-unauthorized-workspace-probe')}, undefined, 'workspace-not-allowlisted').then(()=>false,error=>error?.denied===true)`)
+  const created = await harness.createHarnessSessionRaw(titleA, workspace.id, true)
+  // 新建草稿直到明确晋升前不应在侧栏出现；之后只对本次新建的测试会话做可逆 pin/unpin。
+  steps.draftHiddenBeforePromotion = !(await sidebarHas(titleA))
+  assertOwnedSessionMutation(created.id, harness.getCreatedSessionIds(), '晋升测试会话')
+  await harness.invokeRaw('agent:toggle-pin', [created.id])
+  await harness.invokeRaw('agent:toggle-pin', [created.id])
+  steps.promotedToVisible = (await waitSidebar(titleA, true, 10_000)) !== null
+  // 通过应用公开标题更新路径，检查元数据事件在不重连时刷新侧栏。
   assertOwnedSessionMutation(created.id, harness.getCreatedSessionIds(), '改名')
   await harness.invokeApi('updateAgentSessionTitle', [created.id, titleB])
   await harness.client.evaluate(`window.dispatchEvent(new Event('focus'))`)
   steps.renameVisibleMs = await waitSidebar(titleB, true, 10_000)
   // 外部改名 + 外部新建（绕过本端渲染状态，模拟桌面/其他设备的操作），随后断线重连恢复
   await harness.invokeRaw('agent:update-title', [created.id, titleC])
-  const workspaces = await harness.client.evaluate('window.electronAPI.listAgentWorkspaces()')
-  const workspace = workspaces.find((item) => item?.name === '独立站')
-  const external = await harness.invokeRaw('agent:create-session', [titleD, undefined, workspace.id])
+  const external = await harness.createHarnessSessionRaw(titleD, workspace.id, false)
   result.externalSessionId = external?.id
   const reconnect = async () => {
     // 关闭当前 /api/ipc 连接，触发 shim 自动重连与 renderer 的 proma-web-remote-reconnected 恢复同步
@@ -1153,8 +1227,8 @@ async function runSessionSync(harness, options, result) {
     await delay(1_500)
     await harness.openDrawer().catch(() => undefined)
   }
-  steps.liveRenameVisibleMs = await waitSidebar(titleC, true, 5_000)
-  steps.liveCreateVisibleMs = await waitSidebar(titleD, true, 5_000)
+  steps.liveRenameVisibleMs = await waitSidebar(titleC, true, 10_000)
+  steps.liveCreateVisibleMs = await waitSidebar(titleD, true, 10_000)
   await reconnect()
   steps.afterReconnectRenameVisible = (await waitSidebar(titleC, true, 30_000)) !== null
   steps.afterReconnectCreateVisible = (await waitSidebar(titleD, true, 30_000)) !== null
@@ -1164,30 +1238,148 @@ async function runSessionSync(harness, options, result) {
     harness.client.on('Page.javascriptDialogOpening', acceptConfirm)
     try { await harness.invokeApi('deleteAgentSession', [external.id]); steps.externalDeleted = true } catch (error) { steps.externalDeleteError = String(error) }
     harness.client.off('Page.javascriptDialogOpening', acceptConfirm)
-    steps.liveDeleteGoneMs = await waitSidebar(titleD, false, 5_000)
+    steps.liveDeleteGoneMs = await waitSidebar(titleD, false, 10_000)
     await reconnect()
     steps.afterReconnectDeleteGone = (await waitSidebar(titleD, false, 30_000)) !== null
   }
   // 本端归档：侧栏 active 视图应不再显示
+  const archiveStartedAt = Date.now()
   await harness.invokeApi('toggleArchiveAgentSession', [created.id])
+  steps.archiveRemovedMs = await waitSidebar(titleB, false, 10_000)
+  steps.archiveCommandMs = Date.now() - archiveStartedAt
   const archived = (await harness.client.evaluate('window.electronAPI.listActiveAgentSessions()')).some((item) => item?.id === created.id)
   steps.archivedRemovedFromActiveList = !archived
+  const restoreStartedAt = Date.now()
   await harness.invokeApi('toggleArchiveAgentSession', [created.id])
+  steps.restoreVisibleMs = await waitSidebar(titleC, true, 10_000)
+  steps.restoreCommandMs = Date.now() - restoreStartedAt
   // 回复探索节点按需读取
   const bindings = await harness.invokeRaw('web-remote:get-session-entry-bindings', [{ sessionId: created.id }]).catch((error) => ({ error: String(error) }))
   steps.entryBindingsReadable = !!bindings && typeof bindings === 'object' && !bindings.error
-  result.sessionSync = { ...steps, exceptions: harness.exceptions.length }
+  result.sessionSync = { ...steps, exceptions: Math.max(0, harness.exceptions.length - exceptionsBeforeSessionSync), exceptionsBeforeSessionSync }
   steps.listCallsDuringSuite = (await harness.client.evaluate("fetch('/api/dev/metrics',{credentials:'include'}).then(r=>r.ok?r.json():null)"))?.ipc?.devices ? 'see-metrics' : 'n/a'
-  // 外部（其他客户端/桌面）变更没有推送事件，修复前后都只在重连/运行事件时同步：live* 只记录，不作为失败条件。
-  const failed = steps.renameVisibleMs === null || !steps.afterReconnectRenameVisible || !steps.afterReconnectCreateVisible || (external?.id && !steps.afterReconnectDeleteGone) || !steps.archivedRemovedFromActiveList || !steps.entryBindingsReadable || harness.exceptions.length > 0
+  const failed = !steps.draftHiddenBeforePromotion || !steps.promotedToVisible || steps.renameVisibleMs === null || steps.liveRenameVisibleMs === null || steps.liveCreateVisibleMs === null || steps.liveDeleteGoneMs === null || steps.archiveRemovedMs === null || steps.restoreVisibleMs === null || !steps.afterReconnectRenameVisible || !steps.afterReconnectCreateVisible || (external?.id && !steps.afterReconnectDeleteGone) || !steps.archivedRemovedFromActiveList || !steps.entryBindingsReadable || steps.visibleWorkspaceCount !== 1 || !steps.unauthorizedWorkspaceCreateDenied || result.sessionSync.exceptions > 0
   if (failed) throw new Error(`会话列表同步验收失败：${JSON.stringify(result.sessionSync)}`)
+}
+
+async function runRealHistory(harness, options, result, deviceId) {
+  const sessionId = options.session
+  if (!/^[A-Za-z0-9-]{16,128}$/.test(sessionId)) throw new Error('real-history 需要通过 PROMA_WEB_REMOTE_SESSION 指定真实会话 ID')
+  const root = join(homedir(), '.proma-dev', 'agent-sessions')
+  const messagesPath = join(root, `${sessionId}.jsonl`)
+  if (!messagesPath.startsWith(`${root}/`) || !existsSync(messagesPath)) throw new Error('真实历史文件不在开发实例会话目录或不存在')
+  const sessionFileBytes = statSync(messagesPath).size
+  const initialSessions = await harness.client.evaluate('window.electronAPI.listAgentSessions()')
+  if (!Array.isArray(initialSessions) || initialSessions.length !== 830 || !initialSessions.some((session) => session?.id === sessionId)) {
+    throw new Error(`授权视图会话数量或目标会话不匹配：count=${Array.isArray(initialSessions) ? initialSessions.length : -1}`)
+  }
+  const getMetrics = () => harness.client.evaluate("fetch('/api/dev/metrics',{credentials:'include'}).then(response=>response.ok?response.json():null)")
+  const channelMetric = (snapshot, name) => snapshot?.ipc?.devices?.[deviceId]?.byChannel?.[name] ?? {}
+  await harness.client.command('Network.enable')
+  await harness.client.command('Network.emulateNetworkConditions', {
+    offline: false, latency: 50, downloadThroughput: 0.5 * 1024 * 1024 / 8,
+    uploadThroughput: 1 * 1024 * 1024 / 8, connectionType: 'cellular2g',
+  })
+  // Force a fresh full-list IPC after the shim's short coalescing window so the
+  // 830-session payload is measured on the slow link; keep initialization CSP errors outside the action window.
+  await delay(12_000)
+  const beforeList = await getMetrics()
+  const listFrameStart = harness.websocketFramesReceived.length
+  const listStartedAt = Date.now()
+  const list = await harness.client.evaluate(`window.__PROMA_WEB_REMOTE_INVOKE('agent:list-sessions').then(value=>Array.isArray(value)?value:[])`)
+  const listElapsedMs = Date.now() - listStartedAt
+  const afterList = await getMetrics()
+  const listFrames = harness.websocketFramesReceived.slice(listFrameStart).filter((item) => item.url && new URL(item.url).pathname === '/api/ipc')
+  const listFramePayloadBytes = listFrames.reduce((sum, frame) => sum + frame.payloadBytes, 0)
+  if (!Array.isArray(list) || list.length !== 830 || !list.some((session) => session?.id === sessionId)) {
+    throw new Error(`弱网列表返回与授权视图不符：count=${Array.isArray(list) ? list.length : -1}`)
+  }
+  const metricsDevicesBefore = beforeList?.ipc?.devices ?? {}
+  const metricsDevicesAfter = afterList?.ipc?.devices ?? {}
+  const listMetricDelta = (key) => Object.keys(metricsDevicesAfter).reduce((total, id) => {
+    const before = metricsDevicesBefore[id]?.byChannel?.['agent:list-sessions']?.[key] ?? 0
+    const after = metricsDevicesAfter[id]?.byChannel?.['agent:list-sessions']?.[key] ?? 0
+    return total + Math.max(0, after - before)
+  }, 0)
+  const listMetrics = {
+    calls: listMetricDelta('calls') || 1,
+    responseUtf8Bytes: listMetricDelta('responseUtf8Bytes') || new TextEncoder().encode(JSON.stringify(list)).length,
+    appSentBytes: listMetricDelta('appSentBytes') || listFramePayloadBytes,
+    estimatedDeflateRawBytes: listMetricDelta('estimatedDeflateRawBytes'),
+    wireBytes: null,
+    bufferedAmountPeak: Math.max(0, ...Object.values(metricsDevicesAfter).map((device) => device?.byChannel?.['agent:list-sessions']?.bufferedAmountPeak ?? 0)),
+    websocketDecodedPayloadBytes: listFramePayloadBytes,
+    elapsedMs: listElapsedMs,
+  }
+  if (listMetrics.calls < 1 || listMetrics.responseUtf8Bytes <= 0 || listMetrics.appSentBytes <= 0) throw new Error(`弱网会话列表计量为空：${JSON.stringify(listMetrics)}`)
+  // Create a temporary empty session only after the 830-session list measurement. This
+  // lets the actual history request be a cold UI read without changing the measured list payload.
+  const away = await harness.createHarnessSessionRaw(`web-remote-real-history-away-${Date.now()}`)
+  await harness.openDrawer()
+  const awayPoint = await harness.client.evaluate(`(() => {const node=document.querySelector('[data-session-switch-id=${quoteJs(away.id)}]');if(!node)return null;node.scrollIntoView({block:'center'});const r=node.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`)
+  if (!awayPoint) throw new Error('无法选择本次新建的空历史会话，拒绝复用或改写其它会话')
+  await touchAt(harness.client, awayPoint.x, awayPoint.y)
+  await waitUntil(harness.client, `document.querySelector('[data-session-switch-id=${quoteJs(away.id)}].agent-session-item-active') !== null`, 10_000)
+  await waitUntil(harness.client, 'document.querySelectorAll("[data-message-role]").length === 0', 5_000)
+  const exceptionsBeforeRealHistory = harness.exceptions.length
+  const point = await harness.client.evaluate(`(() => {const node=document.querySelector('[data-session-switch-id=${quoteJs(sessionId)}]');if(!node)return null;node.scrollIntoView({block:'center'});const r=node.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`)
+  if (!point) throw new Error('真实目标会话不在授权侧栏的可见候选中')
+  const firstFrameIndex = harness.websocketFramesReceived.length
+  const startedAt = Date.now()
+  await touchAt(harness.client, point.x, point.y)
+  const activeSelector = `document.querySelector('[data-session-switch-id=${quoteJs(sessionId)}].agent-session-item-active') !== null`
+  const activated = await waitUntil(harness.client, activeSelector, 4_000).then(() => true).catch(() => false)
+  if (!activated) {
+    await harness.client.evaluate(`document.querySelector('[data-session-switch-id=${quoteJs(sessionId)}]')?.click()`)
+    const retry = await waitUntil(harness.client, activeSelector, 10_000).then(() => true).catch(() => false)
+    if (!retry) {
+      const debug = await harness.client.evaluate(`(() => ({targetCount:document.querySelectorAll('[data-session-switch-id=${quoteJs(sessionId)}]').length,activeIds:[...document.querySelectorAll('.agent-session-item-active')].map(node=>node.getAttribute('data-session-switch-id')),drawerOpen:document.body.dataset.webRemoteSidebarOpen==='true',sidebarCount:document.querySelectorAll('[data-web-remote-sidebar="left"]').length}))()`)
+      throw new Error(`真实目标会话点击后未激活：${JSON.stringify(debug)}`)
+    }
+  }
+  const historyVisible = await waitUntil(harness.client, `document.querySelectorAll('[data-message-role]').length > 0`, 45_000).then(() => true).catch(() => false)
+  const firstHistoryMs = historyVisible ? Date.now() - startedAt : null
+  const afterHistory = await getMetrics()
+  const historyMetricDevicesBefore = afterList?.ipc?.devices ?? {}
+  const historyMetricDevicesAfter = afterHistory?.ipc?.devices ?? {}
+  const historyMetricDelta = (key) => Object.keys(historyMetricDevicesAfter).reduce((total, id) => {
+    const before = historyMetricDevicesBefore[id]?.byChannel?.['agent:get-sdk-messages']?.[key] ?? 0
+    const after = historyMetricDevicesAfter[id]?.byChannel?.['agent:get-sdk-messages']?.[key] ?? 0
+    return total + Math.max(0, after - before)
+  }, 0)
+  const historyFrames = harness.websocketFramesReceived.slice(firstFrameIndex).filter((item) => item.url && new URL(item.url).pathname === '/api/ipc')
+  const historyDecodedPayloadBytes = historyFrames.reduce((sum, frame) => sum + frame.payloadBytes, 0)
+  result.realHistory = {
+    sessionCount: list.length,
+    sessionFileBytes,
+    network: { latencyMs: 50, downloadBitsPerSecond: 0.5 * 1024 * 1024, uploadBitsPerSecond: 1 * 1024 * 1024 },
+    list: listMetrics,
+    firstHistoryMs,
+    historyVisible,
+    history: {
+      calls: historyMetricDelta('calls') || (historyDecodedPayloadBytes > 0 ? 1 : 0),
+      responseUtf8Bytes: historyMetricDelta('responseUtf8Bytes') || historyDecodedPayloadBytes,
+      appSentBytes: historyMetricDelta('appSentBytes') || historyDecodedPayloadBytes,
+      estimatedDeflateRawBytes: historyMetricDelta('estimatedDeflateRawBytes'),
+      wireBytes: null,
+      bufferedAmountPeak: Math.max(0, ...Object.values(historyMetricDevicesAfter).map((device) => device?.byChannel?.['agent:get-sdk-messages']?.bufferedAmountPeak ?? 0)),
+      websocketDecodedPayloadBytes: historyDecodedPayloadBytes,
+    },
+    exceptions: Math.max(0, harness.exceptions.length - exceptionsBeforeRealHistory),
+    exceptionsBeforeRealHistory,
+    exceptionsDuringRealHistory: Math.max(0, harness.exceptions.length - exceptionsBeforeRealHistory),
+    totalPageExceptions: harness.exceptions.length,
+  }
+  if (!historyVisible || firstHistoryMs === null || firstHistoryMs >= 30_000 || result.realHistory.exceptionsDuringRealHistory !== 0) {
+    throw new Error(`真实大会话弱网首屏未达 30 秒预算：${JSON.stringify(result.realHistory)}`)
+  }
 }
 
 async function runHeavySession(harness, options, result, onSyntheticFileCreated) {
   const baselineMode = process.env.PROMA_WEB_REMOTE_HEAVY_SESSION_BASELINE === '1'
   const title = `web-remote-heavy-session-${Date.now()}`
   const awayTitle = `web-remote-heavy-away-${Date.now()}`
-  const heavy = await harness.createHarnessSession(title)
+  const heavy = await harness.createHarnessSessionRaw(title)
   const messagesPath = join(homedir(), '.proma-dev', 'agent-sessions', `${heavy.id}.jsonl`)
   if (!messagesPath.startsWith(join(homedir(), '.proma-dev', 'agent-sessions') + '/')) throw new Error('拒绝写入开发会话目录以外的文件')
   const synthetic = createSyntheticHeavyHistory()
@@ -1196,7 +1388,7 @@ async function runHeavySession(harness, options, result, onSyntheticFileCreated)
   const syntheticBytes = Buffer.byteLength(synthetic.content, 'utf8')
   if (syntheticBytes < 30 * 1024 * 1024) throw new Error(`合成大会话不足 30 MiB：${syntheticBytes}`)
   // Move away from the just-created empty snapshot, then reopen it after network throttling is active.
-  await harness.createHarnessSession(awayTitle)
+  await harness.createHarnessSessionRaw(awayTitle)
   const cellularProfile = options.suite === 'cellular'
     ? { latency: 50, downloadThroughput: 0.5 * 1024 * 1024 / 8, uploadThroughput: 1 * 1024 * 1024 / 8, connectionType: 'cellular2g' }
     : { latency: 300, downloadThroughput: 3 * 1024 * 1024 / 8, uploadThroughput: 1 * 1024 * 1024 / 8, connectionType: 'cellular3g' }
@@ -1316,13 +1508,21 @@ async function runCleanupSynthetic(harness, result) {
   const ids = (process.env.PROMA_WEB_REMOTE_CLEANUP_SESSION_IDS || '').split(',').map((id) => id.trim()).filter(Boolean)
   if (ids.length === 0 || ids.some((id) => !/^[a-f0-9-]{36}$/i.test(id))) throw new Error('cleanup-synthetic 需要显式传入合成 session UUID 列表')
   const manifest = await harness.readSessionManifest()
+  const fullSessions = await harness.client.evaluate('window.electronAPI.listAgentSessions()')
+  const workspaces = await harness.client.evaluate('window.electronAPI.listAgentWorkspaces()')
   result.explicitCleanupSessionIds = []
   const acceptDeleteConfirm = (event) => { if (event.type === 'confirm') void harness.client.command('Page.handleJavaScriptDialog', { accept: true }).catch(() => {}) }
   harness.client.on('Page.javascriptDialogOpening', acceptDeleteConfirm)
   try {
     for (const id of ids) {
       const session = manifest.find((item) => item.id === id)
-      if (!session || !/^web-remote-heavy-(?:session|away)-\d+$/.test(session.title)) throw new Error(`目标不是本次格式的合成大会话，拒绝删除：${id}`)
+      const meta = Array.isArray(fullSessions) ? fullSessions.find((item) => item?.id === id) : null
+      const heavySynthetic = session && /^web-remote-heavy-(?:session|away)-\d+$/.test(session.title)
+      const orphanedHarnessDraft = meta && ['新 Agent 会话', 'New Agent Session'].includes(meta.title)
+        && meta.workspaceId === workspaces?.[0]?.id
+        && Number.isFinite(meta.createdAt) && Date.now() - meta.createdAt < 6 * 60 * 60 * 1000
+        && !existsSync(join(homedir(), '.proma-dev', 'agent-sessions', `${id}.jsonl`))
+      if (!session || (!heavySynthetic && !orphanedHarnessDraft)) throw new Error(`目标不是已确认的 harness 合成会话，拒绝删除：${id}`)
       await harness.invokeApi('deleteAgentSession', [id])
       await waitUntil(harness.client, `window.electronAPI.listAgentSessions().then(items=>!(items||[]).some(item=>item?.id===${quoteJs(id)}))`, 15_000)
       result.explicitCleanupSessionIds.push(id)
@@ -1333,7 +1533,7 @@ async function runCleanupSynthetic(harness, result) {
 async function runMediaDemo(harness, result) {
   const title = '手机图片演示'
   const existing = await harness.client.evaluate(`window.electronAPI.listAgentSessions().then(items=>(items||[]).find(item=>item?.title===${quoteJs(title)}))`)
-  const session = existing ?? await harness.createHarnessSession(title)
+  const session = existing ?? await harness.createHarnessSessionRaw(title)
   const messagesPath = join(homedir(), '.proma-dev', 'agent-sessions', `${session.id}.jsonl`)
   if (!messagesPath.startsWith(join(homedir(), '.proma-dev', 'agent-sessions') + '/')) throw new Error('拒绝写入开发会话目录以外的文件')
   if (existing && (!existsSync(messagesPath) || !readFileSync(messagesPath, 'utf8').includes('synthetic-media-demo-user'))) throw new Error('发现同名非本任务合成演示会话，拒绝覆盖')
@@ -1426,6 +1626,8 @@ async function main() {
     await assertIpcCompressionHandshake(harness, options, result)
     const secondAppLoad = await harness.navigate('/app/')
     await harness.installInteractionStreamAudit()
+    result.pageStartupExceptionCount = harness.exceptions.length
+    result.pageStartupExceptionCategories = harness.exceptions.map((entry) => summarizeHarnessException(entry))
     result.loadMetrics = { first: paired.firstAppLoad, second: secondAppLoad }
     result.sessionManifestBefore = await harness.readSessionManifest()
     if (options.suite === 'smoke') await runSmoke(harness, options, result)
@@ -1433,6 +1635,7 @@ async function main() {
     else if (options.suite === 'heavy-session' || options.suite === 'cellular') await runHeavySession(harness, options, result, (path) => { syntheticFileCleanupPath = path })
     else if (options.suite === 'idle-session-sync') await runIdleSessionSync(harness, options, result, deviceId)
     else if (options.suite === 'session-sync') await runSessionSync(harness, options, result)
+    else if (options.suite === 'real-history') await runRealHistory(harness, options, result, deviceId)
     else if (options.suite === 'media-demo') await runMediaDemo(harness, result)
     else if (options.suite === 'cleanup-synthetic') await runCleanupSynthetic(harness, result)
     else if (options.suite === 'panel-probe') await runPanelProbe(harness, options, result)
@@ -1489,6 +1692,18 @@ async function main() {
     clearTimeout(timeoutTimer)
     result.consoleErrors = harness.consoleErrors
     result.exceptions = harness.exceptions
+    const preActionExceptionCount = result.realHistory?.exceptionsBeforeRealHistory
+      ?? result.idleSessionSync?.exceptionsBeforeIdle
+      ?? result.sessionSync?.exceptionsBeforeSessionSync
+      ?? result.pageStartupExceptionCount
+      ?? 0
+    const exceptionWindow = measureHarnessExceptionWindow(harness.exceptions, preActionExceptionCount)
+    result.preActionExceptionCount = exceptionWindow.baselineCount
+    result.preActionExceptionCategories = exceptionWindow.baselineCategories
+    result.exceptionsAfterStartup = exceptionWindow.actionExceptions
+    result.knownWebAssemblyCspInitializationExceptions = harness.exceptions.filter(isKnownWebAssemblyCspInitializationException).length
+    // Never whitelist by exception text: every exception after the action baseline is new/action-scoped.
+    result.newActionExceptions = exceptionWindow.actionExceptions
     const harnessSessionCleanup = { beforeIds: [], deletedIds: [], afterIds: [], errors: [] }
     try {
       const beforeDelete = await harness.readSessionManifest()

@@ -965,3 +965,9 @@
 - 新增 cursor epoch/sequence、两种事件消费者顺序、快照期间 rename/delete、同 ID remove→upsert 恢复、分类清除与 retention-floor 测试。相关测试 **50 pass / 0 fail**（按 main manager、full-ui security、agent-session-list 三文件），全 workspace typecheck 通过；全量 `bun test` 后续最终验证。
 - E2E 仅依赖此前 0.5 Mbps 本地 harness 证据，session-sync raw IPC 操作测试 (非独立桌面进程控制) 实测创建 **0–202 ms**、改名 **0–1 ms**、归档 **1 ms**、恢复 **3 ms**、删除 **3 ms**，断线回补全部成功；限单工作区实际请求越权创建被拒。跨 workspace 的 manager move 与 server 移出授权 remove 由单测覆盖，**没有**为E2E临时开放第二个工作区。
 - 本 commit 无 3 Mbps 真实 E2E：开发安全启动入口尚未交付，17889/5173 没有监听且 8443 临时 Serve 已关闭。当前链路结果必须等待独立安全任务；模型渠道与历史附件文件仍未导入。
+
+## 2026-09-30: Harness 异常按动作开始基线计量
+
+- `mobile-harness.mjs` 对每个专项显式记录动作前 exceptionCount；结果拆成 `preActionExceptionCategories` 与 `newActionExceptions`。只用精确的 WebAssembly/CSP 类别标注既有初始化异常；**没有**按异常文本过滤动作期间的任何异常。新增单测证明动作期间再次出现相同 WebAssembly/CSP 异常仍计为新异常，并与其他 JS 异常一起失败。
+- 已保存的 0.5 Mbps stress 结果显示真实目标历史加载期间新增异常为 0；执行前页面存在 1–2 个已知 WebAssembly.instantiate/CSP 初始化异常。它们未通过 `unsafe-eval` 或放宽 CSP 绕过；当前开发服务不可安全启动，故本 commit 不重复运行 E2E、不将该历史结果标为 3 Mbps 验收。
+- 验证：`bun test scripts/personal/mobile-harness.test.mjs` **1 pass / 0 fail**；`node --check` 与 `bash -n` 通过。仅调整 harness/test 汇总，不改开发进程清理或启动/停止逻辑。

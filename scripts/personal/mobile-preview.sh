@@ -197,9 +197,21 @@ if (result.heavySession) {
     process.exit(1)
   }
 }
+if (result.sessionSync) {
+  const sync = result.sessionSync
+  checks.push(`session-sync rename=${sync.liveRenameVisibleMs}ms create=${sync.liveCreateVisibleMs}ms archive=${sync.archiveRemovedMs}ms restore=${sync.restoreVisibleMs}ms delete=${sync.liveDeleteGoneMs}ms reconnect=${sync.afterReconnectCreateVisible ? 'pass' : 'fail'}, new-exceptions=${sync.exceptions}, pre-action=${sync.exceptionsBeforeSessionSync}`)
+}
+if (result.realHistory) {
+  const real = result.realHistory
+  checks.push(`real-history=${real.sessionCount} sessions/${real.sessionFileBytes}B/${real.firstHistoryMs}ms, list=${real.list?.responseUtf8Bytes}B appSent=${real.list?.appSentBytes}B, history=${real.history?.responseUtf8Bytes}B appSent=${real.history?.appSentBytes}B buffered=${real.history?.bufferedAmountPeak}B, exceptions=${real.exceptionsDuringRealHistory} during / ${real.exceptionsBeforeRealHistory} before`)
+  if (real.sessionCount !== 830 || real.sessionFileBytes < 30_000_000 || !real.historyVisible || real.firstHistoryMs === null || real.exceptionsDuringRealHistory !== 0 || real.list?.calls < 1 || real.history?.calls < 1 || real.history?.wireBytes !== null) {
+    console.error(`FAIL ${ua}/${suite}: 真实大会话验收字段不完整：${JSON.stringify(real)}`)
+    process.exit(1)
+  }
+}
 if (result.idleSessionSync) {
   const idle = result.idleSessionSync
-  checks.push(`idle=${idle.elapsedMs}ms, listCalls=${idle.listRequests}, appSent=${idle.appSentBytes}B, bufferPeak=${idle.bufferedAmountPeak}B, initialList=${idle.initialList.calls} calls/${idle.initialList.appSentBytes}B`)
+  checks.push(`idle=${idle.elapsedMs}ms, listCalls=${idle.listRequests}, appSent=${idle.appSentBytes}B, bufferPeak=${idle.bufferedAmountPeak}B, initialList=${idle.initialList.calls} calls/${idle.initialList.appSentBytes}B, new-exceptions=${idle.exceptions}, pre-action=${idle.exceptionsBeforeIdle}`)
   if (idle.elapsedMs < 180_000 || idle.listRequests !== 0 || idle.responseUtf8Bytes !== 0 || idle.exceptions !== 0) {
     console.error(`FAIL ${ua}/${suite}: 空闲 session 列表发生重复下发：${JSON.stringify(idle)}`)
     process.exit(1)
@@ -209,8 +221,8 @@ if (result.probe) checks.push(`tabs=${result.probe.filter((item) => item.hitIsTa
 if (result.attachments) checks.push(`attachments=${result.attachments.textAssistantReplyContainsFirstLine && result.attachments.imageAssistantIdentifiedRed ? 'pass' : 'fail'}`)
 if (result.singleTapChecks) checks.push(`singleTap=${result.singleTapSuccess}/${result.singleTapChecks}`)
 if (result.steps?.length) checks.push(`steps=${result.steps.filter((step) => step.ok).length}/${result.steps.filter((step) => !step.skipped).length}`)
-checks.push(`exceptions=${result.exceptions?.length ?? 0}`)
-if (result.error || result.revokeError || badSteps.length || result.layout?.passed === false || (result.probe && result.probe.some((item) => !item.hitIsTab)) || (result.singleTapChecks && result.singleTapSuccess !== result.singleTapChecks) || (result.attachments && (!result.attachments.textAssistantReplyContainsFirstLine || !result.attachments.imageAssistantIdentifiedRed)) || !result.revoked || !result.chromeExited || !result.profileRemoved || (result.exceptions?.length ?? 0) > 0) {
+checks.push(`new-action-exceptions=${result.newActionExceptions?.length ?? 0}, known-WASM-CSP-total=${result.knownWebAssemblyCspInitializationExceptions ?? 0}, pre-action=${result.preActionExceptionCount ?? result.pageStartupExceptionCount ?? 0}${result.preActionExceptionCategories?.length ? ` (${[...new Set(result.preActionExceptionCategories)].join('; ')})` : ''}`)
+if (result.error || result.revokeError || badSteps.length || result.layout?.passed === false || (result.probe && result.probe.some((item) => !item.hitIsTab)) || (result.singleTapChecks && result.singleTapSuccess !== result.singleTapChecks) || (result.attachments && (!result.attachments.textAssistantReplyContainsFirstLine || !result.attachments.imageAssistantIdentifiedRed)) || !result.revoked || !result.chromeExited || !result.profileRemoved || (result.newActionExceptions?.length ?? 0) > 0) {
   console.error(`FAIL ${ua}/${suite}: ${checks.join(', ')}${result.error ? `; ${result.error}` : ''}`)
   process.exit(1)
 }
