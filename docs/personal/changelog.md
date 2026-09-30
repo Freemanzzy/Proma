@@ -1108,3 +1108,9 @@
 - full-ui 按连接检查 `bufferedAmount`。超过 **1,000,000 B** 时只丢弃 `chat:stream:chunk` 与 `agent:stream:event` 中 `payload.kind === 'sdk_delta'`（兼容旧式 `event.type === 'text_delta'`），并为该连接置 `needsResync`。不丢弃 `sdk_message`、`proma_event`（含 AskUser/计划/权限交互）、`agent:stream:complete/error`、`agent:session-metadata-changed` 或任意 invoke 响应。
 - 连接缓冲低于 **256 KiB** 时发送一次 WebSocket `resync` 控制帧；手机 shim 将它映射到已有 `proma-web-remote-reconnected` 事件，复用 `__PROMA_WEB_REMOTE_RECOVER` 与 LeftSidebar resync，无新增 IPC channel/权限分级。
 - 单测覆盖 droppable 分类、超阈值增量丢弃、完整/错误/AskUser/metadata 状态帧与 invoke response 保留，以及缓冲回落后只发送一次 resync；`full-ui-security.test.ts` **26 pass / 0 fail**，`git diff --check` 通过。该步骤未增加或修改 channel-policy 项。
+
+## 2026-10-01: 按 WebSocket 连接独立积压计量
+
+- `/api/dev/metrics` 的 `devices` 映射改为以随机 `connectionId` 为键，每项保留 `deviceId`；同一设备的多个并发连接各自拥有独立计量对象。连接关闭时先 flush 最终窗口再删除快照，避免重连导致旧连接覆盖新连接，也避免长期保留断开连接。
+- 每个 30 秒窗口汇总窗口内 `bufferedAmountPeak`、事件通道发送字节 Top 5、`backpressureDroppedEvents` 与 `resyncCount`；现有 IPC 通道字节计量行新增 connectionId。只记 channel、字节与次数，不记事件内容或会话标题，仍写入 `[INFO] scope=Web Remote 计量`。
+- 更新 `docs/personal/web-remote.md` 计量契约。`full-ui-security.test.ts` **27 pass / 0 fail**，覆盖同 deviceId 的两个连接互不覆盖、各自峰值/事件字节/丢弃计数独立及断开后移除。测试输出样例：`{"v":2,"w":"…","d":"…","connectionId":"…","bufferedAmountPeak":1000001,"eventBytesTop5":[{"channel":"agent:session-metadata-changed","bytes":226},{"channel":"agent:stream:event","bytes":194}],"backpressureDroppedEvents":1,"resyncCount":0}`。`git diff --check` 通过。

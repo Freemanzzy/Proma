@@ -15,13 +15,14 @@ const { WebRemoteIpcBridge, getWebRemoteMetricsSnapshot, slimWebRemoteSessionMet
 class FakeWebSocket extends EventEmitter {
   readyState = 1
   bufferedAmount = 0
+  connectionId = ''
   sent: string[] = []
   send(payload: string): void { this.sent.push(payload) }
 }
 
 function client(bridge: InstanceType<typeof WebRemoteIpcBridge>): FakeWebSocket {
   const ws = new FakeWebSocket()
-  bridge.attachWebSocket(ws as never, 'device-1')
+  ws.connectionId = bridge.attachWebSocket(ws as never, 'device-1')
   ws.sent = []
   return ws
 }
@@ -234,7 +235,7 @@ describe('Web Remote full-ui security policy', () => {
     expect(response.value[0]).not.toHaveProperty('delegationGoal')
     expect(response.value[0]).not.toHaveProperty('piSessionFile')
     expect(response.value[0]).not.toHaveProperty('piEntryBindings')
-    const metric = getWebRemoteMetricsSnapshot().devices['device-1']?.byChannel['agent:list-sessions']
+    const metric = getWebRemoteMetricsSnapshot().devices[ws.connectionId]?.byChannel['agent:list-sessions']
     expect(metric).toMatchObject({ calls: 1 })
     expect(metric?.responseUtf8Bytes).toBeGreaterThan(0)
     expect(metric?.appSentBytes).toBeGreaterThan(0)
@@ -327,6 +328,28 @@ describe('Web Remote full-ui security policy', () => {
     expect(ws.sent.map((frame) => JSON.parse(frame).type).filter((type) => type === 'resync')).toHaveLength(1)
     expect(ws.sent.map((frame) => JSON.parse(frame)).some((frame) => frame.type === 'event' && frame.channel === 'agent:stream:event')).toBe(true)
     ws.emit('close', 1000, Buffer.from('test complete'))
+  })
+
+  test('同一设备的并发连接保留独立积压指标与事件通道字节', async () => {
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
+    const first = client(bridge)
+    const second = client(bridge)
+    expect(first.connectionId).not.toBe(second.connectionId)
+    first.bufferedAmount = EVENT_BACKPRESSURE_BYTES + 10
+    second.bufferedAmount = 64
+    const mainWindow = (await import('../../main-window-store')).getMainWindow()!
+    mainWindow.webContents.send('agent:stream:event', { sessionId: 's-1', payload: { kind: 'sdk_delta', delta: { type: 'text_delta', contentIndex: 0, delta: 'per-connection' } } })
+    const metrics = getWebRemoteMetricsSnapshot().devices
+    const firstMetrics = metrics[first.connectionId]
+    const secondMetrics = metrics[second.connectionId]
+    expect(firstMetrics).toMatchObject({ connectionId: first.connectionId, deviceId: 'device-1', bufferedAmountPeak: EVENT_BACKPRESSURE_BYTES + 10, backpressureDroppedEvents: 1, resyncCount: 0 })
+    expect(secondMetrics).toMatchObject({ connectionId: second.connectionId, deviceId: 'device-1', backpressureDroppedEvents: 0 })
+    expect(secondMetrics?.eventBytesByChannel['agent:stream:event']).toBeGreaterThan(0)
+    expect(firstMetrics?.eventBytesByChannel['agent:stream:event'] ?? 0).toBe(0)
+    first.emit('close', 1000, Buffer.from('test complete'))
+    second.emit('close', 1000, Buffer.from('test complete'))
+    expect(getWebRemoteMetricsSnapshot().devices[first.connectionId]).toBeUndefined()
+    expect(getWebRemoteMetricsSnapshot().devices[second.connectionId]).toBeUndefined()
   })
 
   test('会话元数据事件按工作区过滤、脱敏并将越权迁移降为移除通知', async () => {

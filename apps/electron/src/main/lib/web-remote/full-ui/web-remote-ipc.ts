@@ -26,18 +26,31 @@ const HEAVY_SESSION_BASELINE = process.env.NODE_ENV !== 'production' && process.
 type InvokeHandler = (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
 type EventHandler = (event: IpcMainEvent, ...args: unknown[]) => void
 
+interface IpcClientMetrics {
+  connectionId: string
+  deviceId: string
+  startedAt: number
+  byChannel: Record<string, { calls: number; responseUtf8Bytes: number; appFramingBytes: number; base64PayloadBytes: number; appSentBytes: number; estimatedDeflateRawBytes: number; elapsedMs: number; chunks: number; bufferedAmountPeak: number }>
+  bufferedAmountPeak: number
+  eventBytesByChannel: Record<string, number>
+  backpressureDroppedEvents: number
+  resyncCount: number
+}
+
 interface IpcClient {
   ws: WebSocket
   deviceId: string
+  connectionId: string
   confirmations: Map<string, { token: string; expiresAt: number }>
   needsResync: boolean
   resyncTimer?: ReturnType<typeof setTimeout>
-  metrics: { startedAt: number; byChannel: Record<string, { calls: number; responseUtf8Bytes: number; appFramingBytes: number; base64PayloadBytes: number; appSentBytes: number; estimatedDeflateRawBytes: number; elapsedMs: number; chunks: number; bufferedAmountPeak: number }> }
+  metrics: IpcClientMetrics
 }
 
 export interface WebRemoteMetricsSnapshot {
   generatedAt: string
-  devices: Record<string, IpcClient['metrics']>
+  /** Snapshots are keyed by unique connectionId; each value retains its authenticated deviceId. */
+  devices: Record<string, IpcClientMetrics>
 }
 
 const remoteMetrics: WebRemoteMetricsSnapshot = { generatedAt: new Date().toISOString(), devices: {} }
@@ -341,23 +354,33 @@ export class WebRemoteIpcBridge {
   private *invokeHandlersKeys(): Iterable<string> { yield* this.invokeHandlers.keys() }
   private *eventHandlersKeys(): Iterable<string> { yield* this.eventHandlers.keys() }
 
-  attachWebSocket(ws: WebSocket, deviceId: string): void {
-    const metrics: IpcClient['metrics'] = { startedAt: Date.now(), byChannel: {} }
-    const client: IpcClient = { ws, deviceId, confirmations: new Map(), needsResync: false, metrics }
+  attachWebSocket(ws: WebSocket, deviceId: string): string {
+    const connectionId = randomBytes(12).toString('hex')
+    const metrics: IpcClientMetrics = {
+      connectionId, deviceId, startedAt: Date.now(), byChannel: {}, bufferedAmountPeak: 0,
+      eventBytesByChannel: {}, backpressureDroppedEvents: 0, resyncCount: 0,
+    }
+    const client: IpcClient = { ws, deviceId, connectionId, confirmations: new Map(), needsResync: false, metrics }
     this.clients.add(client)
-    remoteMetrics.devices[deviceId] = metrics
+    remoteMetrics.devices[connectionId] = metrics
     const flushMetrics = () => {
       const channels = Object.entries(metrics.byChannel)
-      if (channels.length === 0) return
+      const eventBytesTop5 = Object.entries(metrics.eventBytesByChannel).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([channel, bytes]) => ({ channel, bytes }))
+      if (channels.length === 0 && eventBytesTop5.length === 0 && metrics.backpressureDroppedEvents === 0 && metrics.resyncCount === 0 && metrics.bufferedAmountPeak === 0) return
       const windowId = randomBytes(6).toString('hex')
       const deviceTag = createHash('sha256').update(deviceId).digest('hex').slice(0, 10)
       for (const [channel, metric] of channels) {
-        recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 1, w: windowId, d: deviceTag, c: channel, n: metric.calls, ms: metric.elapsedMs }))
-        recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 1, w: windowId, d: deviceTag, c: channel, responseUtf8: metric.responseUtf8Bytes, appFraming: metric.appFramingBytes, base64: metric.base64PayloadBytes, appSent: metric.appSentBytes }))
-        recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 1, w: windowId, d: deviceTag, c: channel, estimatedDeflateRaw: metric.estimatedDeflateRawBytes, wireBytes: null, chunks: metric.chunks, bufferedPeak: metric.bufferedAmountPeak }))
+        recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 2, w: windowId, d: deviceTag, connectionId, c: channel, n: metric.calls, ms: metric.elapsedMs }))
+        recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 2, w: windowId, d: deviceTag, connectionId, c: channel, responseUtf8: metric.responseUtf8Bytes, appFraming: metric.appFramingBytes, base64: metric.base64PayloadBytes, appSent: metric.appSentBytes }))
+        recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 2, w: windowId, d: deviceTag, connectionId, c: channel, estimatedDeflateRaw: metric.estimatedDeflateRawBytes, wireBytes: null, chunks: metric.chunks, bufferedPeak: metric.bufferedAmountPeak }))
       }
+      recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 2, w: windowId, d: deviceTag, connectionId, bufferedAmountPeak: metrics.bufferedAmountPeak, eventBytesTop5, backpressureDroppedEvents: metrics.backpressureDroppedEvents, resyncCount: metrics.resyncCount }))
       metrics.startedAt = Date.now()
       metrics.byChannel = {}
+      metrics.bufferedAmountPeak = 0
+      metrics.eventBytesByChannel = {}
+      metrics.backpressureDroppedEvents = 0
+      metrics.resyncCount = 0
     }
     const metricsTimer = setInterval(flushMetrics, 30_000)
     metricsTimer.unref?.()
@@ -365,14 +388,16 @@ export class WebRemoteIpcBridge {
       flushMetrics()
       clearInterval(metricsTimer)
       if (client.resyncTimer) clearTimeout(client.resyncTimer)
-      recordPersonalInfo('Web Remote 计量', JSON.stringify({ deviceId, event: 'close', code, reason: reason.toString().slice(0, 120) }))
+      delete remoteMetrics.devices[connectionId]
+      recordPersonalInfo('Web Remote 计量', JSON.stringify({ deviceId, connectionId, event: 'close', code, reason: reason.toString().slice(0, 120) }))
     })
     this.ensureWrapped()
-    this.sendRaw(ws, JSON.stringify({ type: 'ready' }))
+    this.sendForClient(client, JSON.stringify({ type: 'ready' }))
     ws.on('message', (raw) => { void this.handleMessage(client, raw.toString()) })
     const remove = () => { this.clients.delete(client) }
     ws.once('close', remove)
     ws.once('error', remove)
+    return connectionId
   }
 
   private ensureWrapped(): void {
@@ -528,7 +553,9 @@ export class WebRemoteIpcBridge {
   }
 
   private bufferedAmount(client: IpcClient): number {
-    return (client.ws as unknown as { bufferedAmount?: number }).bufferedAmount ?? 0
+    const amount = (client.ws as unknown as { bufferedAmount?: number }).bufferedAmount ?? 0
+    client.metrics.bufferedAmountPeak = Math.max(client.metrics.bufferedAmountPeak, amount)
+    return amount
   }
 
   private scheduleResync(client: IpcClient): void {
@@ -537,7 +564,8 @@ export class WebRemoteIpcBridge {
       client.resyncTimer = undefined
       if (client.ws.readyState !== WebSocket.OPEN || !client.needsResync) return
       if (this.bufferedAmount(client) < EVENT_RESYNC_LOW_WATER_BYTES) {
-        this.sendRaw(client.ws, JSON.stringify({ type: 'resync' }))
+        this.sendForClient(client, JSON.stringify({ type: 'resync' }))
+        client.metrics.resyncCount++
         client.needsResync = false
         return
       }
@@ -584,11 +612,13 @@ export class WebRemoteIpcBridge {
       if (client.ws.readyState !== WebSocket.OPEN) continue
       const bufferedAmount = this.bufferedAmount(client)
       if (droppableDelta && bufferedAmount > EVENT_BACKPRESSURE_BYTES) {
+        client.metrics.backpressureDroppedEvents++
         client.needsResync = true
         this.scheduleResync(client)
         continue
       }
-      this.sendRaw(client.ws, message)
+      this.sendForClient(client, message)
+      client.metrics.eventBytesByChannel[channel] = (client.metrics.eventBytesByChannel[channel] ?? 0) + Buffer.byteLength(message, 'utf8')
     }
   }
 
@@ -625,7 +655,7 @@ export class WebRemoteIpcBridge {
       const result = encodeWebRemoteValue(this.filterResult(channel, SLIM_SESSION_LIST_CHANNELS.has(channel) ? slimWebRemoteSessionMeta(value) : value, args))
       const response = JSON.stringify({ type: 'response', id, ok: true, value: result })
       metricRawBytes = Buffer.byteLength(response)
-      const bufferedPeak = this.sendRaw(client.ws, response)
+      const bufferedPeak = this.sendForClient(client, response)
       this.recordIpcMetric(client, channel, response, metricRawBytes, Date.now() - metricStart, bufferedPeak)
     } catch (error) {
       try { this.send(client, { type: 'response', id, ok: false, error: serializeError(error) }) }
@@ -633,7 +663,12 @@ export class WebRemoteIpcBridge {
     }
   }
 
-  private send(client: IpcClient, message: unknown): void { if (client.ws.readyState === WebSocket.OPEN) this.sendRaw(client.ws, JSON.stringify(message)) }
+  private send(client: IpcClient, message: unknown): void { if (client.ws.readyState === WebSocket.OPEN) this.sendForClient(client, JSON.stringify(message)) }
+  private sendForClient(client: IpcClient, message: string): number {
+    const peak = this.sendRaw(client.ws, message)
+    client.metrics.bufferedAmountPeak = Math.max(client.metrics.bufferedAmountPeak, peak)
+    return peak
+  }
   private recordIpcMetric(client: IpcClient, channel: string, message: string, rawBytes: number, elapsedMs: number, bufferedPeak: number): void {
     const bytes = Buffer.from(message, 'utf8')
     let chunkCount = 1
