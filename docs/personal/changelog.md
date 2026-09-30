@@ -1056,3 +1056,9 @@
 - Web Remote full-ui 对 `agent:send-message` 特殊处理：调用原 handler 后，1.5 秒内结束则照常返回；1.5 秒内 reject 原样返回；仍运行则返回 `{ accepted: true }`，并消费后续 rejection、记 `[WARN]`。其他 IPC 通道维持原 30 秒超时。
 - 未改 `ipc.ts` 或桌面 renderer。核对 `AgentView.tsx`：`sendAgentMessage()` 的 resolve 值未读取，仅挂接 `.catch()` 处理发送错误，因此不依赖成功返回值；长运行错误继续由既有 Agent 事件呈现。
 - 定向单测 `apps/electron/src/main/lib/web-remote/full-ui/full-ui.test.ts`：**10 pass / 0 fail**，覆盖立即拒绝、窗口内完成及窗口外迟到拒绝；后续拒绝被消费。`git diff --check` 通过。未运行全量测试（留待收尾）。
+
+## 2026-10-01: 手机发送超时后核对会话记录
+
+- 手机 shim 将 `agent:send-message` 的 IPC 响应与分块停滞超时单独延长到 **60 秒**；其他通道保持 **35 秒**。WebSocket 断开仍立即拒绝在途请求。
+- 发送因超时/连接不确定而失败时，先显示“发送确认较慢，正在核对…”，然后对本会话调用一次 `agent:get-sdk-messages`（尾部预算 **128 KiB**），只检查最近返回的用户消息是否包含本次文本前 **200** 字。找到则撤掉提示并按已接收处理；未找到或核对失败则提示“可能未送达，请刷新确认后再重发”。确定性拒绝仍保留原错误提示，`denied` / `needsConfirm` 分支不变。
+- 新增 `web-electron-shim.test.ts` 覆盖找到、未找到、核对失败三种路径；连同步骤 A 定向测试 **13 pass / 0 fail**。全量测试与构建留待收尾。

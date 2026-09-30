@@ -32,10 +32,12 @@ let livenessCheck: Promise<WebSocket> | null = null
 /** 连接空闲超过该时长后，发请求前先 ping 确认连接仍活着（iOS 切后台后常出现“看似 OPEN 实已断开”的连接）。 */
 const LIVENESS_IDLE_MS = 10_000
 const PING_TIMEOUT_MS = 3_000
-const pending = new Map<string, { resolve(value: unknown): void; reject(error: unknown): void; timer: number; ws?: WebSocket }>()
+const pending = new Map<string, { resolve(value: unknown): void; reject(error: unknown): void; timer: number; ws?: WebSocket; timeoutMs?: number }>()
 const responseChunks = new Map<string, { requestId?: string; total: number; parts: string[]; received: number }>()
 const inFlightReadRequests = new Map<string, Promise<unknown>>()
 const RESPONSE_TIMEOUT_MS = 35_000
+const SEND_MESSAGE_RESPONSE_TIMEOUT_MS = 60_000
+const SEND_VERIFY_HISTORY_BUDGET_BYTES = 128 * 1024
 
 function dataSaverEnabled(): boolean {
   if (typeof window === 'undefined') return false
@@ -55,7 +57,7 @@ function consumeChunk(message: { id?: string; requestId?: string; seq?: number; 
   if (transfer.total !== message.total || transfer.requestId !== message.requestId) { responseChunks.delete(message.id); return null }
   if (transfer.parts[message.seq!] === undefined) { transfer.parts[message.seq!] = message.data; transfer.received++ }
   const request = message.requestId ? pending.get(message.requestId) : undefined
-  if (request) { window.clearTimeout(request.timer); request.timer = window.setTimeout(() => { pending.delete(message.requestId!); responseChunks.delete(message.id!); request.reject(new Error('IPC 请求超时: response chunks stalled')) }, RESPONSE_TIMEOUT_MS) }
+  if (request) { window.clearTimeout(request.timer); request.timer = window.setTimeout(() => { pending.delete(message.requestId!); responseChunks.delete(message.id!); request.reject(new Error('IPC 请求超时: response chunks stalled')) }, request.timeoutMs ?? RESPONSE_TIMEOUT_MS) }
   if (transfer.received !== transfer.total) return null
   responseChunks.delete(message.id)
   const binary = atob(transfer.parts.join(''))
@@ -222,18 +224,71 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   window.addEventListener('online', revalidate)
 }
 
-function showSendFailedToast(): void {
-  if (typeof document === 'undefined' || !document.body) return
-  const existing = document.querySelector('[data-web-remote-send-failed]')
-  if (existing) existing.remove()
+function showSendStatusToast(message: string, tone: 'neutral' | 'warning' | 'error'): HTMLElement | null {
+  if (typeof document === 'undefined' || !document.body) return null
+  document.querySelector('[data-web-remote-send-status]')?.remove()
+  document.querySelector('[data-web-remote-send-failed]')?.remove()
   const toast = document.createElement('div')
-  toast.setAttribute('data-web-remote-send-failed', 'true')
-  toast.setAttribute('role', 'alert')
-  toast.textContent = '消息未送达 Mac，请检查连接后重新发送（刷新页面可查看实际记录）'
-  toast.style.cssText = 'position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top) + 64px);z-index:2147483647;padding:12px 14px;border-radius:12px;background:#b42318;color:#fff;font-size:14px;line-height:1.4;box-shadow:0 6px 20px rgba(0,0,0,.25)'
+  toast.setAttribute('data-web-remote-send-status', tone)
+  toast.setAttribute('role', 'status')
+  toast.textContent = message
+  const background = tone === 'error' ? '#b42318' : tone === 'warning' ? '#8a5a00' : '#475467'
+  toast.style.cssText = `position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top) + 64px);z-index:2147483647;padding:12px 14px;border-radius:12px;background:${background};color:#fff;font-size:14px;line-height:1.4;box-shadow:0 6px 20px rgba(0,0,0,.25)`
   toast.addEventListener('click', () => toast.remove())
   document.body.appendChild(toast)
-  window.setTimeout(() => toast.remove(), 8_000)
+  if (tone !== 'neutral') window.setTimeout(() => toast.remove(), 8_000)
+  return toast
+}
+
+function showSendFailedToast(): void {
+  showSendStatusToast('消息未送达 Mac，请检查连接后重新发送（刷新页面可查看实际记录）', 'error')
+}
+
+function userMessageText(message: unknown): string {
+  if (typeof message === 'string') return message
+  if (!message || typeof message !== 'object') return ''
+  if (Array.isArray(message)) return message.map(userMessageText).join('')
+  const record = message as Record<string, unknown>
+  if (typeof record.text === 'string') return record.text
+  if (typeof record.content === 'string') return record.content
+  if (Array.isArray(record.content)) return userMessageText(record.content)
+  if (Array.isArray(record.parts)) return userMessageText(record.parts)
+  return ''
+}
+
+export type AgentSendVerification = 'found' | 'not-found' | 'check-failed'
+
+export async function verifySentAgentMessage(sentText: string, loadHistory: () => Promise<unknown>): Promise<AgentSendVerification> {
+  try {
+    const history = await loadHistory()
+    const needle = sentText.slice(0, 200)
+    if (!needle || !Array.isArray(history)) return 'not-found'
+    const found = history.some((message) => {
+      if (!message || typeof message !== 'object' || (message as { role?: unknown }).role !== 'user') return false
+      return userMessageText((message as Record<string, unknown>).content).includes(needle)
+    })
+    return found ? 'found' : 'not-found'
+  } catch {
+    return 'check-failed'
+  }
+}
+
+function isAmbiguousSendFailure(error: unknown): boolean {
+  const message = typeof error === 'string' ? error : error instanceof Error ? error.message : (error as { message?: unknown } | null)?.message
+  return typeof message === 'string' && /超时|连接已断开|连接失败|WebSocket.*(?:closed|open)|not open/i.test(message)
+}
+
+async function verifyAndNotifySendFailure(input: { sessionId?: unknown; userMessage?: unknown }): Promise<boolean> {
+  const sentText = typeof input.userMessage === 'string' ? input.userMessage : ''
+  const status = showSendStatusToast('发送确认较慢，正在核对…', 'neutral')
+  const result = await verifySentAgentMessage(sentText, () => invokeWithToken('agent:get-sdk-messages', [input.sessionId, { budgetBytes: SEND_VERIFY_HISTORY_BUDGET_BYTES }]))
+  if (result === 'found') { status?.remove(); return true }
+  if (status) {
+    status.textContent = '可能未送达，请刷新确认后再重发'
+    status.setAttribute('data-web-remote-send-status', 'warning')
+    window.setTimeout(() => status.remove(), 8_000)
+  } else showSendStatusToast('可能未送达，请刷新确认后再重发', 'warning')
+  return false
 }
 
 async function invokeWithToken(channel: string, args: unknown[], confirmToken?: string): Promise<unknown> {
@@ -244,11 +299,12 @@ async function invokeWithToken(channel: string, args: unknown[], confirmToken?: 
     : args
   const payload = JSON.stringify({ type: 'invoke', id, channel, args: requestArgs.map(encode), ...(confirmToken ? { confirmToken } : {}) })
   const response = await new Promise<unknown>((resolve, reject) => {
+    const timeoutMs = channel === 'agent:send-message' ? SEND_MESSAGE_RESPONSE_TIMEOUT_MS : RESPONSE_TIMEOUT_MS
     const timer = window.setTimeout(() => {
       pending.delete(id)
       reject(new Error(`IPC 请求超时: ${channel}`))
-    }, RESPONSE_TIMEOUT_MS)
-    pending.set(id, { resolve, reject, timer, ws })
+    }, timeoutMs)
+    pending.set(id, { resolve, reject, timer, ws, timeoutMs })
     ws.send(payload)
   })
   return channel === 'agent:get-sdk-messages' ? normalizeHistoryWindow(response, typeof args[0] === 'string' ? args[0] : undefined) : response
@@ -338,7 +394,12 @@ async function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
     return await invokeWithToken(channel, args)
   } catch (error) {
     const access = error as { denied?: boolean; needsConfirm?: boolean; summary?: string; token?: string }
-    if (channel === 'agent:send-message' && !access?.denied && !access?.needsConfirm) showSendFailedToast()
+    if (channel === 'agent:send-message' && !access?.denied && !access?.needsConfirm) {
+      if (isAmbiguousSendFailure(error)) {
+        const input = args[0] && typeof args[0] === 'object' ? args[0] as { sessionId?: unknown; userMessage?: unknown } : {}
+        if (await verifyAndNotifySendFailure(input)) return { accepted: true }
+      } else showSendFailedToast()
+    }
     if (access?.denied) {
       console.warn(`[Web Remote full-ui] 已安全忽略不可用通道: ${channel}`)
       return safeDeniedValue(channel)
