@@ -1095,3 +1095,10 @@
 
 - 全量 `bun test`：**657 pass / 0 fail**（98 files，1,600 assertions）；workspace `bun run typecheck` 通过；Electron `build:main`、`build:renderer`、`build:web-preload` 均通过。Renderer 构建保留已有 >500 KB chunk 警告。
 - 最终 `git diff --check` 通过，分支工作树干净。未 merge、未 push、未打包或安装；正式 Proma PID `28971` 未变。开发启动器仍运行，17889/5173 在线，临时 Serve 8443 仍指向 17889；`~/.proma-dev` 会话数核对为 **830**。
+
+## 2026-10-01: Web Remote 重连由侧栏独占列表快照
+
+- `recoverWebRemoteState()` 不再调用 `fetchAndMergeAgentSessionSnapshot()` 的全量 `agent:list-sessions`，也不再重复调用 `restoreStoppedSessions()` 的 active list。停止态只在 renderer 初始化时用 active list 恢复；WebSocket 重连不销毁 atom 状态。重连列表唯一权威由 `LeftSidebar` 的 `proma-web-remote-reconnected` resync 按当前视图刷新：active 视图拉 active，归档视图拉 active + archived。未改少见未知会话等其他全量刷新点；桌面不使用此重连回调，归档视图也不会被 active-only recover 快照覆盖。
+- 新增 `useGlobalAgentListeners.recovery.test.ts`，验证恢复函数只还原运行快照、排队消息与待处理请求，不调用 full/active/archive 列表；**1 pass / 0 fail**。一次 `iphone:session-sync`（3 Mbps/1 Mbps/50 ms）通过：两次断线重连均恢复成功，耗时 **4,596 ms / 4,353 ms**，UI 的外部改名/新建/删除恢复断言通过；suite 结束配对撤销、Chrome/profile 清理通过。
+- harness 对同一设备的完整 session-sync 生命周期按 metrics 窗口汇总，而不是按重连动作切片：全 suite 的 `agent:list-sessions` 共 **6 次**、每次约 **459.8–460.5 KB**；`agent:list-active-sessions` 共 **18 次**、每次约 **66.2–66.9 KB**。这些列表调用含 session-sync 的初始读取、测试操作及未知会话等既有路径，不能全部归因给重连；本次无法从 harness 汇总值单独分离每个重连瞬间的请求数。代码路径已确认恢复函数本身列表调用 **0 次**，sidebar 的 reconnect listener 每次只触发当前视图的一次权威刷新。
+- **830 条 dev 数据 active 投影仅测量**：未归档 **105** 条；删除 `delegationGoal`、`piSessionFile`、`piEntryBindings` 后，字段投影共 **65,992 B**（按每项 JSON UTF-8 字节求和，不含数组逗号/外层 IPC envelope），平均 **628.50 B/会话**。按实际发送投影逐字段累计 key/value UTF-8 字节的前五名：`title` **6,587 B**、`workspaceId` **5,460 B**、`sdkSessionId` **5,406 B**、`channelId` **5,250 B**、`id` **4,515 B**。运行 metrics 的多次 active 请求每次 responseUtf8 约 **66.2–66.9 KB**，与投影计算相符。正式版简报基准是 934 条数据下每次 1 次全量列表（约 520 KB）+ 1 次 active（约 340 KB）；不同数据集不作精确百分比比较。`~/.proma-dev` 会话索引测试前后仍为 **830**。

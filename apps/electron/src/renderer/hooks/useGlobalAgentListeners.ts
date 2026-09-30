@@ -1196,12 +1196,14 @@ export function useGlobalAgentListeners(): void {
     }
 
     const recoverWebRemoteState = async (): Promise<void> => {
+      // The sidebar owns the authoritative active/archive list resync on the same reconnect event.
+      // Keep this recovery limited to runtime state so it neither duplicates a list request nor
+      // replaces an archive view with an active-only snapshot. Stopped-session state is restored
+      // on renderer initialization above and remains in memory across a WebSocket reconnect.
       await Promise.all([
         restoreActiveSnapshots(),
         restoreQueuedMessages(),
         restorePendingRequests(),
-        restoreStoppedSessions(),
-        fetchAndMergeAgentSessionSnapshot(),
       ])
       const activeSessionId = store.get(activeSessionIdAtom)
       if (activeSessionId) {
