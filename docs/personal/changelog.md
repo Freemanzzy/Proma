@@ -971,3 +971,12 @@
 - `mobile-harness.mjs` 对每个专项显式记录动作前 exceptionCount；结果拆成 `preActionExceptionCategories` 与 `newActionExceptions`。只用精确的 WebAssembly/CSP 类别标注既有初始化异常；**没有**按异常文本过滤动作期间的任何异常。新增单测证明动作期间再次出现相同 WebAssembly/CSP 异常仍计为新异常，并与其他 JS 异常一起失败。
 - 已保存的 0.5 Mbps stress 结果显示真实目标历史加载期间新增异常为 0；执行前页面存在 1–2 个已知 WebAssembly.instantiate/CSP 初始化异常。它们未通过 `unsafe-eval` 或放宽 CSP 绕过；当前开发服务不可安全启动，故本 commit 不重复运行 E2E、不将该历史结果标为 3 Mbps 验收。
 - 验证：`bun test scripts/personal/mobile-harness.test.mjs` **1 pass / 0 fail**；`node --check` 与 `bash -n` 通过。仅调整 harness/test 汇总，不改开发进程清理或启动/停止逻辑。
+
+## 2026-09-30: 会话同步离线收尾与验证边界
+
+- 分阶段提交（均保留在 `fix/mobile-session-sync-20260929`，未合并/push）：受限导入 `a0c97d09`、metadata epoch/classification/clearedFields `4543e554`、revision journal/tombstone/snapshot merge `55d4d4ae`、harness exception baseline `273d9b3b`。
+- 最终离线验证：全量 `bun test` **643 pass / 0 fail**（97 files，1,560 assertions）；`bun run typecheck` 全 workspace 通过；`build:main`、`build:renderer`、`build:web-preload` 通过。Renderer 保留已知 >500 KB chunk 警告；`git diff --check` 通过。
+- 新版 harness 单测验证：仅按动作开始前计数确定基线；所有之后异常（含同类 WebAssembly/CSP）都计为 action exception。项目当前已知初始化类目为 `WebAssembly.instantiate` 被现有 `script-src` CSP 拒绝；不加 `unsafe-eval`、不改变 CSP。
+- **3 Mbps 真实备份/双端 E2E 未完成**：已安全确认开发实例端口 17889/5173 不监听；临时 8443 Serve 路由已关闭。独立开发进程安全启动任务仍未就绪；根据用户指示没有调用旧 `mobile-preview.sh start`/`dev.sh` 链，没有修改或清理该独立任务。不得将此前 0.5 Mbps压力数据或 Chromium raw-IPC harness 当作当前3 Mbps双端实测。
+- **本轮未测**：独立桌面进程/实体手机各操作的3 Mbps传播延迟、真实跨 workspace move E2E、Smoke/附件回答（隔离 dev 未导入模型渠道/钥匙串）、源备份外部附件/旧 Pi artifact 可用性、真机 iOS Safari。workspace 越权由 full-ui security 单测和单工作区端到端拒绝探针覆盖；子会话/自动任务分类字段由投影与 renderer reducer 单测覆盖。
+- 将新增触碰的上游文件、逐文件增减行数与理由追加至本机 `.context/proma-personal/upstream-surface/phase1-2026-09-29.md`（不入库）；`docs/personal/web-remote.md` 更新为 3 Mbps 是当前目标、0.5 Mbps仅为压力测试。

@@ -191,3 +191,4 @@ Web Remote WebSocket 为超过 16 KB 的消息启用 per-message deflate；服�
 - Renderer 的 revision journal 记录每次增量；所有列表快照写入使用请求开始时的 revision，并重放请求进行期间到达的增量。恢复时按 `epoch`/`sequence` 检查顺序，epoch 变化时从新进程序号重新接受；空闲 WebSocket 重连会回取 active/archive 权威快照。归档视图、active 列表、标签与删除后选中态共用增量路径；草稿保持隐藏，删除与工作区移出都清理本地条目。
 - 删除标记与增量 journal 均最多保留 8,192 条。若非常旧的 snapshot 在 journal 超限后才返回，将丢弃该 stale snapshot、保留当前列表并等待下一次权威同步，不用不完整历史覆盖现有状态；同 ID 的后续合法 upsert 会解除 tombstone。单测覆盖旧快照晚到改名/删除、epoch 重启、移出范围和恢复、清除字段、cursor/journal 两种消费顺序及保留上限 fail-closed。
 - 端到端状态：测试只在此前受限开发实例上由 Chromium harness 发 raw IPC 模拟另一个客户端，证实创建/改名/归档恢复/删除更新可见，断线后回补；该操作延迟不是独立桌面进程或真手机 3 Mbps 测量。当前安全启动入口未就绪、17889 无监听、8443 已关闭，故当前分支没有新的 3 Mbps 双端 E2E 或真实跨工作区移动操作；跨工作区权限目前由manager/full-ui单测覆盖。
+- 最终离线状态核对（2026-09-30）：开发端口 17889/5173 无监听，临时 Tailscale Serve 8443 已关闭；只保留安装版 17888 的既有 Serve 路由，未尝试启动或停止任何应用进程。
