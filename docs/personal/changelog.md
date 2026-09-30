@@ -1010,3 +1010,8 @@
 - `evaluateHarnessExceptionWindow()` 统一将动作开始前的异常作为单独基线，只有动作期间新增异常使 session-sync、real-history、idle-session-sync 与大会话 suite 失败。结果 JSON 分开记录基线数量/类别与新增数量/类别；新增同类 WebAssembly/CSP 异常仍算失败。
 - CDP `Network.responseReceived` 仅按结构化 HTTP status=429 记录服务响应；可读文本识别仅接受明确的 `HTTP 429`、`status 429` 或 `Too Many Requests`，不再用裸 `429` 子串。新增回归证明含 `429` 子串的会话 UUID 不会误报。
 - 验证：Harness 单测 **4 pass / 0 fail**（含“基线 1、新增 0→通过；基线 1、新增 1 个同类 WASM→失败”）；`node --check`、`bash -n`、`git diff --check` 通过。实际 3 Mbps suite 尚待重跑。
+
+## 2026-09-30: 等待初始化异常静默后再开始动作计量
+
+- 修复后首个 3 Mbps 重跑观察到 2 条动作前 CSP 类异常及 1 条出现在过早基线之后的同类异常。没有按异常文本豁免；将 session-sync 的动作基线移至侧栏/工作区设置完成后，并在 real-history、idle-session-sync 与大会话 suite 的动作前等待有界异常静默期。任何静默期后出现的同类 CSP 异常仍然失败。
+- 新增单测验证延迟到达的初始化异常会纳入动作基线；Harness 单测 **5 pass / 0 fail**，`node --check`、`bash -n` 与 `git diff --check` 通过。

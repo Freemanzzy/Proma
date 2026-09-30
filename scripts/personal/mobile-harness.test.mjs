@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { evaluateHarnessExceptionWindow, isHttp429Signal, measureHarnessExceptionWindow, resolveHarnessNetworkProfile } from './mobile-harness.mjs'
+import { evaluateHarnessExceptionWindow, isHttp429Signal, measureHarnessExceptionWindow, resolveHarnessNetworkProfile, waitForHarnessExceptionQuietPeriod } from './mobile-harness.mjs'
 
 test('only the pre-action prefix is baseline; later CSP and other exceptions remain failures', () => {
   const wasmCsp = {
@@ -28,6 +28,14 @@ test('baseline exceptions do not fail but any same-category action exception doe
   expect(repeatedWasmDuringAction.passed).toBe(false)
   expect(repeatedWasmDuringAction.newActionExceptions).toBe(1)
   expect(repeatedWasmDuringAction.actionCategories).toEqual(['WebAssembly.instantiate blocked by current script-src CSP'])
+})
+
+test('delayed initialization exceptions settle before the action baseline is captured', async () => {
+  const harness = { exceptions: [{ description: 'startup exception' }] }
+  setTimeout(() => harness.exceptions.push({ description: 'late startup exception' }), 30)
+  const baseline = await waitForHarnessExceptionQuietPeriod(harness, 30, 300)
+  expect(baseline.baselineCount).toBe(2)
+  expect(baseline.settledAfterMs).toBeGreaterThanOrEqual(100)
 })
 
 test('429 detection only accepts HTTP status fields or explicit status/error phrases', () => {

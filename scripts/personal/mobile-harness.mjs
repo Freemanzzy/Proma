@@ -59,6 +59,22 @@ export function evaluateHarnessExceptionWindow(exceptions, baselineCount) {
   return { ...window, newActionExceptions: window.actionCount, passed: window.actionCount === 0 }
 }
 
+/** Finish delayed page-start exceptions before defining a suite's action baseline. */
+export async function waitForHarnessExceptionQuietPeriod(harness, quietMs = 800, maxWaitMs = 4_000) {
+  const startedAt = Date.now()
+  let count = harness.exceptions.length
+  let lastChangedAt = startedAt
+  while (Date.now() - startedAt < maxWaitMs) {
+    await delay(100)
+    if (harness.exceptions.length !== count) {
+      count = harness.exceptions.length
+      lastChangedAt = Date.now()
+    }
+    if (Date.now() - lastChangedAt >= quietMs) break
+  }
+  return { baselineCount: harness.exceptions.length, settledAfterMs: Date.now() - startedAt }
+}
+
 /** Match only structured HTTP status fields or explicit 429 status/error phrases, never bare digits. */
 export function isHttp429Signal(value) {
   if (value && typeof value === 'object') {
@@ -1184,7 +1200,8 @@ async function runIdleSessionSync(harness, options, result, deviceId) {
   // Let initial mount/presence resolution finish before starting the true idle window.
   await delay(8_000)
   const baselineSnapshot = await fetchMetrics()
-  const exceptionsBeforeIdle = harness.exceptions.length
+  const idleBaseline = await waitForHarnessExceptionQuietPeriod(harness)
+  const exceptionsBeforeIdle = idleBaseline.baselineCount
   const windows = new Map()
   const startedAt = Date.now()
   while (Date.now() - startedAt < 180_000) {
@@ -1230,6 +1247,7 @@ async function runIdleSessionSync(harness, options, result, deviceId) {
     newActionExceptions: exceptionWindow.newActionExceptions,
     newActionExceptionCategories: exceptionWindow.actionCategories,
     exceptionsBeforeIdle: exceptionWindow.baselineCount,
+    baselineSettledAfterMs: idleBaseline.settledAfterMs,
   }
   if (result.idleSessionSync.elapsedMs < 180_000 || result.idleSessionSync.listRequests > 0 || result.idleSessionSync.responseUtf8Bytes > 0 || !exceptionWindow.passed) {
     throw new Error(`空闲列表同步验收失败：${JSON.stringify(result.idleSessionSync)}`)
@@ -1240,7 +1258,6 @@ async function runSessionSync(harness, options, result) {
   const networkProfile = options.networkProfile
   await harness.client.command('Network.enable')
   await harness.client.command('Network.emulateNetworkConditions', { offline: false, latency: networkProfile.latencyMs, downloadThroughput: networkProfile.downloadThroughput, uploadThroughput: networkProfile.uploadThroughput, connectionType: networkProfile.connectionType })
-  const exceptionsBeforeSessionSync = harness.exceptions.length
   // 验证停止周期拉取后，会话列表在本端操作与断线重连后仍正确同步（只操作本次新建的会话）。
   const sidebarHas = (text) => harness.client.evaluate(`(() => {const root=document.querySelector('[data-web-remote-sidebar="left"]');return !!root&&(root.innerText||'').includes(${JSON.stringify(text)})})()`)
   const waitSidebar = async (text, present, timeoutMs) => {
@@ -1259,6 +1276,9 @@ async function runSessionSync(harness, options, result) {
   const workspace = Array.isArray(workspaces) ? workspaces[0] : null
   if (!workspace?.id) throw new Error('远程可见工作区为空，拒绝在未授权工作区创建测试会话')
   steps.visibleWorkspaceCount = workspaces.length
+  const actionBaseline = await waitForHarnessExceptionQuietPeriod(harness)
+  const exceptionsBeforeSessionSync = actionBaseline.baselineCount
+  steps.baselineSettledAfterMs = actionBaseline.settledAfterMs
   steps.unauthorizedWorkspaceCreateDenied = await harness.client.evaluate(`window.__PROMA_WEB_REMOTE_INVOKE('agent:create-session', ${quoteJs('web-remote-unauthorized-workspace-probe')}, undefined, 'workspace-not-allowlisted').then(()=>false,error=>error?.denied===true)`)
   const created = await harness.createHarnessSessionRaw(titleA, workspace.id, true)
   // 新建草稿直到明确晋升前不应在侧栏出现；之后只对本次新建的测试会话做可逆 pin/unpin。
@@ -1381,7 +1401,8 @@ async function runRealHistory(harness, options, result, deviceId) {
   await touchAt(harness.client, awayPoint.x, awayPoint.y)
   await waitUntil(harness.client, `document.querySelector('[data-session-switch-id=${quoteJs(away.id)}].agent-session-item-active') !== null`, 10_000)
   await waitUntil(harness.client, 'document.querySelectorAll("[data-message-role]").length === 0', 5_000)
-  const exceptionsBeforeRealHistory = harness.exceptions.length
+  const realHistoryBaseline = await waitForHarnessExceptionQuietPeriod(harness)
+  const exceptionsBeforeRealHistory = realHistoryBaseline.baselineCount
   const point = await harness.client.evaluate(`(() => {const node=document.querySelector('[data-session-switch-id=${quoteJs(sessionId)}]');if(!node)return null;node.scrollIntoView({block:'center'});const r=node.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`)
   if (!point) throw new Error('真实目标会话不在授权侧栏的可见候选中')
   const firstFrameIndex = harness.websocketFramesReceived.length
@@ -1430,6 +1451,7 @@ async function runRealHistory(harness, options, result, deviceId) {
     newActionExceptions: exceptionWindow.newActionExceptions,
     newActionExceptionCategories: exceptionWindow.actionCategories,
     exceptionsBeforeRealHistory: exceptionWindow.baselineCount,
+    baselineSettledAfterMs: realHistoryBaseline.settledAfterMs,
     exceptionsDuringRealHistory: exceptionWindow.newActionExceptions,
     totalPageExceptions: harness.exceptions.length,
   }
@@ -1457,11 +1479,12 @@ async function runHeavySession(harness, options, result, onSyntheticFileCreated)
   if (options.suite === 'cellular') await harness.client.evaluate("localStorage.removeItem('proma-web-remote-data-saver');document.querySelector('[data-web-remote-data-saver]')?.click()")
   const firstFrameIndex = harness.websocketFramesReceived.length
   const firstNetworkIndex = harness.websocketDataReceived.length
-  const exceptionStart = harness.exceptions.length
-  const startedAt = Date.now()
   await harness.openDrawer()
   const heavySessionPoint = await harness.client.evaluate(`(() => {const n=document.querySelector('[data-session-switch-id=${quoteJs(heavy.id)}]');if(!n)return null;n.scrollIntoView({block:'center'});const r=n.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`)
   if (!heavySessionPoint) throw new Error(`新建的大会话未出现在侧栏：${heavy.id}`)
+  const heavyBaseline = await waitForHarnessExceptionQuietPeriod(harness)
+  const exceptionStart = heavyBaseline.baselineCount
+  const startedAt = Date.now()
   await touchAt(harness.client, heavySessionPoint.x, heavySessionPoint.y)
   await waitUntil(harness.client, `document.querySelector('[data-session-switch-id=${quoteJs(heavy.id)}].agent-session-item-active') !== null`, 10_000)
   const historyVisible = await waitForVisibleHistoryMarker(harness.client, synthetic.visibleMarker, baselineMode ? 40_000 : 20_000)
@@ -1487,6 +1510,8 @@ async function runHeavySession(harness, options, result, onSyntheticFileCreated)
     maxDecodedFrameBytes: frameEvents.reduce((max, item) => Math.max(max, item.payloadBytes), 0),
     cdpEncodedNetworkBytes: encodedNetworkBytes,
     cdpDataReceivedEventCount: networkEvents.length,
+    exceptionsBeforeHeavySession: exceptionWindow.baselineCount,
+    baselineSettledAfterMs: heavyBaseline.settledAfterMs,
     exceptions: exceptionWindow.newActionExceptions,
     newActionExceptions: exceptionWindow.newActionExceptions,
     newActionExceptionCategories: exceptionWindow.actionCategories,
@@ -1760,6 +1785,7 @@ async function main() {
     const preActionExceptionCount = result.realHistory?.exceptionsBeforeRealHistory
       ?? result.idleSessionSync?.exceptionsBeforeIdle
       ?? result.sessionSync?.exceptionsBeforeSessionSync
+      ?? result.heavySession?.exceptionsBeforeHeavySession
       ?? result.pageStartupExceptionCount
       ?? 0
     const exceptionWindow = evaluateHarnessExceptionWindow(harness.exceptions, preActionExceptionCount)
