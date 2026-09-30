@@ -31,6 +31,7 @@ import {
 import { activeViewAtom } from '@/atoms/active-view'
 import { appModeAtom } from '@/atoms/app-mode'
 import { tabsAtom, activeTabIdAtom, openTab } from '@/atoms/tab-atoms'
+import { getAgentSessionMetadataRevision, mergeAgentSessionSnapshotWithChanges } from '@/lib/agent-session-list'
 
 export function AgentRecommendBanner(): React.ReactElement | null {
   const [recommendation, setRecommendation] = useAtom(pendingAgentRecommendationAtom)
@@ -72,9 +73,10 @@ export function AgentRecommendBanner(): React.ReactElement | null {
       // 2. 迁移 Chat 对话记录到新 Agent 会话
       await window.electronAPI.migrateChatToAgent(conversationId, session.id)
 
-      // 3. 刷新会话列表
+      // 3. 刷新会话列表；并发期间到达的 metadata deltas 会在 snapshot 后重放。
+      const snapshotRevision = getAgentSessionMetadataRevision()
       const sessions = await window.electronAPI.listActiveAgentSessions()
-      store.set(agentSessionsAtom, sessions)
+      store.set(agentSessionsAtom, (previous) => mergeAgentSessionSnapshotWithChanges(previous, sessions, snapshotRevision, false))
 
       // 4. 切换到默认工作区（确保 AgentView 能正确显示新会话）
       if (defaultWorkspaceId) {

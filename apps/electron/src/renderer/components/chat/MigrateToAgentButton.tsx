@@ -24,6 +24,7 @@ import {
 import { tabsAtom, activeTabIdAtom, openTab } from '@/atoms/tab-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
 import { appModeAtom } from '@/atoms/app-mode'
+import { getAgentSessionMetadataRevision, mergeAgentSessionSnapshotWithChanges } from '@/lib/agent-session-list'
 
 interface MigrateToAgentButtonProps {
   /** 当前对话 ID */
@@ -59,9 +60,10 @@ export function MigrateToAgentButton({ conversationId }: MigrateToAgentButtonPro
       // 2. 迁移 Chat 对话记录到新 Agent 会话
       await window.electronAPI.migrateChatToAgent(conversationId, session.id)
 
-      // 3. 刷新会话列表
+      // 3. 刷新会话列表；并发期间到达的 metadata deltas 会在 snapshot 后重放。
+      const snapshotRevision = getAgentSessionMetadataRevision()
       const sessions = await window.electronAPI.listActiveAgentSessions()
-      store.set(agentSessionsAtom, sessions)
+      store.set(agentSessionsAtom, (previous) => mergeAgentSessionSnapshotWithChanges(previous, sessions, snapshotRevision, false))
 
       // 4. 切换到默认工作区
       if (defaultWorkspaceId) {

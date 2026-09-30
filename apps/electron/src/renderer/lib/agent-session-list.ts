@@ -1,4 +1,4 @@
-import type { AgentSessionMeta, AgentWorkspace } from '@proma/shared'
+import type { AgentSessionMeta, AgentSessionMetadataChange, AgentWorkspace } from '@proma/shared'
 import type { SessionIndicatorStatus } from '@/atoms/agent-atoms'
 
 interface AgentSessionTreeLike {
@@ -23,6 +23,102 @@ export function sortAgentSessionsByUpdatedAtDesc(
   sessions: readonly AgentSessionMeta[],
 ): AgentSessionMeta[] {
   return [...sessions].sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
+export interface AgentSessionMetadataEventCursor {
+  epoch: string | null
+  sequence: number
+}
+
+/** Accept ordered deltas within one main-process boot and reset when its epoch changes. */
+export function acceptAgentSessionMetadataChange(
+  cursor: AgentSessionMetadataEventCursor,
+  change: AgentSessionMetadataChange,
+): boolean {
+  if (!change || typeof change.epoch !== 'string' || !change.epoch || !Number.isSafeInteger(change.sequence) || change.sequence < 1) return false
+  if (cursor.epoch !== change.epoch) {
+    cursor.epoch = change.epoch
+    cursor.sequence = 0
+  }
+  if (change.sequence <= cursor.sequence) return false
+  cursor.sequence = change.sequence
+  return true
+}
+
+/** Reconnect starts a fresh authority snapshot; the next boot's deltas must be accepted. */
+export function resetAgentSessionMetadataEventCursor(cursor: AgentSessionMetadataEventCursor): void {
+  cursor.epoch = null
+  cursor.sequence = 0
+}
+
+/** Apply a path-free session delta to the current active/archive sidebar cache. */
+export function applyAgentSessionMetadataChange(
+  sessions: readonly AgentSessionMeta[],
+  change: AgentSessionMetadataChange,
+  includeArchived: boolean,
+): AgentSessionMeta[] {
+  const current = sessions.find((session) => session.id === change.session.id)
+  const withoutCurrent = sessions.filter((session) => session.id !== change.session.id)
+  if (change.action === 'remove') return withoutCurrent
+  const updated = { ...current, ...change.session } as AgentSessionMeta
+  for (const field of change.clearedFields ?? []) delete (updated as unknown as Record<string, unknown>)[field]
+  if (updated.isDraft || (!includeArchived && updated.archived)) return withoutCurrent
+  return upsertAgentSession(withoutCurrent, updated)
+}
+
+interface RevisionedAgentSessionMetadataChange {
+  revision: number
+  change: AgentSessionMetadataChange
+}
+
+let agentSessionMetadataRevision = 0
+const agentSessionMetadataJournalCursor: AgentSessionMetadataEventCursor = { epoch: null, sequence: 0 }
+const agentSessionMetadataChangeJournal: RevisionedAgentSessionMetadataChange[] = []
+const deletedAgentSessionRevisions = new Map<string, number>()
+const MAX_SESSION_METADATA_JOURNAL = 8192
+let discardedSessionMetadataRevision = 0
+
+/** Record every accepted IPC delta so concurrent authoritative snapshots can replay it. */
+export function recordAgentSessionMetadataChange(change: AgentSessionMetadataChange): number {
+  if (!acceptAgentSessionMetadataChange(agentSessionMetadataJournalCursor, change)) return agentSessionMetadataRevision
+  const revision = ++agentSessionMetadataRevision
+  if (change.action === 'remove') {
+    deletedAgentSessionRevisions.set(change.session.id, revision)
+    while (deletedAgentSessionRevisions.size > MAX_SESSION_METADATA_JOURNAL) {
+      const oldest = deletedAgentSessionRevisions.keys().next().value as string | undefined
+      if (!oldest) break
+      deletedAgentSessionRevisions.delete(oldest)
+    }
+  } else deletedAgentSessionRevisions.delete(change.session.id)
+  agentSessionMetadataChangeJournal.push({ revision, change })
+  if (agentSessionMetadataChangeJournal.length > MAX_SESSION_METADATA_JOURNAL) {
+    const removed = agentSessionMetadataChangeJournal.splice(0, agentSessionMetadataChangeJournal.length - MAX_SESSION_METADATA_JOURNAL)
+    discardedSessionMetadataRevision = Math.max(discardedSessionMetadataRevision, removed.at(-1)?.revision ?? 0)
+  }
+  return revision
+}
+
+export function getAgentSessionMetadataRevision(): number {
+  return agentSessionMetadataRevision
+}
+
+/** Reconcile a snapshot plus every delta that arrived after that request began. */
+export function mergeAgentSessionSnapshotWithChanges(
+  previous: readonly AgentSessionMeta[],
+  fetched: readonly AgentSessionMeta[],
+  snapshotRevision: number,
+  includeArchived: boolean,
+): AgentSessionMeta[] {
+  // If the event journal wrapped while a very old fetch was pending, fail closed by
+  // keeping the current cache instead of applying a snapshot that cannot be reconciled.
+  let merged = snapshotRevision < discardedSessionMetadataRevision
+    ? sortAgentSessionsByUpdatedAtDesc(previous)
+    : mergeFetchedAgentSessions(previous, fetched)
+  for (const id of deletedAgentSessionRevisions.keys()) merged = merged.filter((session) => session.id !== id)
+  for (const entry of agentSessionMetadataChangeJournal) {
+    if (entry.revision > snapshotRevision) merged = applyAgentSessionMetadataChange(merged, entry.change, includeArchived)
+  }
+  return merged
 }
 
 /** Agent 归档会话的顶层项目分组。 */
@@ -131,6 +227,7 @@ export function upsertAgentSession(
   sessions: readonly AgentSessionMeta[],
   incoming: AgentSessionMeta,
 ): AgentSessionMeta[] {
+  if (deletedAgentSessionRevisions.has(incoming.id)) return sessions.filter((session) => session.id !== incoming.id)
   const existing = sessions.find((session) => session.id === incoming.id)
   const merged: AgentSessionMeta = existing
     ? { ...existing, ...incoming }

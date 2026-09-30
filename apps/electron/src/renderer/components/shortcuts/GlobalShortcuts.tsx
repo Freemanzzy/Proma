@@ -58,7 +58,7 @@ import {
   updateShortcutOverrides,
 } from '@/lib/shortcut-registry'
 import { getFileParentPath } from '@/lib/file-utils'
-import { isDelegationObservationVisible } from '@/lib/agent-session-list'
+import { getAgentSessionMetadataRevision, isDelegationObservationVisible, mergeAgentSessionSnapshotWithChanges } from '@/lib/agent-session-list'
 import { getLastInteractedStopTarget, resolveStopGenerationTarget } from '@/lib/stop-generation-target'
 import { CLOSE_ACTIVE_RIGHT_WORKSPACE_TAB_EVENT } from '@/lib/right-workspace-events'
 import {
@@ -518,11 +518,12 @@ export function GlobalShortcuts(): null {
   useEffect(() => {
     const cleanupOpen = window.electronAPI.onTrayOpenAgentSession(async (data) => {
       try {
+        const snapshotRevision = getAgentSessionMetadataRevision()
         const sessions = await window.electronAPI.listAgentSessions()
         const session = sessions.find((item) => item.id === data.sessionId)
         if (!session) return
 
-        store.set(agentSessionsAtom, sessions)
+        store.set(agentSessionsAtom, (previous) => mergeAgentSessionSnapshotWithChanges(previous, sessions, snapshotRevision, true))
         store.set(appModeAtom, 'agent')
         store.set(activeViewAtom, 'conversations')
         store.set(currentAgentSessionIdAtom, session.id)

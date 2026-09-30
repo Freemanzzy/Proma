@@ -956,3 +956,12 @@
 - `agent:session-metadata-changed` 明确登记为 `read/workspace`。服务端按授权 allowlist 裁剪并再次用安全字段白名单重建 payload；会话移出授权范围只发 session ID/remove，不含标题或目标工作区。Main IPC 与 Electron/web preload 添加只读订阅，桌面 IPC 原业务处理未改变。
 - 定向安全与主进程测试 **45 pass / 0 fail**；测试覆盖写入点单调事件、创建/更新/移动/删除、字段脱敏、未授权 workspace 事件屏蔽及移出授权范围的 remove 映射。`bun run typecheck` 全 workspace 通过。
 - 真实开发设备的 3 Mbps 验收仍因进程安全分支未就绪、17889 不监听而待办；相关 0.5 Mbps 数据只见上一节压力测试，不宣称已完成当前链路体验验证。更新 `docs/personal/web-remote.md` 会话元数据事件契约段。
+
+## 2026-09-30: Renderer 增量与权威快照原子合并
+
+- `LeftSidebar` 按 `epoch`/`sequence` 接收事件；main-process 重启的新 epoch 可从 sequence 1 继续，不会被旧 ref 永久丢弃。重连时重置本地游标并触发权威 active/archive 快照。
+- Renderer 全局 revision journal 记录被接受的增量。每个全量列表请求在发起前记 revision；快照返回后，只合并其基准之后发生的增量，避免旧快照覆盖较新标题/归档状态或复活已删除会话。侧栏 refresh 本身串行执行，期间事件缓冲并在快照提交后重放；global recover、自动任务刷新、Tab 恢复、工作区/会话表单/快捷菜单的全量 session snapshot 均复用同一合并 helper。
+- 删除会话/移出 workspace 会关闭相关本地 Tab 并移除列表项；`clearedFields` 删除旧的父子、delegation、automation 分类属性而不是保留浅合并残值。删除墓碑与事件 journal 均限制为 **8,192** 条；超过 journal 保留窗口的 stale snapshot fail-closed（不覆盖当前缓存），待下一次权威快照。相同 session ID 的后续合法 upsert 会解除 tombstone。
+- 新增 cursor epoch/sequence、两种事件消费者顺序、快照期间 rename/delete、同 ID remove→upsert 恢复、分类清除与 retention-floor 测试。相关测试 **50 pass / 0 fail**（按 main manager、full-ui security、agent-session-list 三文件），全 workspace typecheck 通过；全量 `bun test` 后续最终验证。
+- E2E 仅依赖此前 0.5 Mbps 本地 harness 证据，session-sync raw IPC 操作测试 (非独立桌面进程控制) 实测创建 **0–202 ms**、改名 **0–1 ms**、归档 **1 ms**、恢复 **3 ms**、删除 **3 ms**，断线回补全部成功；限单工作区实际请求越权创建被拒。跨 workspace 的 manager move 与 server 移出授权 remove 由单测覆盖，**没有**为E2E临时开放第二个工作区。
+- 本 commit 无 3 Mbps 真实 E2E：开发安全启动入口尚未交付，17889/5173 没有监听且 8443 临时 Serve 已关闭。当前链路结果必须等待独立安全任务；模型渠道与历史附件文件仍未导入。

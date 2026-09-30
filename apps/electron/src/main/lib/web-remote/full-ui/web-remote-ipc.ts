@@ -494,7 +494,9 @@ export class WebRemoteIpcBridge {
       if (!currentWorkspaceAllowed && previousWorkspaceAllowed && change.action === 'upsert') {
         // A move out of scope is observable only as removal from the previously allowed list.
         remoteValue = { epoch: change.epoch, sequence: change.sequence, action: 'remove', workspaceId: change.previousWorkspaceId, session: { id: rawSession.id } }
-      } else if (currentWorkspaceAllowed && (change.action === 'upsert' || change.action === 'remove')) {
+      } else if (currentWorkspaceAllowed && change.action === 'remove') {
+        remoteValue = { epoch: change.epoch, sequence: change.sequence, action: 'remove', workspaceId: change.workspaceId, session: { id: rawSession.id } }
+      } else if (currentWorkspaceAllowed && change.action === 'upsert') {
         const safeKeys = ['id', 'title', 'createdAt', 'updatedAt', 'workspaceId', 'channelId', 'modelId', 'pinned', 'starred', 'archived', 'isDraft', 'manualWorking', 'completedButUnconfirmed', 'stoppedByUser', 'parentSessionId', 'rootSessionId', 'sourceDelegationId', 'delegationStatus', 'sourceAutomationId']
         const session = Object.fromEntries(safeKeys.filter((key) => rawSession[key] !== undefined).map((key) => [key, rawSession[key]]))
         session.workspaceId = change.workspaceId

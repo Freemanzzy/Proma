@@ -42,6 +42,7 @@ import { updateStatusAtom, initializeUpdater } from './atoms/updater'
 import { automationsAtom } from './atoms/automation-atoms'
 import { calendarEventsAtom, calendarPlanningGroupsAtom, planningTagsAtom, todoPlanningGroupsAtom, todosAtom } from './atoms/planning-atoms'
 import { mergeTodoSnapshot, upsertTodo } from './lib/todo-state'
+import { getAgentSessionMetadataRevision, mergeAgentSessionSnapshotWithChanges } from './lib/agent-session-list'
 import {
   notificationsEnabledAtom,
   notificationSoundEnabledAtom,
@@ -546,7 +547,10 @@ function AutomationInitializer(): null {
   useEffect(() => {
     const load = (): void => {
       window.electronAPI.listAutomations().then(setAutomations).catch(console.error)
-      window.electronAPI.listActiveAgentSessions().then(setAgentSessions).catch(console.error)
+      const snapshotRevision = getAgentSessionMetadataRevision()
+      window.electronAPI.listActiveAgentSessions()
+        .then((sessions) => setAgentSessions((previous) => mergeAgentSessionSnapshotWithChanges(previous, sessions, snapshotRevision, false)))
+        .catch(console.error)
     }
     load()
     const unsub = window.electronAPI.onAutomationChanged(load)
@@ -868,6 +872,7 @@ function TabStatePersistenceInitializer(): null {
   // 启动恢复：读取 settings.tabState + 校验会话有效性
   useEffect(() => {
     const restore = async (): Promise<void> => {
+      const snapshotRevision = getAgentSessionMetadataRevision()
       const [settings, conversations, activeAgentSessions] = await Promise.all([
         window.electronAPI.getSettings(),
         window.electronAPI.listConversations(),
@@ -884,7 +889,12 @@ function TabStatePersistenceInitializer(): null {
       const archivedAgentSessions = hasArchivedAgentTab
         ? await window.electronAPI.listArchivedAgentSessions()
         : []
-      const agentSessions = [...activeAgentSessions, ...archivedAgentSessions]
+      const agentSessions = mergeAgentSessionSnapshotWithChanges(
+        store.get(agentSessionsAtom),
+        [...activeAgentSessions, ...archivedAgentSessions],
+        snapshotRevision,
+        true,
+      )
 
       // 构建有效 sessionId 集合
       const validSessionIds = new Set([
@@ -923,6 +933,7 @@ function TabStatePersistenceInitializer(): null {
       }
 
       const activeTab = validTabs.find((t) => t.id === restoredActiveTabId) ?? validTabs[0] ?? null
+      store.set(agentSessionsAtom, agentSessions)
       store.set(tabsAtom, activeTab ? [activeTab] : [])
       store.set(activeTabIdAtom, restoredActiveTabId)
 

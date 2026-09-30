@@ -277,8 +277,9 @@ describe('Web Remote full-ui security policy', () => {
     mainWindow.webContents.send(channel, { epoch: 'boot-1', sequence: 1, action: 'upsert', workspaceId: 'ws-1', clearedFields: ['parentSessionId', 'piSessionFile', 'delegationGoal'], session: { id: 's-1', title: 'renamed', workspaceId: 'ws-1', createdAt: 1, updatedAt: 2, parentSessionId: 'parent-1', rootSessionId: 'root-1', sourceDelegationId: 'delegation-1', delegationStatus: 'running', sourceAutomationId: 'automation-1', piEntryBindings: { private: 'binding' }, delegationGoal: 'secret goal', piSessionFile: '/private/session', apiKey: 'secret' } })
     mainWindow.webContents.send(channel, { epoch: 'boot-1', sequence: 2, action: 'upsert', workspaceId: 'ws-2', session: { id: 's-2', title: 'unauthorized', workspaceId: 'ws-2', createdAt: 1, updatedAt: 2 } })
     mainWindow.webContents.send(channel, { epoch: 'boot-1', sequence: 3, action: 'upsert', workspaceId: 'ws-2', previousWorkspaceId: 'ws-1', session: { id: 's-1', title: 'renamed', workspaceId: 'ws-2', createdAt: 1, updatedAt: 3, piSessionFile: '/private/session' } })
+    mainWindow.webContents.send(channel, { epoch: 'boot-1', sequence: 4, action: 'remove', workspaceId: 'ws-1', session: { id: 's-1', title: 'deleted title', workspaceId: 'ws-1', createdAt: 1, updatedAt: 4, piSessionFile: '/private/session' } })
     const events = ws.sent.map((item) => JSON.parse(item)).filter((item) => item.type === 'event' && item.channel === channel)
-    expect(events).toHaveLength(2)
+    expect(events).toHaveLength(3)
     expect(events[0].value).toMatchObject({ epoch: 'boot-1', sequence: 1, action: 'upsert' })
     expect(events[0].value.session).toMatchObject({
       id: 's-1', title: 'renamed', workspaceId: 'ws-1', parentSessionId: 'parent-1', rootSessionId: 'root-1',
@@ -287,7 +288,8 @@ describe('Web Remote full-ui security policy', () => {
     expect(events[0].value.clearedFields).toEqual(['parentSessionId'])
     for (const key of ['piEntryBindings', 'delegationGoal', 'piSessionFile', 'apiKey']) expect(events[0].value.session).not.toHaveProperty(key)
     expect(events[1].value).toEqual({ epoch: 'boot-1', sequence: 3, action: 'remove', workspaceId: 'ws-1', session: { id: 's-1' } })
-    expect(events.map((event) => event.value.sequence)).toEqual([1, 3])
+    expect(events[2].value).toEqual({ epoch: 'boot-1', sequence: 4, action: 'remove', workspaceId: 'ws-1', session: { id: 's-1' } })
+    expect(events.map((event) => event.value.sequence)).toEqual([1, 3, 4])
   })
 
   test('会话流事件只镜像给授权工作区，含 SDK 内容与交互事件', async () => {
