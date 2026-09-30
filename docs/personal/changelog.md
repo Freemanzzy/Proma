@@ -1074,3 +1074,19 @@
 
 - 收尾代码复核发现 `agent:get-sdk-messages` 返回持久化 SDK 结构 `{ type: 'user', message: { content } }`，不只存在旧式 `{ role: 'user', content }`。修正发送核对器兼容两种结构，避免真实 SDK 用户消息被误判为缺失；测试改用实际 SDK 包装结构覆盖。
 - 定向 `web-electron-shim.test.ts` **4 pass / 0 fail**，`git diff --check` 通过。
+
+## 2026-10-01: 手机列表分块实测与 full-ui 积压调查
+
+- 开发实例通过 `mobile-preview.sh start` 启动；17889、5173 与临时 8443→17889 均在线；正式版 PID 28971 未变。使用 `iphone:real-history` harness，网络仿真下行 **3,000,000 bit/s**、上行 **1,000,000 bit/s**、RTT **50 ms**。首次误选的最大 JSONL 属于归档会话，harness 在选中阶段安全失败并按应用 API 清理自建会话；随后改用最大活跃会话重跑成功。最终 manifest **830 → 830**，清理确认通过。
+- **C 改后 830 列表实测**：830 条列表、单次 `agent:list-sessions` responseUtf8 **459,810 B**、appSent **501,278 B**、base64 payload **0 B**、IPC **1,491 ms**、发送采样 bufferedPeak **2,545,869 B**。对照 2026-09-30 改前 responseUtf8 **459,810 B** / appSent **613,404 B**，responseUtf8 不变，appSent 减少 **112,126 B（18.28%）**，帧开销从 **153,594 B** 降至 **41,468 B**。改后首次显示真实大会话 **4,334 ms**，会话 JSONL **41,914,743 B**；history 两次请求合计 responseUtf8 **2,096,331 B** / appSent **2,170,230 B**，`wireBytes=null`。
+- **积压来源占比（本轮可观测的请求范围）**：
+
+  | 来源/帧类型 | responseUtf8 | appSent | 占本轮已量化列表+历史响应 appSent | 观测边界 |
+  |---|---:|---:|---:|---|
+  | IPC response（列表 + 历史，含大响应文本分块） | 2,556,141 B | 2,671,508 B | 100% | 两类 response 的 `/api/dev/metrics` 差分；不是整个页面的总流量 |
+  | agent 流事件 | 未测 | 未测 | 不可计算 | 开发数据无可用模型渠道；现有 harness 没有持续流事件注入/历史事件回放入口，本轮未伪造或改 harness |
+  | session-metadata 事件 | 未测 | 未测 | 不可计算 | 实测窗口未产生元数据变更事件 |
+  | 其他帧/页面控制流量 | 未测 | 未测 | 不可计算 | harness 汇总结果未提供全连接按帧类型的原始分项 |
+
+- **bufferedAmount / 背压结论草稿**：当前只能取得 IPC response 发送路径同步采样出的峰值（列表 **2,545,869 B**、历史 **2,170,069 B**），没有每 5 秒采样数据；不能用该值推断持续事件流积压。本轮因此没有复现或排除 agent-event 积压。代码审阅确认 `full-ui` 的 `broadcast()` 与 invoke response 均直接 `sendRaw()`，没有 `bufferedAmount` 上限、队列限流或丢弃策略；另一个 `web-remote-events.ts` Hub 有独立的 **1,000,000 B** 阈值、文本 delta 合并及超限丢弃/刷新策略，但不能视为 full-ui 的保护。`bufferedAmountPeak` 存在于每个 `IpcClient` 的独立 metrics 对象，故内存累积按连接分别进行；但快照以 `deviceId` 为键，同设备新连接会覆盖旧连接快照，日志也没有稳定连接 ID，外部观测不能可靠比较同设备多个并发窗口。建议后续另行批准加入只读采样/事件回放能力后再做完整归因；本轮未修工具或 harness。
+- 3 个初始化期既有 WebAssembly/CSP 异常为基线，real-history 动作期新增 **0**；HTTP 429 状态响应 **0**。`/tmp` harness 日志显示授权设备已撤销、Chrome/profile 已清理；开发 `~/.proma-dev` 最终仍为 **830** 条。dev 保持运行，供用户体验；未关闭临时 8443。
