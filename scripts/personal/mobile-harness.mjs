@@ -382,6 +382,7 @@ async function createHarness(options) {
   const websocketUrls = new Map()
   const websocketHandshakes = []
   const websocketFramesReceived = []
+  const websocketFramesSent = []
   const websocketDataReceived = []
   const http429Responses = []
   client.on('Network.webSocketCreated', (event) => { websocketUrls.set(event.requestId, event.url) })
@@ -389,6 +390,10 @@ async function createHarness(options) {
   client.on('Network.webSocketFrameReceived', (event) => {
     const url = websocketUrls.get(event.requestId)
     websocketFramesReceived.push({ requestId: event.requestId, url, payloadBytes: Buffer.byteLength(event.response?.payloadData ?? '', 'utf8'), opcode: event.response?.opcode })
+  })
+  client.on('Network.webSocketFrameSent', (event) => {
+    const url = websocketUrls.get(event.requestId)
+    websocketFramesSent.push({ requestId: event.requestId, url, payloadBytes: Buffer.byteLength(event.response?.payloadData ?? '', 'utf8'), opcode: event.response?.opcode })
   })
   client.on('Network.dataReceived', (event) => {
     const url = websocketUrls.get(event.requestId)
@@ -697,7 +702,7 @@ async function createHarness(options) {
     activeChrome = null
     activeProfile = null
   }
-  return { client, chrome, profile, pair, navigate, installInteractionStreamAudit, loadMetrics, openDrawer, clickSidebarText, clickText, openSession, createHarnessSession, createHarnessSessionRaw, setPermissionMode, inputAndSend, waitText, readHistory, waitForUserSubmission, waitForAssistantReply, waitForRunning, waitForAbortedAssistant, resolveVisibleAskUserA, resolveVisiblePlanApproval, getInteractionStreamEvents, getActiveSessionId: () => activeSessionId, getCreatedSessionIds: () => new Set(createdSessionIds), invokeApi, invokeRaw, websocketUrls, websocketHandshakes, websocketFramesReceived, websocketDataReceived, http429Responses, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, readSessionManifest, close }
+  return { client, chrome, profile, pair, navigate, installInteractionStreamAudit, loadMetrics, openDrawer, clickSidebarText, clickText, openSession, createHarnessSession, createHarnessSessionRaw, setPermissionMode, inputAndSend, waitText, readHistory, waitForUserSubmission, waitForAssistantReply, waitForRunning, waitForAbortedAssistant, resolveVisibleAskUserA, resolveVisiblePlanApproval, getInteractionStreamEvents, getActiveSessionId: () => activeSessionId, getCreatedSessionIds: () => new Set(createdSessionIds), invokeApi, invokeRaw, websocketUrls, websocketHandshakes, websocketFramesReceived, websocketFramesSent, websocketDataReceived, http429Responses, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, readSessionManifest, close }
 }
 
 async function runDeadSocket(harness, options, result) {
@@ -1265,6 +1270,21 @@ async function runSessionSync(harness, options, result) {
     while (Date.now() - started < timeoutMs) { if ((await sidebarHas(text)) === present) return Date.now() - started; await delay(200) }
     return null
   }
+  const fetchDevMetrics = () => harness.client.evaluate("fetch('/api/dev/metrics',{credentials:'include'}).then(r=>r.ok?r.json():null)")
+  const channelMetrics = (snapshot, channel) => {
+    const entries = Object.values(snapshot?.ipc?.devices ?? {}).map((device) => device?.byChannel?.[channel] ?? {})
+    return {
+      calls: entries.reduce((sum, entry) => sum + (entry.calls ?? 0), 0),
+      elapsedMs: entries.reduce((sum, entry) => sum + (entry.elapsedMs ?? 0), 0),
+      responseUtf8Bytes: entries.reduce((sum, entry) => sum + (entry.responseUtf8Bytes ?? 0), 0),
+      appSentBytes: entries.reduce((sum, entry) => sum + (entry.appSentBytes ?? 0), 0),
+    }
+  }
+  const channelDelta = (before, after, channel) => {
+    const left = channelMetrics(before, channel)
+    const right = channelMetrics(after, channel)
+    return Object.fromEntries(Object.keys(left).map((key) => [key, Math.max(0, right[key] - left[key])]))
+  }
   const stamp = Date.now()
   const titleA = `web-remote-sync-a-${stamp}`
   const titleB = `web-remote-sync-b-${stamp}`
@@ -1321,10 +1341,24 @@ async function runSessionSync(harness, options, result) {
     steps.afterReconnectDeleteGone = (await waitSidebar(titleD, false, 30_000)) !== null
   }
   // 本端归档：侧栏 active 视图应不再显示
+  const archiveMetricsBefore = await fetchDevMetrics()
+  const archiveSentFrameIndex = harness.websocketFramesSent.length
+  const archiveReceivedFrameIndex = harness.websocketFramesReceived.length
   const archiveStartedAt = Date.now()
   await harness.invokeApi('toggleArchiveAgentSession', [created.id])
-  steps.archiveRemovedMs = await waitSidebar(titleB, false, 10_000)
   steps.archiveCommandMs = Date.now() - archiveStartedAt
+  const archiveMetricsAfter = await fetchDevMetrics()
+  const archiveSentFrames = harness.websocketFramesSent.slice(archiveSentFrameIndex).filter((frame) => frame.url && new URL(frame.url).pathname === '/api/ipc')
+  const archiveReceivedFrames = harness.websocketFramesReceived.slice(archiveReceivedFrameIndex).filter((frame) => frame.url && new URL(frame.url).pathname === '/api/ipc')
+  steps.archiveTransport = {
+    toggleArchive: channelDelta(archiveMetricsBefore, archiveMetricsAfter, 'agent:toggle-archive'),
+    listSessions: channelDelta(archiveMetricsBefore, archiveMetricsAfter, 'agent:list-sessions'),
+    sentFrameCount: archiveSentFrames.length,
+    sentFramePayloadBytes: archiveSentFrames.reduce((sum, frame) => sum + frame.payloadBytes, 0),
+    receivedFrameCount: archiveReceivedFrames.length,
+    receivedFramePayloadBytes: archiveReceivedFrames.reduce((sum, frame) => sum + frame.payloadBytes, 0),
+  }
+  steps.archiveRemovedMs = await waitSidebar(titleB, false, 10_000)
   const archived = (await harness.client.evaluate('window.electronAPI.listActiveAgentSessions()')).some((item) => item?.id === created.id)
   steps.archivedRemovedFromActiveList = !archived
   const restoreStartedAt = Date.now()

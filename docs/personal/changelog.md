@@ -1015,3 +1015,8 @@
 
 - 修复后首个 3 Mbps 重跑观察到 2 条动作前 CSP 类异常及 1 条出现在过早基线之后的同类异常。没有按异常文本豁免；将 session-sync 的动作基线移至侧栏/工作区设置完成后，并在 real-history、idle-session-sync 与大会话 suite 的动作前等待有界异常静默期。任何静默期后出现的同类 CSP 异常仍然失败。
 - 新增单测验证延迟到达的初始化异常会纳入动作基线；Harness 单测 **5 pass / 0 fail**，`node --check`、`bash -n` 与 `git diff --check` 通过。
+
+## 2026-09-30: 补充归档命令的服务端/传输计量
+
+- 两次既有 3 Mbps session-sync 结果的 `archiveCommandMs` 分别为 **7,687 ms、7,684 ms**，而 `archiveRemovedMs` 分别为 **25 ms、26 ms**，恢复调用为 **49 ms、55 ms**；这不像一次性抖动。启动后的 `agent-sessions.json` 为 **3,061,848 B**，3 Mbps 若完整传输该大小约需 **8,165 ms**，但该数值仅为相关性，不足以证明实际传输了全量索引。
+- 代码路径确认 `agent:toggle-archive` handler 会读取全会话列表、更新并重写索引，再返回单条会话元数据。为区分主进程 handler 时间、是否重调全量列表以及 WebSocket 收发帧字节，Harness 增加 archive 前后 `/api/dev/metrics` 与帧体积差分；尚未得出根因或改动主进程路径。

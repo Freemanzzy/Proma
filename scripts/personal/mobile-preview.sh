@@ -199,7 +199,7 @@ if (result.heavySession) {
 }
 if (result.sessionSync) {
   const sync = result.sessionSync
-  checks.push(`session-sync net=${sync.network?.downloadBitsPerSecond}/${sync.network?.uploadBitsPerSecond}bps@${sync.network?.latencyMs}ms rename=${sync.liveRenameVisibleMs}ms create=${sync.liveCreateVisibleMs}ms archive=${sync.archiveRemovedMs}ms restore=${sync.restoreVisibleMs}ms delete=${sync.liveDeleteGoneMs}ms reconnect=${sync.afterReconnectCreateVisible ? 'pass' : 'fail'}, new-exceptions=${sync.newActionExceptions ?? sync.exceptions}, baseline=${sync.exceptionsBeforeSessionSync}`)
+  checks.push(`session-sync net=${sync.network?.downloadBitsPerSecond}/${sync.network?.uploadBitsPerSecond}bps@${sync.network?.latencyMs}ms rename=${sync.liveRenameVisibleMs}ms create=${sync.liveCreateVisibleMs}ms archive=${sync.archiveCommandMs}ms/visible=${sync.archiveRemovedMs}ms toggleIPC=${sync.archiveTransport?.toggleArchive?.elapsedMs ?? 'n/a'}ms/${sync.archiveTransport?.toggleArchive?.responseUtf8Bytes ?? 'n/a'}B listCalls=${sync.archiveTransport?.listSessions?.calls ?? 'n/a'} listBytes=${sync.archiveTransport?.listSessions?.responseUtf8Bytes ?? 'n/a'}B wsRx=${sync.archiveTransport?.receivedFramePayloadBytes ?? 'n/a'}B restore=${sync.restoreCommandMs}ms/visible=${sync.restoreVisibleMs}ms delete=${sync.liveDeleteGoneMs}ms reconnect=${sync.afterReconnectCreateVisible ? 'pass' : 'fail'}, new-exceptions=${sync.newActionExceptions ?? sync.exceptions}, baseline=${sync.exceptionsBeforeSessionSync}`)
 }
 if (result.realHistory) {
   const real = result.realHistory
