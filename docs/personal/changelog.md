@@ -1004,3 +1004,9 @@
 - 本轮新增提交：`b7e128b1` 临时移除启动链的按名清理调用；`20386656` 拒绝已退役 epoch 迟到增量并覆盖工作区移出后同 ID 恢复；`97066aa2` 将 Harness 网络条件参数化。提交均在 `fix/mobile-session-sync-20260929`，没有 merge、push、打包或安装。
 - 上述安全计划 `dev-process-cleanup-safety.md` 仍标记“待执行”，完整 PID/进程归属安全启动入口尚未审查就绪。虽然临时 package 改动和静态 grep 已证明启动链不再调用 `dev-kill`、`pkill`、`killall`、`taskkill`，按用户约束仍未调用 `mobile-preview.sh start`/`dev.sh`，未启动或停止任何进程、未改端口/Tailscale Serve、未触碰正式版或 `~/.proma-dev`。
 - 因启动门控未解除，未执行 830 会话列表、41.9 MB 历史、180 秒空闲、双端实时同步、越权隔离、临时会话清理/hash 核对；也未在本轮运行全量 `bun test` 与三个 build。定向验证仍以各前置条目所记录结果为准。此前最后一次环境快照显示 17889/5173 无监听、8443 Serve 关闭；本轮没有重新采集快照，也未改变该状态。
+
+## 2026-09-30: Harness 仅按动作新增异常判定并精确识别 HTTP 429
+
+- `evaluateHarnessExceptionWindow()` 统一将动作开始前的异常作为单独基线，只有动作期间新增异常使 session-sync、real-history、idle-session-sync 与大会话 suite 失败。结果 JSON 分开记录基线数量/类别与新增数量/类别；新增同类 WebAssembly/CSP 异常仍算失败。
+- CDP `Network.responseReceived` 仅按结构化 HTTP status=429 记录服务响应；可读文本识别仅接受明确的 `HTTP 429`、`status 429` 或 `Too Many Requests`，不再用裸 `429` 子串。新增回归证明含 `429` 子串的会话 UUID 不会误报。
+- 验证：Harness 单测 **4 pass / 0 fail**（含“基线 1、新增 0→通过；基线 1、新增 1 个同类 WASM→失败”）；`node --check`、`bash -n`、`git diff --check` 通过。实际 3 Mbps suite 尚待重跑。

@@ -187,8 +187,8 @@ const checks = []
 if (result.layout) checks.push(`pages=${result.layout.pages.filter((page) => !page.failed).length}/${result.layout.pages.length}`)
 if (result.heavySession) {
   const heavy = result.heavySession
-  checks.push(`heavy=${Math.round(heavy.syntheticJsonlBytes / 1024 / 1024)}MiB, first=${heavy.firstHistoryMs ?? 'not-visible'}ms, wsDecoded=${heavy.websocketPayloadBytes}B, netEncoded=${heavy.cdpEncodedNetworkBytes}B`)
-  if (!heavy.baselineMode && (!heavy.historyVisible || heavy.firstHistoryMs === null || heavy.firstHistoryMs >= 20_000 || heavy.visibleMessagesAfterLoadEarlier <= heavy.visibleMessagesBeforeLoadEarlier || !heavy.truncationTextVisible || !heavy.imagePlaceholderVisible || heavy.exceptions !== 0 || !heavy.largeDecodedFrameObserved)) {
+  checks.push(`heavy=${Math.round(heavy.syntheticJsonlBytes / 1024 / 1024)}MiB, first=${heavy.firstHistoryMs ?? 'not-visible'}ms, wsDecoded=${heavy.websocketPayloadBytes}B, netEncoded=${heavy.cdpEncodedNetworkBytes}B, new-exceptions=${heavy.newActionExceptions ?? heavy.exceptions}`)
+  if (!heavy.baselineMode && (!heavy.historyVisible || heavy.firstHistoryMs === null || heavy.firstHistoryMs >= 20_000 || heavy.visibleMessagesAfterLoadEarlier <= heavy.visibleMessagesBeforeLoadEarlier || !heavy.truncationTextVisible || !heavy.imagePlaceholderVisible || (heavy.newActionExceptions ?? heavy.exceptions) > 0 || !heavy.largeDecodedFrameObserved)) {
     console.error(`FAIL ${ua}/${suite}: 大会话验收字段不完整：${JSON.stringify(heavy)}`)
     process.exit(1)
   }
@@ -199,12 +199,12 @@ if (result.heavySession) {
 }
 if (result.sessionSync) {
   const sync = result.sessionSync
-  checks.push(`session-sync net=${sync.network?.downloadBitsPerSecond}/${sync.network?.uploadBitsPerSecond}bps@${sync.network?.latencyMs}ms rename=${sync.liveRenameVisibleMs}ms create=${sync.liveCreateVisibleMs}ms archive=${sync.archiveRemovedMs}ms restore=${sync.restoreVisibleMs}ms delete=${sync.liveDeleteGoneMs}ms reconnect=${sync.afterReconnectCreateVisible ? 'pass' : 'fail'}, new-exceptions=${sync.exceptions}, pre-action=${sync.exceptionsBeforeSessionSync}`)
+  checks.push(`session-sync net=${sync.network?.downloadBitsPerSecond}/${sync.network?.uploadBitsPerSecond}bps@${sync.network?.latencyMs}ms rename=${sync.liveRenameVisibleMs}ms create=${sync.liveCreateVisibleMs}ms archive=${sync.archiveRemovedMs}ms restore=${sync.restoreVisibleMs}ms delete=${sync.liveDeleteGoneMs}ms reconnect=${sync.afterReconnectCreateVisible ? 'pass' : 'fail'}, new-exceptions=${sync.newActionExceptions ?? sync.exceptions}, baseline=${sync.exceptionsBeforeSessionSync}`)
 }
 if (result.realHistory) {
   const real = result.realHistory
   checks.push(`real-history=${real.sessionCount} sessions/${real.sessionFileBytes}B/${real.firstHistoryMs}ms net=${real.network?.downloadBitsPerSecond}/${real.network?.uploadBitsPerSecond}bps@${real.network?.latencyMs}ms, list=${real.list?.responseUtf8Bytes}B appSent=${real.list?.appSentBytes}B, history=${real.history?.responseUtf8Bytes}B appSent=${real.history?.appSentBytes}B buffered=${real.history?.bufferedAmountPeak}B, exceptions=${real.exceptionsDuringRealHistory} during / ${real.exceptionsBeforeRealHistory} before`)
-  if (real.sessionCount !== 830 || real.sessionFileBytes < 30_000_000 || !real.historyVisible || real.firstHistoryMs === null || real.exceptionsDuringRealHistory !== 0 || real.list?.calls < 1 || real.history?.calls < 1 || real.history?.wireBytes !== null) {
+  if (real.sessionCount !== 830 || real.sessionFileBytes < 30_000_000 || !real.historyVisible || real.firstHistoryMs === null || (real.newActionExceptions ?? real.exceptionsDuringRealHistory) > 0 || real.list?.calls < 1 || real.history?.calls < 1 || real.history?.wireBytes !== null) {
     console.error(`FAIL ${ua}/${suite}: 真实大会话验收字段不完整：${JSON.stringify(real)}`)
     process.exit(1)
   }
@@ -212,7 +212,7 @@ if (result.realHistory) {
 if (result.idleSessionSync) {
   const idle = result.idleSessionSync
   checks.push(`idle=${idle.elapsedMs}ms net=${idle.network?.downloadBitsPerSecond}/${idle.network?.uploadBitsPerSecond}bps@${idle.network?.latencyMs}ms, listCalls=${idle.listRequests}, appSent=${idle.appSentBytes}B, bufferPeak=${idle.bufferedAmountPeak}B, initialList=${idle.initialList.calls} calls/${idle.initialList.appSentBytes}B, new-exceptions=${idle.exceptions}, pre-action=${idle.exceptionsBeforeIdle}`)
-  if (idle.elapsedMs < 180_000 || idle.listRequests !== 0 || idle.responseUtf8Bytes !== 0 || idle.exceptions !== 0) {
+  if (idle.elapsedMs < 180_000 || idle.listRequests !== 0 || idle.responseUtf8Bytes !== 0 || (idle.newActionExceptions ?? idle.exceptions) > 0) {
     console.error(`FAIL ${ua}/${suite}: 空闲 session 列表发生重复下发：${JSON.stringify(idle)}`)
     process.exit(1)
   }
@@ -221,7 +221,7 @@ if (result.probe) checks.push(`tabs=${result.probe.filter((item) => item.hitIsTa
 if (result.attachments) checks.push(`attachments=${result.attachments.textAssistantReplyContainsFirstLine && result.attachments.imageAssistantIdentifiedRed ? 'pass' : 'fail'}`)
 if (result.singleTapChecks) checks.push(`singleTap=${result.singleTapSuccess}/${result.singleTapChecks}`)
 if (result.steps?.length) checks.push(`steps=${result.steps.filter((step) => step.ok).length}/${result.steps.filter((step) => !step.skipped).length}`)
-checks.push(`new-action-exceptions=${result.newActionExceptions?.length ?? 0}, known-WASM-CSP-total=${result.knownWebAssemblyCspInitializationExceptions ?? 0}, pre-action=${result.preActionExceptionCount ?? result.pageStartupExceptionCount ?? 0}${result.preActionExceptionCategories?.length ? ` (${[...new Set(result.preActionExceptionCategories)].join('; ')})` : ''}`)
+checks.push(`new-action-exceptions=${result.newActionExceptionCount ?? result.newActionExceptions?.length ?? 0}, known-WASM-CSP-total=${result.knownWebAssemblyCspInitializationExceptions ?? 0}, http-429-status-responses=${result.http429Responses?.length ?? 0}, pre-action=${result.preActionExceptionCount ?? result.pageStartupExceptionCount ?? 0}${result.preActionExceptionCategories?.length ? ` (${[...new Set(result.preActionExceptionCategories)].join('; ')})` : ''}`)
 if (result.error || result.revokeError || badSteps.length || result.layout?.passed === false || (result.probe && result.probe.some((item) => !item.hitIsTab)) || (result.singleTapChecks && result.singleTapSuccess !== result.singleTapChecks) || (result.attachments && (!result.attachments.textAssistantReplyContainsFirstLine || !result.attachments.imageAssistantIdentifiedRed)) || !result.revoked || !result.chromeExited || !result.profileRemoved || (result.newActionExceptions?.length ?? 0) > 0) {
   console.error(`FAIL ${ua}/${suite}: ${checks.join(', ')}${result.error ? `; ${result.error}` : ''}`)
   process.exit(1)

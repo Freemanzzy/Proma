@@ -53,6 +53,28 @@ export function measureHarnessExceptionWindow(exceptions, baselineCount) {
   }
 }
 
+/** Shared suite gate: only exceptions after the action-start baseline fail the run. */
+export function evaluateHarnessExceptionWindow(exceptions, baselineCount) {
+  const window = measureHarnessExceptionWindow(exceptions, baselineCount)
+  return { ...window, newActionExceptions: window.actionCount, passed: window.actionCount === 0 }
+}
+
+/** Match only structured HTTP status fields or explicit 429 status/error phrases, never bare digits. */
+export function isHttp429Signal(value) {
+  if (value && typeof value === 'object') {
+    const record = value
+    const statuses = [record.status, record.statusCode, record.httpStatus, record.response?.status]
+    if (statuses.some((status) => Number(status) === 429)) return true
+    const phrases = [record.statusText, record.message, record.error, record.text]
+    return phrases.some((phrase) => typeof phrase === 'string' && isHttp429Signal(phrase))
+  }
+  if (typeof value !== 'string') return false
+  return /\bHTTP(?:\/\d(?:\.\d)?)?\s+429\b/i.test(value)
+    || /\bstatus\s*[:=]?\s*429\b/i.test(value)
+    || /\b429\s+Too Many Requests\b/i.test(value)
+    || /\bToo Many Requests\b/i.test(value)
+}
+
 /** Network profile is parameterized in decimal bits/s; default matches the current 3 Mbps relay. */
 export function resolveHarnessNetworkProfile(options = {}) {
   const downloadMbps = Number(options.downloadMbps ?? 3)
@@ -345,6 +367,7 @@ async function createHarness(options) {
   const websocketHandshakes = []
   const websocketFramesReceived = []
   const websocketDataReceived = []
+  const http429Responses = []
   client.on('Network.webSocketCreated', (event) => { websocketUrls.set(event.requestId, event.url) })
   client.on('Network.webSocketHandshakeResponseReceived', (event) => websocketHandshakes.push({ requestId: event.requestId, url: websocketUrls.get(event.requestId), status: event.response?.status, headers: event.response?.headers ?? {} }))
   client.on('Network.webSocketFrameReceived', (event) => {
@@ -361,6 +384,7 @@ async function createHarness(options) {
     if (activeNavigation) activeNavigation.requestIds.add(event.requestId)
   })
   client.on('Network.responseReceived', (event) => {
+    if (isHttp429Signal(event.response)) http429Responses.push({ status: 429, resourceType: event.type ?? null })
     if (!activeNavigation) return
     activeNavigation.responses += 1
     if (event.response?.fromDiskCache || event.response?.fromServiceWorker || event.response?.fromPrefetchCache) activeNavigation.cachedResponses += 1
@@ -657,7 +681,7 @@ async function createHarness(options) {
     activeChrome = null
     activeProfile = null
   }
-  return { client, chrome, profile, pair, navigate, installInteractionStreamAudit, loadMetrics, openDrawer, clickSidebarText, clickText, openSession, createHarnessSession, createHarnessSessionRaw, setPermissionMode, inputAndSend, waitText, readHistory, waitForUserSubmission, waitForAssistantReply, waitForRunning, waitForAbortedAssistant, resolveVisibleAskUserA, resolveVisiblePlanApproval, getInteractionStreamEvents, getActiveSessionId: () => activeSessionId, getCreatedSessionIds: () => new Set(createdSessionIds), invokeApi, invokeRaw, websocketUrls, websocketHandshakes, websocketFramesReceived, websocketDataReceived, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, readSessionManifest, close }
+  return { client, chrome, profile, pair, navigate, installInteractionStreamAudit, loadMetrics, openDrawer, clickSidebarText, clickText, openSession, createHarnessSession, createHarnessSessionRaw, setPermissionMode, inputAndSend, waitText, readHistory, waitForUserSubmission, waitForAssistantReply, waitForRunning, waitForAbortedAssistant, resolveVisibleAskUserA, resolveVisiblePlanApproval, getInteractionStreamEvents, getActiveSessionId: () => activeSessionId, getCreatedSessionIds: () => new Set(createdSessionIds), invokeApi, invokeRaw, websocketUrls, websocketHandshakes, websocketFramesReceived, websocketDataReceived, http429Responses, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, readSessionManifest, close }
 }
 
 async function runDeadSocket(harness, options, result) {
@@ -1184,6 +1208,7 @@ async function runIdleSessionSync(harness, options, result, deviceId) {
     }
   })
   const initialList = idleDevice?.byChannel?.['agent:list-sessions']
+  const exceptionWindow = evaluateHarnessExceptionWindow(harness.exceptions, exceptionsBeforeIdle)
   result.idleSessionSync = {
     initialList: {
       calls: initialList?.calls ?? 0,
@@ -1201,10 +1226,12 @@ async function runIdleSessionSync(harness, options, result, deviceId) {
     appSentBytes: entries.reduce((sum, item) => sum + item.appSentBytes, 0),
     bufferedAmountPeak: Math.max(0, ...entries.map((item) => item.bufferedAmountPeak)),
     metricWindows: entries.length,
-    exceptions: Math.max(0, harness.exceptions.length - exceptionsBeforeIdle),
-    exceptionsBeforeIdle,
+    exceptions: exceptionWindow.newActionExceptions,
+    newActionExceptions: exceptionWindow.newActionExceptions,
+    newActionExceptionCategories: exceptionWindow.actionCategories,
+    exceptionsBeforeIdle: exceptionWindow.baselineCount,
   }
-  if (result.idleSessionSync.elapsedMs < 180_000 || result.idleSessionSync.listRequests > 0 || result.idleSessionSync.responseUtf8Bytes > 0 || result.idleSessionSync.exceptions > 0) {
+  if (result.idleSessionSync.elapsedMs < 180_000 || result.idleSessionSync.listRequests > 0 || result.idleSessionSync.responseUtf8Bytes > 0 || !exceptionWindow.passed) {
     throw new Error(`空闲列表同步验收失败：${JSON.stringify(result.idleSessionSync)}`)
   }
 }
@@ -1287,9 +1314,10 @@ async function runSessionSync(harness, options, result) {
   // 回复探索节点按需读取
   const bindings = await harness.invokeRaw('web-remote:get-session-entry-bindings', [{ sessionId: created.id }]).catch((error) => ({ error: String(error) }))
   steps.entryBindingsReadable = !!bindings && typeof bindings === 'object' && !bindings.error
-  result.sessionSync = { ...steps, network: { latencyMs: networkProfile.latencyMs, downloadBitsPerSecond: networkProfile.downloadBitsPerSecond, uploadBitsPerSecond: networkProfile.uploadBitsPerSecond }, exceptions: Math.max(0, harness.exceptions.length - exceptionsBeforeSessionSync), exceptionsBeforeSessionSync }
+  const exceptionWindow = evaluateHarnessExceptionWindow(harness.exceptions, exceptionsBeforeSessionSync)
+  result.sessionSync = { ...steps, network: { latencyMs: networkProfile.latencyMs, downloadBitsPerSecond: networkProfile.downloadBitsPerSecond, uploadBitsPerSecond: networkProfile.uploadBitsPerSecond }, exceptions: exceptionWindow.newActionExceptions, newActionExceptions: exceptionWindow.newActionExceptions, newActionExceptionCategories: exceptionWindow.actionCategories, exceptionsBeforeSessionSync: exceptionWindow.baselineCount }
   steps.listCallsDuringSuite = (await harness.client.evaluate("fetch('/api/dev/metrics',{credentials:'include'}).then(r=>r.ok?r.json():null)"))?.ipc?.devices ? 'see-metrics' : 'n/a'
-  const failed = !steps.draftHiddenBeforePromotion || !steps.promotedToVisible || steps.renameVisibleMs === null || steps.liveRenameVisibleMs === null || steps.liveCreateVisibleMs === null || steps.liveDeleteGoneMs === null || steps.archiveRemovedMs === null || steps.restoreVisibleMs === null || !steps.afterReconnectRenameVisible || !steps.afterReconnectCreateVisible || (external?.id && !steps.afterReconnectDeleteGone) || !steps.archivedRemovedFromActiveList || !steps.entryBindingsReadable || steps.visibleWorkspaceCount !== 1 || !steps.unauthorizedWorkspaceCreateDenied || result.sessionSync.exceptions > 0
+  const failed = !steps.draftHiddenBeforePromotion || !steps.promotedToVisible || steps.renameVisibleMs === null || steps.liveRenameVisibleMs === null || steps.liveCreateVisibleMs === null || steps.liveDeleteGoneMs === null || steps.archiveRemovedMs === null || steps.restoreVisibleMs === null || !steps.afterReconnectRenameVisible || !steps.afterReconnectCreateVisible || (external?.id && !steps.afterReconnectDeleteGone) || !steps.archivedRemovedFromActiveList || !steps.entryBindingsReadable || steps.visibleWorkspaceCount !== 1 || !steps.unauthorizedWorkspaceCreateDenied || !exceptionWindow.passed
   if (failed) throw new Error(`会话列表同步验收失败：${JSON.stringify(result.sessionSync)}`)
 }
 
@@ -1381,6 +1409,7 @@ async function runRealHistory(harness, options, result, deviceId) {
   }, 0)
   const historyFrames = harness.websocketFramesReceived.slice(firstFrameIndex).filter((item) => item.url && new URL(item.url).pathname === '/api/ipc')
   const historyDecodedPayloadBytes = historyFrames.reduce((sum, frame) => sum + frame.payloadBytes, 0)
+  const exceptionWindow = evaluateHarnessExceptionWindow(harness.exceptions, exceptionsBeforeRealHistory)
   result.realHistory = {
     sessionCount: list.length,
     sessionFileBytes,
@@ -1397,12 +1426,14 @@ async function runRealHistory(harness, options, result, deviceId) {
       bufferedAmountPeak: Math.max(0, ...Object.values(historyMetricDevicesAfter).map((device) => device?.byChannel?.['agent:get-sdk-messages']?.bufferedAmountPeak ?? 0)),
       websocketDecodedPayloadBytes: historyDecodedPayloadBytes,
     },
-    exceptions: Math.max(0, harness.exceptions.length - exceptionsBeforeRealHistory),
-    exceptionsBeforeRealHistory,
-    exceptionsDuringRealHistory: Math.max(0, harness.exceptions.length - exceptionsBeforeRealHistory),
+    exceptions: exceptionWindow.newActionExceptions,
+    newActionExceptions: exceptionWindow.newActionExceptions,
+    newActionExceptionCategories: exceptionWindow.actionCategories,
+    exceptionsBeforeRealHistory: exceptionWindow.baselineCount,
+    exceptionsDuringRealHistory: exceptionWindow.newActionExceptions,
     totalPageExceptions: harness.exceptions.length,
   }
-  if (!historyVisible || firstHistoryMs === null || firstHistoryMs >= 30_000 || result.realHistory.exceptionsDuringRealHistory !== 0) {
+  if (!historyVisible || firstHistoryMs === null || firstHistoryMs >= 30_000 || !exceptionWindow.passed) {
     throw new Error(`真实大会话弱网首屏未达 30 秒预算：${JSON.stringify(result.realHistory)}`)
   }
 }
@@ -1440,7 +1471,8 @@ async function runHeavySession(harness, options, result, onSyntheticFileCreated)
   const networkEvents = harness.websocketDataReceived.slice(firstNetworkIndex).filter((item) => item.url && new URL(item.url).pathname === '/api/ipc')
   const receivedPayloadBytes = frameEvents.reduce((total, item) => total + item.payloadBytes, 0)
   const encodedNetworkBytes = networkEvents.reduce((total, item) => total + item.encodedDataLength, 0)
-  const exceptionsDuringTest = harness.exceptions.slice(exceptionStart)
+  const exceptionWindow = evaluateHarnessExceptionWindow(harness.exceptions, exceptionStart)
+  const exceptionsDuringTest = exceptionWindow.actionExceptions
   result.heavySession = {
     syntheticSessionId: heavy.id,
     syntheticJsonlBytes: syntheticBytes,
@@ -1455,7 +1487,9 @@ async function runHeavySession(harness, options, result, onSyntheticFileCreated)
     maxDecodedFrameBytes: frameEvents.reduce((max, item) => Math.max(max, item.payloadBytes), 0),
     cdpEncodedNetworkBytes: encodedNetworkBytes,
     cdpDataReceivedEventCount: networkEvents.length,
-    exceptions: exceptionsDuringTest.length,
+    exceptions: exceptionWindow.newActionExceptions,
+    newActionExceptions: exceptionWindow.newActionExceptions,
+    newActionExceptionCategories: exceptionWindow.actionCategories,
   }
   if (baselineMode) {
     // The pre-fix comparison deliberately expects the unpaged response to miss the 20 s target or hit the 35 s client timeout.
@@ -1722,15 +1756,18 @@ async function main() {
     clearTimeout(timeoutTimer)
     result.consoleErrors = harness.consoleErrors
     result.exceptions = harness.exceptions
+    result.http429Responses = harness.http429Responses
     const preActionExceptionCount = result.realHistory?.exceptionsBeforeRealHistory
       ?? result.idleSessionSync?.exceptionsBeforeIdle
       ?? result.sessionSync?.exceptionsBeforeSessionSync
       ?? result.pageStartupExceptionCount
       ?? 0
-    const exceptionWindow = measureHarnessExceptionWindow(harness.exceptions, preActionExceptionCount)
+    const exceptionWindow = evaluateHarnessExceptionWindow(harness.exceptions, preActionExceptionCount)
     result.preActionExceptionCount = exceptionWindow.baselineCount
     result.preActionExceptionCategories = exceptionWindow.baselineCategories
     result.exceptionsAfterStartup = exceptionWindow.actionExceptions
+    result.newActionExceptionCount = exceptionWindow.newActionExceptions
+    result.newActionExceptionCategories = exceptionWindow.actionCategories
     result.knownWebAssemblyCspInitializationExceptions = harness.exceptions.filter(isKnownWebAssemblyCspInitializationException).length
     // Never whitelist by exception text: every exception after the action baseline is new/action-scoped.
     result.newActionExceptions = exceptionWindow.actionExceptions
