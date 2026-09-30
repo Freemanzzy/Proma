@@ -998,3 +998,9 @@
 - `mobile-harness.mjs` 的 `real-history`、`idle-session-sync`、`session-sync` 与大会话套件统一使用参数化 CDP 网络 profile；默认十进制速率为下行 **3,000,000 bit/s**、上行 **1,000,000 bit/s**、延迟 **50 ms**。结果 JSON 与 `mobile-preview.sh test` 汇总会回报实际 profile。
 - 参数可通过 `--download-mbps`、`--upload-mbps`、`--latency-ms` 指定，或通过 `PROMA_WEB_REMOTE_DOWNLOAD_MBPS`、`PROMA_WEB_REMOTE_UPLOAD_MBPS`、`PROMA_WEB_REMOTE_LATENCY_MS` 环境变量传给 `mobile-preview.sh test`。0.5 Mbps 压力测试仍可显式选择，例如设置 `PROMA_WEB_REMOTE_DOWNLOAD_MBPS=0.5`；不再作为默认。
 - 验证：Harness 单测 **2 pass / 0 fail**（覆盖 3/1 Mbps 默认及 0.5 Mbps 压力换算）；`node --check`、`bash -n`、`git diff --check` 通过。此为参数化实现与本地验证，尚非真实 `~/.proma-dev` 3 Mbps E2E 结果。
+
+## 2026-09-30: 真实 3 Mbps 验收继续受安全启动门控
+
+- 本轮新增提交：`b7e128b1` 临时移除启动链的按名清理调用；`20386656` 拒绝已退役 epoch 迟到增量并覆盖工作区移出后同 ID 恢复；`97066aa2` 将 Harness 网络条件参数化。提交均在 `fix/mobile-session-sync-20260929`，没有 merge、push、打包或安装。
+- 上述安全计划 `dev-process-cleanup-safety.md` 仍标记“待执行”，完整 PID/进程归属安全启动入口尚未审查就绪。虽然临时 package 改动和静态 grep 已证明启动链不再调用 `dev-kill`、`pkill`、`killall`、`taskkill`，按用户约束仍未调用 `mobile-preview.sh start`/`dev.sh`，未启动或停止任何进程、未改端口/Tailscale Serve、未触碰正式版或 `~/.proma-dev`。
+- 因启动门控未解除，未执行 830 会话列表、41.9 MB 历史、180 秒空闲、双端实时同步、越权隔离、临时会话清理/hash 核对；也未在本轮运行全量 `bun test` 与三个 build。定向验证仍以各前置条目所记录结果为准。此前最后一次环境快照显示 17889/5173 无监听、8443 Serve 关闭；本轮没有重新采集快照，也未改变该状态。

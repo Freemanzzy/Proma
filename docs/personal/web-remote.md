@@ -18,11 +18,13 @@
 | 数据目录 | 安装版 `~/.proma/web-remote/`，开发实例 `~/.proma-dev/web-remote/`：`config.json`、`devices.json`、`pairing.json`、`push-subscriptions.json`、`vapid.json`（均 0600，不入库） |
 | 端口 | 安装版 `127.0.0.1:17888` ← Tailscale Serve https 443（常开）；开发实例 `127.0.0.1:17889` ← Tailscale Serve https 8443（仅同步验证期间临时开启，结束即关闭）。开发实例 `allowedOrigin` 带 `:8443` |
 
-启动开发实例：
+启动开发实例（仅在独立进程安全启动入口完成审查后）：
 
 ```bash
 PROMA_WEB_REMOTE=1 bash scripts/personal/dev.sh
 ```
+
+**当前分支临时启动措施（2026-09-30）**：为避免启动链按进程名清理，在 `apps/electron/package.json` 的 `dev` 与 `dev:electron` 中移除了两处 `dev-kill` 调用；`scripts/dev-kill.ts`、`scripts/personal/dev.sh` 的进程实例预检和独立进程安全工作树均未修改。静态检查确认 `mobile-preview.sh start → dev.sh → bun run dev` 不再调用 `dev-kill`、`pkill`、`killall` 或 `taskkill`。这只是临时措施，完整 PID/进程归属安全启动器仍待完成审查；安全入口就绪前不要启动测试开发实例，也不要退出或结束正在运行的正式版。
 
 暴露给 tailnet（安装版，只需一次，可随时撤销）：
 
@@ -97,9 +99,9 @@ tailscale serve --https=8443 off
 
 手机预览与回归统一使用仓库脚本 `scripts/personal/mobile-preview.sh`（仅对开发实例运行，不对安装版运行）：
 
-- `bash scripts/personal/mobile-preview.sh start`：检查 17889/5173 空闲、开启临时 8443 Tailscale Serve、后台启动开发实例并等待启动与分级覆盖率 100% 日志；PID/日志分别记于 `/tmp/proma-mobile-preview.pids` 与 `/tmp/proma-mobile-preview.log`。
+- `bash scripts/personal/mobile-preview.sh start`：检查 17889/5173 空闲、开启临时 8443 Tailscale Serve、后台启动开发实例并等待启动与分级覆盖率 100% 日志；PID/日志分别记于 `/tmp/proma-mobile-preview.pids` 与 `/tmp/proma-mobile-preview.log`。**须先完成独立进程安全启动入口审查**；当前分支虽已临时移除按名清理调用，但不等于完整安全入口已验收。
 - `bash scripts/personal/mobile-preview.sh sim [--device <name|udid>]`：默认启动 iPhone 17 Pro 模拟器、打开 Simulator、生成配对码并通过 AXe 的辅助功能树定位配对控件，配对后打开 `/app/` 并以 `simctl` 截图确认界面。
-- `bash scripts/personal/mobile-preview.sh test [suites...]`：默认运行既有 iPhone/Android 回归套件并追加 `iphone:heavy-session` 大会话套件；另可显式运行 `iphone:cellular`，以 CDP 50 ms RTT / 0.5 Mbps 下行验证弱网历史首屏和省流量图像策略（静态资源在开启节流前已加载，因此不代表更新后资源冷启动）。每套单独去掉代理变量并受 420 秒外层 watchdog 保护，终端只汇总结果，完整 harness 输出分别保存在 `/tmp/proma-mobile-preview-<ua>-<suite>.log`；结束核查无残留 `proma-mobile-chrome`。
+- `bash scripts/personal/mobile-preview.sh test [suites...]`：默认运行既有 iPhone/Android 回归套件并追加 `iphone:heavy-session` 大会话套件；真实会话历史、空闲同步与实时同步 suite 默认使用下行 **3 Mbps**、上行 **1 Mbps**、延迟 **50 ms**。可在调用前设置 `PROMA_WEB_REMOTE_DOWNLOAD_MBPS`、`PROMA_WEB_REMOTE_UPLOAD_MBPS`、`PROMA_WEB_REMOTE_LATENCY_MS` 覆盖，或直接运行 harness 并传 `--download-mbps`、`--upload-mbps`、`--latency-ms`。0.5 Mbps 仍可显式用于压力测试（例如 `PROMA_WEB_REMOTE_DOWNLOAD_MBPS=0.5`），不是当前默认；显式 `iphone:cellular` 也遵循选定 profile。静态资源在开启节流前已加载，因此不代表更新后资源冷启动。每套单独去掉代理变量并受 420 秒外层 watchdog 保护，终端只汇总结果，完整 harness 输出分别保存在 `/tmp/proma-mobile-preview-<ua>-<suite>.log`；结束核查无残留 `proma-mobile-chrome`。
 - `bash scripts/personal/mobile-preview.sh status` 查看服务、模拟器与 harness 进程；`stop` 只按记录 PID 停止开发实例进程树，关闭 8443 并确认 Serve 路由状态。用户需要继续体验时，最后运行 `start` 与 `sim`，保持服务运行，不要执行 `stop`。
 
 ### 首屏资源拆分评估（2026-09-28）
@@ -182,13 +184,14 @@ Web Remote WebSocket 为超过 16 KB 的消息启用 per-message deflate；服�
 - 2026-09-30 本地受限导入结果：备份目标工作区索引 830 条会话、826 个匹配 JSONL（535,645,225 B）；目标真实会话 JSONL 为 41,914,743 B。安全审计确认导入根仅有会话/工作区数据及最小 Web Remote 配置，且没有遗留正式 `/.proma/` 路径引用。附件、Pi runtime artifact、项目文件及其他 4 个工作区的会话数据均未导入，因此历史中指向这些缺失资源的旧引用不保证可打开。
 - **0.5 Mbps 压力测试（不是当前网络代表值）**：iPhone UA Chromium，经开发 Serve；下行 524,288 bit/s、50 ms RTT、上行 1,048,576 bit/s。真实 830 条会话列表约 459,730 B responseUtf8、613,300 B 应用层发送，fresh-list 调用约 10,135 ms；41,914,743 B 真实会话历史首次显示约 4,349 ms。历史 IPC 约 197,907 B responseUtf8 / 应用层计量、CDP 解压 WebSocket payload 140,728 B；deflate 估算 58,844 B、bufferedPeak 2,796,190 B。CDP 解压 payload 与应用层计量都不是压缩线缆字节；`wireBytes` 为 `null`。
 - **当前链路验收目标（2026-09-30 用户提供）为 3 Mbps 中继**，0.5 Mbps 只作压力测试，不得用来代表当前使用体验。本轮未完成 3 Mbps 真实备份 E2E：开发应用端口没有监听；独立安全启动任务尚未就绪，因此不运行旧 `mobile-preview.sh start`/`dev.sh` 链，也不把 Tailscale Serve 配置当成可用服务。已关闭无上游进程的临时 8443 路由。3 Mbps 列表/历史与180秒空闲专项待安全启动入口可用后测量。
+- Harness 已在 2026-09-30 参数化为 3/1 Mbps、50 ms 默认值，并覆盖列表、真实历史、实时操作与空闲 suite；单测验证 bit/s 到 CDP byte/s 换算及显式 0.5 Mbps 压力档。**这是离线实现验证，不是 `~/.proma-dev` 实测结果**。截至本轮，安全启动入口计划仍是待执行；未运行 `mobile-preview.sh start`、未确认/改变端口或 Serve 状态、未改正式版数据，也未清理真实导入会话。
 
 ### 会话元数据增量事件契约（2026-09-30）
 
 - `agent-session-manager.ts` 的索引写入点是会话元数据增量的单一事件源；按每次持久化索引前后的安全投影生成 upsert/remove。投影含 renderer 实际用到的 `parentSessionId`、`rootSessionId`、`sourceDelegationId`、`delegationStatus`、`sourceAutomationId`，以保持子会话树、运行状态和自动任务分组；不读取这些字段的 `delegationRole`、`delegationDepth`、`automationGraduated` 不随事件下发。
 - 事件携带 main-process boot UUID `epoch` 与单调 `sequence`。可清除的列表分类字段通过 `clearedFields` 显式标记，防止客户端浅合并后残留旧关系/分组；不下发 `delegationGoal`、`piSessionFile`、`piEntryBindings`、凭据、secret、绝对路径或其他未列入投影的字段。
 - `agent:session-metadata-changed` 在 full-ui 分级表中是 `read/workspace`。服务器按当前 workspaces allowlist 定向过滤；会话移出已授权范围时只发送此前允许列表的 `remove` + session ID，不发送标题或目标工作区；目标工作区未授权的新增/更新、未授权会话删除均拒绝。
-- Renderer 的 revision journal 记录每次增量；所有列表快照写入使用请求开始时的 revision，并重放请求进行期间到达的增量。恢复时按 `epoch`/`sequence` 检查顺序，epoch 变化时从新进程序号重新接受；空闲 WebSocket 重连会回取 active/archive 权威快照。归档视图、active 列表、标签与删除后选中态共用增量路径；草稿保持隐藏，删除与工作区移出都清理本地条目。
+- Renderer 的 revision journal 记录每次增量；所有列表快照写入使用请求开始时的 revision，并重放请求进行期间到达的增量。cursor 按 `epoch`/`sequence` 检查顺序：新 main-process epoch 可从 sequence `1` 开始；切换后将旧 epoch 记为 retired，迟到的旧 epoch 事件会被拒绝，不能回滚 cursor。WebSocket 重连会回取 active/archive 权威快照，但不清零已识别 epoch 的顺序。归档视图、active 列表、标签与删除后选中态共用增量路径；草稿保持隐藏，删除与工作区移出都清理本地条目；同 ID 后续合法 upsert 会清除删除标记。
 - 删除标记与增量 journal 均最多保留 8,192 条。若非常旧的 snapshot 在 journal 超限后才返回，将丢弃该 stale snapshot、保留当前列表并等待下一次权威同步，不用不完整历史覆盖现有状态；同 ID 的后续合法 upsert 会解除 tombstone。单测覆盖旧快照晚到改名/删除、epoch 重启、移出范围和恢复、清除字段、cursor/journal 两种消费顺序及保留上限 fail-closed。
 - 端到端状态：测试只在此前受限开发实例上由 Chromium harness 发 raw IPC 模拟另一个客户端，证实创建/改名/归档恢复/删除更新可见，断线后回补；该操作延迟不是独立桌面进程或真手机 3 Mbps 测量。当前安全启动入口未就绪、17889 无监听、8443 已关闭，故当前分支没有新的 3 Mbps 双端 E2E 或真实跨工作区移动操作；跨工作区权限目前由manager/full-ui单测覆盖。
 - 最终离线状态核对（2026-09-30）：开发端口 17889/5173 无监听，临时 Tailscale Serve 8443 已关闭；只保留安装版 17888 的既有 Serve 路由，未尝试启动或停止任何应用进程。
