@@ -1069,3 +1069,8 @@
 - 对超过 **256 KiB** 的 full-ui IPC 响应，仍按约 **180 KiB** 块大小发送，但现在按 UTF-8 字符边界切分并以文本帧传输；shim 直接按序拼接文本，不再 base64 解码。发送与计量使用相同切块函数，`base64PayloadBytes` 对新文本帧为 0，`appSentBytes` 包含帧开销。
 - 单测覆盖 CJK/emoji 边界分块、帧重组一致及上限；Web Remote 定向测试 **37 pass / 0 fail**。`git diff --check` 与全量 typecheck/构建留待后续收尾。
 - 改前 830 会话 3 Mbps 基准采用 2026-09-30 已记录的 `agent:list-sessions`：responseUtf8 **459,810 B**、appSent **613,404 B**。本机当前 dev 未运行，改后真实 830 会话 metrics/harness 测量安排在后续 dev 启动验证中采集；不得以模拟估算冒充实测。
+
+## 2026-10-01: 发送核对兼容 SDK 历史消息结构
+
+- 收尾代码复核发现 `agent:get-sdk-messages` 返回持久化 SDK 结构 `{ type: 'user', message: { content } }`，不只存在旧式 `{ role: 'user', content }`。修正发送核对器兼容两种结构，避免真实 SDK 用户消息被误判为缺失；测试改用实际 SDK 包装结构覆盖。
+- 定向 `web-electron-shim.test.ts` **4 pass / 0 fail**，`git diff --check` 通过。

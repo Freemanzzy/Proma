@@ -9,8 +9,8 @@ describe('mobile send acknowledgement fallback', () => {
   test('finds the submitted text in a recent user message', async () => {
     const text = '用户发送的内容'.repeat(30)
     const result = await verifySentAgentMessage(text, async () => [
-      { role: 'assistant', content: text },
-      { role: 'user', content: [{ type: 'text', text: `prefix ${text}` }] },
+      { type: 'assistant', message: { role: 'assistant', content: text } },
+      { type: 'user', message: { role: 'user', content: [{ type: 'text', text: `prefix ${text}` }] } },
     ])
     expect(result).toBe('found')
   })

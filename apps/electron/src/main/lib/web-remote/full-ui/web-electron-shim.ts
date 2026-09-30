@@ -265,8 +265,11 @@ export async function verifySentAgentMessage(sentText: string, loadHistory: () =
     const needle = sentText.slice(0, 200)
     if (!needle || !Array.isArray(history)) return 'not-found'
     const found = history.some((message) => {
-      if (!message || typeof message !== 'object' || (message as { role?: unknown }).role !== 'user') return false
-      return userMessageText((message as Record<string, unknown>).content).includes(needle)
+      if (!message || typeof message !== 'object') return false
+      const record = message as Record<string, unknown>
+      if (record.role !== 'user' && record.type !== 'user') return false
+      const nested = record.message && typeof record.message === 'object' ? record.message as Record<string, unknown> : record
+      return userMessageText(nested.content).includes(needle)
     })
     return found ? 'found' : 'not-found'
   } catch {
