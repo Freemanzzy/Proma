@@ -1033,3 +1033,10 @@
 - 清理：最终 CDP 超时 run 遗留的两个 `web-remote-sync-*` harness 会话按该 run 基线与标题前缀核实后，使用应用 `deleteAgentSession` API 删除；cleanup suite 明确删除 **2** 条、无错误，之后回到 **830** 条。after-start 与 after-cleanup canonical session SHA-256 均为 `090d9a28…467c7149`；826 个 JSONL 总字节 **535,970,089 B**，JSONL 集合 SHA-256 前后均为 `71688f45…43a53cac`。启动前原始索引 hash 为 `62a5992e…513f1c59`，启动后为 `bc0d6e2c…d875f977`；启动时索引指纹变化原因本轮未再追查。正式 `~/.proma`、备份和导入源未写入。
 - 0.5 Mbps **旧压力对照**（非本轮）：830 列表 responseUtf8 **459,730 B**、appSent **613,300 B**、fresh-list **10,135 ms**；同一 41,914,743 B 历史首屏 **4,349 ms**。Smoke/attachments 未跑（隔离 dev 无渠道）；独立桌面 UI/真机 iOS Safari 和真实跨工作区移动也未 E2E。子任务/自动化分组、移出授权范围只发 ID-only remove、迟到旧快照不复活由本轮全量单测覆盖。
 - 收尾验证：全量 `bun test` **648 pass / 0 fail**（97 files，1,581 assertions）；workspace typecheck 通过；`build:main`、`build:renderer`、`build:web-preload` 均通过。Renderer 仍有 >500 KB chunk 警告。未 merge/push/打包/安装；dev 与 8443 保持运行。
+
+## 2026-09-30: 手机左侧栏仅在导航状态变化后收起
+
+- 移除 mobile-patch document capture handler 对左栏任意点击都删除 `webRemoteSidebarOpen` 的行为。现在比较点击前后的导航状态：左栏中活跃会话的 `data-session-switch-id`/会话类型变化，或 Chat/Agent 模式 rail 的当前选中状态变化时才收起。活跃行暂时消失（如折叠分组）不视为导航；箭头、分组折叠、更多菜单/菜单项和输入操作保持抽屉打开。
+- `forwardMobileControl` 未改；Todo、定时任务、MCP/Skills、项目记忆、日程、设置和新建会话仍沿用原有转发/收起路径。未改 `LeftSidebar.tsx` 等上游组件；补丁不比较 `innerHTML` 或 SVG 内容。
+- 回归测试覆盖箭头点击、更多菜单、分组折叠不收回；会话选择与 Chat/Agent 模式状态变化收回。`mobile-patch.test.ts` **5 pass / 0 fail**；全 workspace typecheck 与 `build:main` 通过。
+- dev 自动重载后状态核验：启动器 PID `82401` 运行，17889 由 PID `8911` 监听，5173 由 PID `82429` 监听，Serve 8443→17889；正式版 PID `83615` 与 443→17888 未变。`~/.proma-dev` 保持 830 条，会话与 JSONL 集合 hash 未变。未运行 harness、未 merge/push/打包/安装。

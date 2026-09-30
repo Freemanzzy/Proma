@@ -277,11 +277,29 @@ export const MOBILE_JS = String.raw`(function(){
       if(event.pointerType==='touch'||Date.now()-lastTouchAt<800){event.stopPropagation();if(event.stopImmediatePropagation)event.stopImmediatePropagation()}
     },true);
   });
+  function sidebarNavigationState(sidebar){
+    var activeSession=sidebar.querySelector('[data-session-switch-id].agent-session-item-active, [data-session-switch-id].session-item-selected');
+    var session=activeSession?((activeSession.getAttribute('data-session-switch-type')||'')+':'+(activeSession.getAttribute('data-session-switch-id')||'')):'';
+    var agentIcon=sidebar.querySelector('button[aria-label^="切换到 Agent 模式"] span');
+    var chatIcon=sidebar.querySelector('button[aria-label="切换到 Chat 模式"] span');
+    var mode=agentIcon&&agentIcon.classList.contains('bg-primary/10')?'agent':chatIcon&&chatIcon.classList.contains('bg-primary/10')?'chat':'';
+    return {session:session,mode:mode};
+  }
   document.addEventListener('click',function(event){
     var target=event.target;
     if (!(target instanceof Element)) return;
     if (window.__PROMA_SKIP_NEXT_CLICK && target.closest('button')) { window.__PROMA_SKIP_NEXT_CLICK=false; event.stopPropagation(); return; }
-    if (target.closest('[data-web-remote-sidebar="left"]')) { delete body.dataset.webRemoteSidebarOpen; }
+    var sidebar=target.closest('[data-web-remote-sidebar="left"]');
+    if (sidebar && body.dataset.webRemoteSidebarOpen==='true') {
+      var before=sidebarNavigationState(sidebar);
+      window.setTimeout(function(){
+        if(body.dataset.webRemoteSidebarOpen!=='true')return;
+        var after=sidebarNavigationState(sidebar);
+        var sessionChanged=!!after.session&&after.session!==before.session;
+        var modeChanged=!!after.mode&&after.mode!==before.mode;
+        if(sessionChanged||modeChanged)delete body.dataset.webRemoteSidebarOpen;
+      },120);
+    }
     var rightPanelTrigger=target.closest('button[aria-label="Todo"],button[aria-label="定时任务"],button[aria-label="MCP/Skills"],button[aria-label="项目记忆"],button[aria-label="日程"]');
     if (rightPanelTrigger) { window.setTimeout(function(){body.dataset.webRemoteRightOpen='true'}, 0); }
     if (target.closest('button[aria-label="打开设置"]')) { window.setTimeout(function(){delete body.dataset.webRemoteRightOpen}, 0); }
