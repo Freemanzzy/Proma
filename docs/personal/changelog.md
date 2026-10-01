@@ -1161,3 +1161,12 @@
 - 全量 `bun test`：**667 pass / 0 fail**（100 files，1,655 assertions）；workspace `bun run typecheck` 通过；`build:main`、`build:renderer`、`build:web-preload` 均通过。Renderer 有既有 >500 KB chunk warning。
 - 开发实例按要求重新启动：launcher PID 7836，17889/5173 在线，临时 Serve 8443→17889；最终 `.proma-dev` 会话索引仍 **830** 条。正式 Proma PID `95991` 未变。
 - 最终 `git diff --check` 通过。未 merge、未 push、未打包或安装。
+
+## 2026-10-01: 安装 f8e745f7（完成事件瘦身批次）
+
+- Claude Code 13:54 用 `install-update.sh` 安装 `f8e745f7`（0.19.58），EXIT=0，备份校验通过，前后快照一致；钥匙串弹窗 1 次。previous 轮换为 `ed95818c`。
+- 健康检查：17888 监听、Serve 仅 443 → 17888、main.log 无 `[FATAL]`/`[ERROR]`、17 个启用任务无过期、会话 943 / 渠道 7 与安装前一致。
+- 手机：安卓打开/切换会话不再弹键盘；蜂窝下 Agent 跑完一轮，最后一段无需刷新即显示。
+- 计量：`agent:stream:complete` 每 30 秒窗口约 1 KB（上一版单次约 5.3 MB），Agent 完成窗口 bufferedAmountPeak 约 573 KB（上一版约 5.5 MB）；背压丢弃与 resync 均为 0。
+- 待查：Agent 运行期间 `agent:list-sessions` 每 30–60 秒一次、每次约 525 KB；安装后 Wi-Fi 阶段同设备仍出现过两条同时关闭的连接；Top3 有 3 项时计量行仍达 332 字符截断上限。列入下一批。
+- 详见本机交接 `install-result-2026-10-01-3.md`。
