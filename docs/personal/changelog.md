@@ -1223,3 +1223,12 @@
 - 修复的测试 harness 显式注入 fake `location`、`history` 与全部计时器 API；afterEach 恢复 Linkedom 原型描述符，并清理共享 Window 标记。通知 deep-link 测试已并入 `mobile-patch.test.ts`，独立测试文件移除。根因是裸全局 `location` 在 Bun `new Function` 环境未定义、导致 presence callback 在请求前抛错；跨实例共享的 Linkedom 状态由 fixture 隔离处理，未改产品逻辑迁就测试。
 - 合并后的 `mobile-patch.test.ts` **9 pass / 0 fail**；按 `alarm 900` 运行的全量 `bun test` 正常结束，**676 pass / 0 fail**（100 files，1,691 assertions）；typecheck 与 `build:main` 通过。
 - dev 保持运行：17889/5173 在线，8443→17889；`.proma-dev` **831** 条；正式版 PID `15699` 未变。前一条 900 秒超时记录为修复前结果，本次全量通过已完成复核。
+
+## 2026-10-01: 安装 76cad12c（运行期列表与 presence 批次）
+
+- Claude Code 17:54 用 `install-update.sh` 安装 `76cad12c`（0.19.58），EXIT=0，备份校验通过，前后快照一致；钥匙串弹窗 1 次。previous 轮换为 `f8e745f7`。
+- 健康检查：17888 监听、Serve 仅 443 → 17888、main.log 无 `[FATAL]`/`[ERROR]`、17 个启用任务无过期、会话 943 / 渠道 7 与安装前一致。
+- 手机：Wi-Fi → 蜂窝、Agent 跑完一轮、点推送通知直达对应会话，用户确认通过。
+- 计量：安装后 `agent:list-sessions` 仅首次打开 1 次，Agent 运行期 0 次（上一版每 30–60 秒约 525 KB）；`agent:get-queued-messages` 合计 10 次（原约 250）；完成事件约 1 KB；摘要行完整含 `scN`。
+- 待查：18:03:06 同一设备 212 ms 内建立两条连接且都保持打开（疑与通知深链有关）；`agent:list-active-sessions` 每连接 4–7 次（约 84 KB/次）；iPhone 首次加载 `get-sdk-messages` 单连接合计约 4.2 MB，背压丢弃 2、resync 2。列入下一批。
+- 详见本机交接 `install-result-2026-10-01-4.md`。
