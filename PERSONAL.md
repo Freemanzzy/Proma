@@ -5,8 +5,8 @@
 ### 基线
 - 上游：`proma-ai/Proma`；个人 Fork：`Freemanzzy/Proma`。
 - 基线正式 tag：`v0.19.58`（`f20943edd047ecdc929df67de9412d6e58cd4312`）；Electron 版本必须跟随官方 tag，不自行递增。
-- 当前主线：`personal`；本轮剩余优化分支：`feature/list-finish-2026-09-28`。
-- 最新已验证基线：2026-09-28 全量 `bun test` 596 pass / 0 fail / 0 error；main.log 优化验证后为 599 pass / 0 fail / 0 error。
+- 当前主线：`personal`；正式安装版 `76cad12c`（2026-10-01）。已验证未发布的分支见 [`docs/personal/backlog.md`](./docs/personal/backlog.md)。
+- 最新已验证基线：2026-10-01 `personal` 全量 `bun test` 676 pass / 0 fail（打包日志）；待合入分支 `fix/mobile-dedupe-20261001` 为 678 pass / 0 fail。
 
 ## 与上游的差异
 
@@ -31,7 +31,7 @@
 - Renderer 首屏主 bundle 约 5.74 MB（Brotli 约 1.74 MB）；因未证明安全切分能减少首屏 ≥30%，暂不改构建配置，分析见 Web Remote 文档。
 - `serve-sim@0.1.47` 已改为 apps/electron 精确运行时依赖，内置路径使用 Electron 自带 Node，npx 保留为包缺失时回退；待后续正式打包复核 ASAR 签名与安装版行为。
 - 手机适配新增的 `data-web-remote-*` 稳定性标记当前保留；替换前需证明替代定位唯一且全套 iPhone/Android harness 通过。
-- 近期待打包修复和设备同步状态见 [`docs/personal/changelog.md`](./docs/personal/changelog.md) 末尾；打包前按当前主线与工作分支提交核验。
+- 待合入分支、后续待办、真实负载测试触发条件与 dev 数据约定的唯一清单：[`docs/personal/backlog.md`](./docs/personal/backlog.md)；逐次安装与验证结果见 changelog 末尾。
 
 ## 变更历史
 

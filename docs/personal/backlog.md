@@ -1,0 +1,29 @@
+# Proma 个人版 · 待合入分支与待办（SSOT）
+
+本文件是“已完成但未发布的分支”和“已确认的后续待办”的唯一权威清单。下次功能批次或整改时，从这里挑选合入；合入或放弃后在此更新状态，并在 `docs/personal/changelog.md` 追加记录。
+
+## 待合入分支（已验证、未发布）
+
+| 分支 | 基于 | 内容 | 验证 | 状态 |
+|---|---|---|---|---|
+| `fix/mobile-dedupe-20261001` | `personal` efc420c1 | P：手机端 `agent:list-active-sessions` / `count-archived-sessions` 并发合并 + 3 秒复用，元数据变更事件使缓存失效（同组操作 13 次 / 825 KB → 6 次 / 382 KB）。Q：IPC WebSocket 带 `src` 与随机 `page` 参数，v2 `open` 行记录来源，用于区分同页双连接与多页面实例。R：非省流量模式首屏历史预算 2 MiB → 1 MiB（41.9 MB 历史弱网首屏 11.3 s → 7.7 s），“加载更早”仍 2 MiB/页 | 全量 678 pass / 0 fail；typecheck 与 main/renderer/web-preload 构建通过；dev 3 Mbps harness | 用户 2026-10-01 决定暂不发布，随下一批合入（合入前与当时的 `personal` 重新 --no-ff 合并并全量回归） |
+
+已归档、不合入：开发进程安全完整方案（原 `fix/dev-process-safety-20260930`，约 2,000 行 launchd 托管），以 git bundle 存档于本机会话工作台 `archive/dev-process-safety-20260930.bundle`；评估结论为过重，改走下方“开发启动小修复”。
+
+## 后续待办（按建议优先级）
+
+1. **观察项（装上 dedupe 分支后用计量确认）**：同设备是否仍出现两条同一秒建立的连接（看 `open` 行的 `page`）；iPhone 首次加载约 4.2 MB `get-sdk-messages` 是单次还是多次。
+2. **开发启动小修复（约 100 行以内）**：删除或改造 `apps/electron/scripts/dev-kill.ts` 中的 `pkill` / Windows 按名 `taskkill`（`dev:kill` 手动命令仍可触发）；dev 启动脱离父进程（避免随正式版退出）；`mobile-preview.sh status/stop` 结束前核对 PID 启动时间，进程在但端口未监听时判为不健康并关闭 8443。用一次真实 start → stop 验收。
+3. **正式版后台服务诊断**：为 Web Remote 启停、调度器 tick、渲染进程重建、退出阶段写 `[INFO]`；定期自检“Web Remote 已启用但端口未监听”“启用任务 nextRunAt 过期 >10 分钟”并告警。对应 2026-09-30 凌晨停摆（根因未证实）。
+4. **两层测试**：小测试集功能回归（约 20 条会话，含父子任务、自动化、归档、两个工作区和一条合成大历史，脚本生成、每次重置）；真实负载测试按下方“真实负载测试触发条件”执行，只测量不作功能判定。
+5. **手机查看子任务**：点子任务时自动打开右侧抽屉并在窄屏正常显示（只改 mobile-patch，约半天）。
+6. **`restoreQueuedMessages()` 合并为一次请求**（目前 Web Remote 已限定范围，约 10 次）。
+7. **发送的可见确认标记**（可选，用户未要求）。
+8. **“只推送手机正在看的会话的实时输出”**：完成事件瘦身与背压上线后积压已消除，暂不需要；若计量再出现 MB 级峰值再评估。
+9. **WebAssembly 被 CSP 拦截的启动报错**：既有独立缺陷，不得放宽 CSP 修复。
+10. **上游同步准备**：下次官方 tag 时把 `useGlobalAgentListeners.ts` 的个人版改动拆为独立模块，降低冲突面（见本机 `upstream-surface` 报告）。
+
+## 测试与开发数据约定
+
+- **真实负载测试触发条件**（父会话在派单前判断，并在交接/安装申请写明做了或没做及原因）：改动涉及手机列表数据内容（字段、投影、瘦身）、历史加载（分页、加载更早、按需媒体）、传输层（WebSocket、压缩、分块、超时、重连同步）、首次加载前端资源明显变大、同步官方版本且上游改了会话存储或 Web Remote、用户反馈手机变慢。其余改动用功能回归 + 打包冒烟即可。
+- **dev 数据**：`~/.proma-dev` 含按 `scripts/personal/import-session-workspace.py` 选择性导入的真实会话（单工作区 allowlist），以及用户 2026-10-01 授权复制的正式渠道 `channels.json`（权限 600，原文件改名保留）。只在本机，不提交仓库；密钥不解密、不打印。dev 中让 Agent 运行只用新建会话，不在导入的旧会话中运行（其附加目录可能指向真实仓库）；dev 对话消耗真实 API 额度。8443 只在测试期间开启。

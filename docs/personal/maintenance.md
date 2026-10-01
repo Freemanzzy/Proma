@@ -70,7 +70,7 @@ Claude Code 接手安装时只做必要复核：包内 marker commit 等于 `per
 
 ## 5. 文档规则（SSOT）
 
-- 每类事实只有一个权威位置：当前基线、与上游差异、同步规则 → `PERSONAL.md`；完整变更历史 → `docs/personal/changelog.md`；共同维护规则 → 本文件；Claude Code 的职责细节 → `CLAUDE.md`；操作步骤 → `docs/personal/*-runbook.md`；手机访问 → `docs/personal/web-remote.md`。其他文档引用，不复制。
+- 每类事实只有一个权威位置：当前基线、与上游差异、同步规则 → `PERSONAL.md`；完整变更历史 → `docs/personal/changelog.md`；共同维护规则 → 本文件；Claude Code 的职责细节 → `CLAUDE.md`；操作步骤 → `docs/personal/*-runbook.md`；手机访问 → `docs/personal/web-remote.md`；待合入分支、后续待办、真实负载测试触发条件与 dev 数据约定 → `docs/personal/backlog.md`。其他文档引用，不复制。
 - 变更记录只追加（`## YYYY-MM-DD: ...`），不改写历史；旧记录有误用新记录更正并写明更正了什么。
 - 改动影响权威内容时，同一提交内同步更新对应文档，并在 `docs/personal/changelog.md` 追加记录，写明改了哪些文档。
 - 验证、审查、故障处理结果直接写入变更记录，无需询问：方法、实测证据、通过项、缺陷项、待办。

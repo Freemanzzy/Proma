@@ -1232,3 +1232,9 @@
 - 计量：安装后 `agent:list-sessions` 仅首次打开 1 次，Agent 运行期 0 次（上一版每 30–60 秒约 525 KB）；`agent:get-queued-messages` 合计 10 次（原约 250）；完成事件约 1 KB；摘要行完整含 `scN`。
 - 待查：18:03:06 同一设备 212 ms 内建立两条连接且都保持打开（疑与通知深链有关）；`agent:list-active-sessions` 每连接 4–7 次（约 84 KB/次）；iPhone 首次加载 `get-sdk-messages` 单连接合计约 4.2 MB，背压丢弃 2、resync 2。列入下一批。
 - 详见本机交接 `install-result-2026-10-01-4.md`。
+
+## 2026-10-01: 新增待办 SSOT，dedupe 分支暂缓发布
+
+- 用户决定：`fix/mobile-dedupe-20261001`（P 活跃列表合并、Q 连接来源标记、R 首屏历史 1 MiB；678 pass / 0 fail）保留不发布，等下一批功能或整改时一起合入；分支已推送到 origin 保存。dev 与 8443 已停止。
+- 新增 `docs/personal/backlog.md` 作为“待合入分支 / 后续待办 / 真实负载测试触发条件 / dev 数据约定”的唯一清单；`PERSONAL.md` 基线与“已知问题与待办”改为引用该文件；`maintenance.md` §5 SSOT 映射补充该文件。
+- 记录：dev 数据已按用户授权复制正式渠道 `channels.json`（本机、600 权限，原文件改名保留），可真实发消息测试。
