@@ -145,6 +145,7 @@ harness 默认整体超时 300 秒（可用 `--timeout-ms` 覆盖），每次页
 
 - 完整 UI 目前必须保留全量列表，以支持全部工作区/归档视图、搜索与当前会话定位；不能只下发最近 30 条或截断列表。Web Remote 对 `agent:list-sessions`、`agent:list-active-sessions`、`agent:list-archived-sessions` 均应用移动端 metadata 瘦身，桌面 IPC 不变。
 - 手机列表不再下发 `delegationGoal`、`piSessionFile` 或可能很大的 `piEntryBindings`。`piEntryBindings` 只在用户从一条回复启动“回复探索”时，通过 `web-remote:get-session-entry-bindings` 按目标 session 查询键→true 的最小映射；该接口为 `read/session`，请求须通过既有 session→workspace 授权校验。正式设备行为与跨工作区拒绝仍须按变更记录完成开发实例验收。
+- 手机 renderer 对相同参数的 `agent:list-sessions`、`agent:list-active-sessions`、`agent:list-archived-sessions` 和 `agent:count-archived-sessions` 并发请求合并，并在 **3 秒**内复用成功结果；收到 `agent:session-metadata-changed` 后先失效这些列表缓存，再分发事件，避免复用过期快照。
 - Push presence 每 5 秒仍需续报。会话 ID 优先使用当前历史窗口 `sessionId`、路由 ID 或活跃 Agent 行 ID；deep-link 需要标题时按 ID 查询 active 列表，其他缺 ID 情形按标题回退 active 列表，不调用全量 `agent:list-sessions`。解析结果按当前 session ID + 标题缓存，标题/ID 改变才重新解析；普通 heartbeat 只 POST presence。
 - Web Remote 运行期间收到本地未知的 Agent stream/title session ID 时，只拉 `agent:list-active-sessions` 并以 `includeArchived=false` 合并；同 ID 60 秒内最多拉取一次，若 active 结果仍不含该 ID，则标为当前 renderer 生命周期内不可见、不再重复查询。桌面 renderer 继续保留全量快照路径。
 - 以上瘦身不改变完整 session 搜索/加载范围。按需 Pi 节点接口的数据体积取决于单个会话分叉数，尚未给它设置分页上限；若单 session 数据异常大，需用真实使用数据另行评估。

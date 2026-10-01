@@ -1232,3 +1232,10 @@
 - 计量：安装后 `agent:list-sessions` 仅首次打开 1 次，Agent 运行期 0 次（上一版每 30–60 秒约 525 KB）；`agent:get-queued-messages` 合计 10 次（原约 250）；完成事件约 1 KB；摘要行完整含 `scN`。
 - 待查：18:03:06 同一设备 212 ms 内建立两条连接且都保持打开（疑与通知深链有关）；`agent:list-active-sessions` 每连接 4–7 次（约 84 KB/次）；iPhone 首次加载 `get-sdk-messages` 单连接合计约 4.2 MB，背压丢弃 2、resync 2。列入下一批。
 - 详见本机交接 `install-result-2026-10-01-4.md`。
+
+## 2026-10-01: 合并 Web Remote 会话列表只读请求
+
+- `web-electron-shim` 将 `agent:list-sessions`、`agent:list-active-sessions`、`agent:list-archived-sessions` 与 `agent:count-archived-sessions` 统一纳入相同参数并发合并及 **3 秒**成功结果复用。收到 `agent:session-metadata-changed` 后先清除此类缓存，再分发元数据事件，避免 3 秒复用旧快照。
+- 改前/改后用同一 `iphone:session-sync` harness、3 Mbps/1 Mbps/50 ms、dev **831** 条索引：`agent:list-active-sessions` 从 **13 次 / 825,491 B** 降到 **6 次 / 381,732 B**；`agent:count-archived-sessions` 从 **18 次 / 1,181 B** 降到 **14 次 / 917 B**。两次 reconnect 均通过，最终索引仍 831，harness 清理通过；归档动作窗口 full-list 调用 0。
+- 同一 harness 的 `agent:list-sessions` 全程聚合数为 **3 次 / 1,381,478 B → 4 次 / 1,841,852 B**，不属于 P 改动通道，且该 suite 含 presence/标题/测试操作等既有读取，metrics 未按单个会话切换动作切片；不把它归因于本改动，保留为既有独立调用需另行归因。
+- `ipc-request-dedupe.test.ts` **3 pass / 0 fail**，覆盖 active 五并发合一、3 秒复用、归档计数复用及 metadata 事件使后续请求失效。`docs/personal/web-remote.md` 已补充契约；`git diff --check` 通过。

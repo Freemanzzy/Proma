@@ -1,5 +1,5 @@
 /* Browser substitute for the small Electron surface imported by preload/index.ts. */
-import { coalesceRequest } from './ipc-request-dedupe'
+import { coalesceSessionListRead, invalidateSessionListReadCache, WEB_REMOTE_SESSION_LIST_READ_CHANNELS } from './ipc-request-dedupe'
 import { isWebRemoteDataSaverEnabled, webRemoteHistoryBudgets } from './mobile-budget'
 const TYPE_KEY = '__proma_web_remote_type'
 if (typeof window !== 'undefined') {
@@ -110,6 +110,7 @@ function normalizeHistoryWindow(value: unknown, sessionId?: string): unknown {
 }
 
 function notify(channel: string, value: unknown): void {
+  if (channel === 'agent:session-metadata-changed') invalidateSessionListReadCache(inFlightReadRequests)
   const event = { sender: window }
   for (const listener of [...(listeners.get(channel) ?? [])]) listener(event, decode(value))
 }
@@ -398,7 +399,9 @@ async function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
       throw error
     }
   }
-  if (channel === 'agent:list-sessions') return coalesceRequest(inFlightReadRequests, JSON.stringify([channel, args]), () => invokeWithToken(channel, args), 3_000)
+  if (WEB_REMOTE_SESSION_LIST_READ_CHANNELS.has(channel)) {
+    return coalesceSessionListRead(inFlightReadRequests, channel, args, () => invokeWithToken(channel, args), 3_000)
+  }
   try {
     return await invokeWithToken(channel, args)
   } catch (error) {
