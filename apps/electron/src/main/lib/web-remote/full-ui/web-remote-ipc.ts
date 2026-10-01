@@ -381,12 +381,13 @@ export class WebRemoteIpcBridge {
     const client: IpcClient = { ws, deviceId, connectionId, confirmations: new Map(), needsResync: false, metrics }
     this.clients.add(client)
     remoteMetrics.devices[connectionId] = metrics
+    const deviceTag = createHash('sha256').update(deviceId).digest('hex').slice(0, 10)
+    recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 2, connectionId, d: deviceTag, event: 'open' }))
     const flushMetrics = () => {
       const channels = Object.entries(metrics.byChannel)
       const hasEventBytes = Object.keys(metrics.eventBytesByChannel).length > 0
       if (channels.length === 0 && !hasEventBytes && metrics.backpressureDroppedEvents === 0 && metrics.resyncCount === 0 && metrics.bufferedAmountPeak === 0) return
       const windowId = randomBytes(6).toString('hex')
-      const deviceTag = createHash('sha256').update(deviceId).digest('hex').slice(0, 10)
       for (const [channel, metric] of channels) {
         recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 2, w: windowId, d: deviceTag, connectionId, c: channel, n: metric.calls, ms: metric.elapsedMs }))
         recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 2, w: windowId, d: deviceTag, connectionId, c: channel, responseUtf8: metric.responseUtf8Bytes, appFraming: metric.appFramingBytes, base64: metric.base64PayloadBytes, appSent: metric.appSentBytes }))

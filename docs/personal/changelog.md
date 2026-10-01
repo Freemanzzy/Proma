@@ -1183,3 +1183,8 @@
 
 - O 检查 `preload/index.ts` 与 `main/ipc.ts` 后确认只有 `getQueuedAgentMessages(sessionId)` 单会话快照接口，没有一次返回全部队列的 IPC；因此未扩展主进程接口。Web Remote 仅查询当前列表中未归档、非草稿且 `running` / `backgroundWaiting` / 有本地队列的会话，再并入现有 queue-map keys；桌面仍检查全部列出的会话与原 queue-map keys。
 - 新增 `selectQueuedMessageRecoverySessionIds()` 及单测：Web Remote 排除闲置 active、归档、draft，仅保留运行/排队与现有队列 key；Desktop 维持全列表。`agent-message-queue.test.ts` **9 pass / 0 fail**。
+
+## 2026-10-01: 记录 full-ui WebSocket 建立事件
+
+- 每条 `/api/ipc` 连接建立时，在当前 30 秒窗口前立即写 v2 `[INFO] scope=Web Remote 计量` 行：`{"v":2,"connectionId":"…","d":"…","event":"open"}`；`d` 是 SHA-256 设备伪名，不写原始 deviceId、事件内容或标题。
+- 单测 `每条 IPC 连接建立时记录 v2 open 事件与设备哈希` 验证事件值、connectionId 和 10 位设备哈希，且日志不含原始测试 deviceId。`full-ui-security.test.ts` **30 pass / 0 fail**；`docs/personal/web-remote.md` 已同步；`git diff --check` 通过。
