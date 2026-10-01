@@ -1193,3 +1193,9 @@
 
 - 背压摘要从 event Top 3 改为 Top 2；加入当前 30 秒窗口 `agent:stream:complete` 次数 `scN`。已知通道别名为 `agent:stream:event`→`se`、`agent:stream:complete`→`sc`、`agent:session-metadata-changed`→`smc`、`agent:stream:error`→`sx`、`chat:stream:chunk`→`cc`、`chat:stream:complete`→`ccmp`、`chat:stream:error`→`cx`；未登记别名的通道保留原名。`scN` 每窗口 flush 后归零。
 - `full-ui-security.test.ts` 验证 complete 事件计数、Top2/别名顺序、未知名称保留与真实最长会话元数据通道场景。含 `[INFO] scope=Web Remote 计量 ` 的构造长行 **223 字符**（≤300）；**30 pass / 0 fail**。更新 `docs/personal/web-remote.md`；`git diff --check` 通过。
+
+## 2026-10-01: 运行期列表与恢复计量批次收尾验证
+
+- 全量 `bun test`：**673 pass / 0 fail**（100 files，1,680 assertions）；workspace `bun run typecheck` 通过；`build:main`、`build:renderer`、`build:web-preload` 均通过。Renderer 保留 >500 KB chunk warning。
+- 最终 `git diff --check` 通过；分支为 `fix/mobile-list-trigger-20261001`，工作树干净；`personal` 与 `origin/personal` 均停在基线 `479597f0`，version **0.19.58**。
+- dev 保持运行（launcher PID **21747**；17889/5173 在线；8443→17889），`.proma-dev` 会话数 **830**；正式 Proma PID `15699` 未变。未 merge、push、打包或安装。
