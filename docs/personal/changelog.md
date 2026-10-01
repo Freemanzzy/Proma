@@ -1127,3 +1127,37 @@
 - 手机：用户确认 OPPO 与 iPhone 蜂窝下响应达标，发消息不再误报“未送达”，页面不卡不断线。
 - 计量 v2 发现：每轮 Agent 完成时 `agent:stream:complete` 携带完整已持久化消息列表（约 5.3 MB），造成约 5.5 MB 积压峰值，背压不覆盖；同一设备加载页面时会同时建立两个连接；单连接 30 秒内 `agent:get-queued-messages` 可达 250 次。列入下一批。
 - 详见本机交接 `install-result-2026-10-01-2.md`。
+
+## 2026-10-01: 手机 stream:complete 移除重复持久化消息
+
+- 仅在 full-ui Web Remote 广播前对 `agent:stream:complete` 的 remoteValue 去掉 `messages`；主进程发出的原始 payload 与桌面 Electron renderer 不变。核对 `useGlobalAgentListeners.ts`：complete handler 不读取 `data.messages`，仍只调用一次 `bumpRefresh()`；`AgentView.tsx` 的 refreshVersion effect 随后使用既有 `getAgentSessionSDKMessages(sessionId)` 读取持久化历史，无需增加 shim IPC 请求，也不改上游组件。
+- 5 条合成、每条约 1 MiB 的消息列表：测试中原始 event **5,243,195 B**，手机下发 event **137 B**（减少 **5,243,058 B**）；桌面 spy 收到原完整 5 条消息，手机事件保留 sessionId/runGeneration/startedAt/resultSubtype 且没有 `messages`，不再产生分块。
+- `full-ui-security.test.ts` **28 pass / 0 fail**；`useGlobalAgentListeners.recovery.test.ts` **2 pass / 0 fail**，验证 complete 使用现有一次刷新路径并保持 AgentView 历史补拉依赖。同步更新 `docs/personal/web-remote.md`；`git diff --check` 通过。
+
+## 2026-10-01: 压缩背压计量摘要行
+
+- 30 秒 v2 背压摘要调整字段顺序为 `connectionId`、`bufferedAmountPeak`、`backpressureDroppedEvents`、`resyncCount` 在前；事件 Top 5 缩为 Top 3，改用 `[channel, bytes]` 紧凑元组并置于末尾。摘要行保留 `v:2`；window/device 仍可由同连接相邻的 IPC v2 计量行关联。
+- 长通道场景使用 `agent:session-metadata-changed`，构造 24 位 connectionId、较大峰值/计数后，含 `[INFO] scope=Web Remote 计量 ` 前缀的整行 **287 字符**（≤300）。`full-ui-security.test.ts` **29 pass / 0 fail**；同步更新 `docs/personal/web-remote.md`；`git diff --check` 通过。
+
+## 2026-10-01: 修复 IPC 重连退避与新连接竞态
+
+- J 调查确认 `/app/` full-ui 的唯一 `/api/ipc` 创建点是 `web-electron-shim.ts::connect()`；renderer 的所有 preload IPC listener/invoke 共用模块级 `socket` / `socketPromise`，mobile-patch 的通知 presence 使用 HTTP，Service Worker 不创建 WebSocket。轻量根页 `/` 的 `/api/stream` 是独立页面/协议，不是 PWA `/app/` 的第二条 full-ui IPC 连接。
+- 找到可复现的重复建连竞态：旧 socket close 安排了 reconnect timer；若其他请求在退避 timer 触发前已创建 replacement socket，而 timer 无条件清空 `socketPromise`，replacement 仍 CONNECTING 时 timer 的 `connect()` 会再创建第三条 socket。修复为 timer 到期直接调用 `connect()`，由其 OPEN/socketPromise 检查复用现有连接。
+- 新增 `web-electron-shim.connection.test.ts`：同一页面的多个监听器只创建一个初始 socket；旧 socket 关闭后，在退避窗口内请求创建 replacement，原 timer 到期不会再创建第三条连接。**1 pass / 0 fail**。正式版的两条记录未含 document/JS realm 标识，不能逐条断定这次竞态就是它们的来源；没有证据显示 full-ui 设计了第二条独立 `/api/ipc` 用途。
+- `agent:get-queued-messages` 来源只调查未修改：`useGlobalAgentListeners.ts::restoreQueuedMessages()` 先对 `agentSessionsAtom` 与本地 queue-map keys 去重，逐 session 顺序调用一次。该函数在 hook 首次挂载及 Web Remote `recoverWebRemoteState()`（WebSocket 重连/页面恢复调用）执行，不是 5 秒定时轮询。约 250 次/30 秒可由一次约 250 个 session 的恢复遍历解释；mobile-js 每 5 秒只重复 POST presence，首次列表查找结果会缓存。
+- 更新 `docs/personal/web-remote.md` 的连接生命周期说明；`git diff --check` 通过。
+
+## 2026-10-01: 安卓会话切换不再自动弹出键盘
+
+- 仅在 `mobile-patch/mobile-js.ts` 为触屏设备安装一次性焦点护栏，以 documentElement dataset 标记避免重复注册。输入框/ProseMirror 仅在最近 **900 ms** 有针对该同一编辑器的 `touchstart` 时保留焦点；程序自动聚焦（如切换会话触发的 `autoFocusTrigger`）立即 `blur()`。不改 AgentView/ChatInput；桌面无触屏不受影响。
+- `mobile-patch.test.ts` 覆盖会话切换后的程序焦点被撤销、用户先触摸输入框后的焦点保留；**6 pass / 0 fail**。更新 `docs/personal/web-remote.md`；`git diff --check` 通过。
+
+## 2026-10-01: 完成事件测试兼容严格索引检查
+
+- 收尾 typecheck 指出大消息完成事件测试读取固定消息索引时需显式确认元素存在；补充非空断言，不改变运行逻辑。workspace typecheck 复跑通过。
+
+## 2026-10-01: stream:complete / WebSocket / Android focus 收尾验证
+
+- 全量 `bun test`：**667 pass / 0 fail**（100 files，1,655 assertions）；workspace `bun run typecheck` 通过；`build:main`、`build:renderer`、`build:web-preload` 均通过。Renderer 有既有 >500 KB chunk warning。
+- 开发实例按要求重新启动：launcher PID 7836，17889/5173 在线，临时 Serve 8443→17889；最终 `.proma-dev` 会话索引仍 **830** 条。正式 Proma PID `95991` 未变。
+- 最终 `git diff --check` 通过。未 merge、未 push、未打包或安装。

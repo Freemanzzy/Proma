@@ -17,7 +17,7 @@ class ManualMutationObserver {
   trigger() { this.callback([], this as unknown as MutationObserver) }
 }
 
-function createMobilePatchHarness() {
+function createMobilePatchHarness(navigatorMock: { maxTouchPoints: number; userAgent: string } = { maxTouchPoints: 5, userAgent: 'Android' }) {
   ManualMutationObserver.instances = []
   const { window, document } = parseHTML(`<!doctype html><html><body>
     <div data-web-remote-sidebar="left"></div>
@@ -71,8 +71,8 @@ function createMobilePatchHarness() {
   const html = renderWebRemoteMobilePatch()
   const script = html.match(/<script nonce="__PROMA_NONCE__">([\s\S]*?)<\/script>/)?.[1]
   if (!script) throw new Error('mobile patch script not found')
-  const run = new Function('window', 'document', 'MutationObserver', 'HTMLElement', 'Element', 'NodeFilter', 'fetch', script)
-  run(window, document, ManualMutationObserver, window.HTMLElement, window.Element, window.NodeFilter, fetchMock)
+  const run = new Function('window', 'document', 'MutationObserver', 'HTMLElement', 'Element', 'NodeFilter', 'fetch', 'navigator', script)
+  run(window, document, ManualMutationObserver, window.HTMLElement, window.Element, window.NodeFilter, fetchMock, navigatorMock)
   const ensureObserver = ManualMutationObserver.instances[0]
   const syncRightObserver = ManualMutationObserver.instances[1]
   const syncMenuObserver = ManualMutationObserver.instances[2]
@@ -169,6 +169,27 @@ describe('renderWebRemoteMobilePatch DOM write convergence', () => {
     agentMode.dispatchEvent(new window.Event('click', { bubbles: true }))
     flushTimeouts()
     expect(body.dataset.webRemoteSidebarOpen).toBeUndefined()
+  })
+
+  test('触屏切换会话导致的程序焦点会 blur，用户触摸输入框后的焦点保留', () => {
+    const { window, document } = createMobilePatchHarness({ maxTouchPoints: 5, userAgent: 'Android' })
+    const sessionRow = document.createElement('button')
+    sessionRow.dataset.sessionSwitchId = 'session-next'
+    sessionRow.textContent = '下一会话'
+    const editor = document.createElement('div')
+    editor.setAttribute('contenteditable', 'true')
+    let blurCount = 0
+    Object.defineProperty(editor, 'blur', { configurable: true, value: () => { blurCount++ } })
+    document.body.append(sessionRow, editor)
+
+    sessionRow.dispatchEvent(new window.Event('touchstart', { bubbles: true }))
+    editor.dispatchEvent(new window.Event('focusin', { bubbles: true }))
+    expect(blurCount).toBe(1)
+
+    editor.dispatchEvent(new window.Event('touchstart', { bubbles: true }))
+    editor.dispatchEvent(new window.Event('focusin', { bubbles: true }))
+    expect(blurCount).toBe(1)
+    expect(document.documentElement.dataset.webRemoteFocusGuard).toBe('installed')
   })
 
   test('presence 定时心跳不再调用全量列表，解析后复用当前 session id', () => {

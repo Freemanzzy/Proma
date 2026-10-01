@@ -65,6 +65,10 @@ tailscale serve --https=8443 off
 
 手机端可用：会话与实时输出、Skill（`/`）、`@` 引用、模型与权限模式切换、新建会话、附件（相册/拍照/文件/粘贴，单文件 25 MB）、提问与计划审批、中止、Todo、定时任务、MCP/Skills、文件面板与预览。顶栏“刷新”会重新加载 `/app/` 并重建 WebSocket；右侧工作区使用顶栏标题下拉切换已打开页面，项目记忆与详情表单按“列表 → 详情 → 返回”显示；侧栏单击切换会话，左右面板带手机端过渡与触控反馈。手机端不可用：设置页、终端、原生对话框、在 Finder 打开、解密密钥、快速任务浮窗等桌面专属能力。
 
+Web Remote full-ui 的 `agent:stream:complete` 只向手机镜像完成状态和元数据，不携带已持久化的 `messages` 列表；renderer 仍通过既有 `agentMessageRefreshAtom` 刷新并调用 `agent:get-sdk-messages` 获取持久化历史。桌面 Electron 收到的完成事件不变。
+
+Android 等触屏设备切换会话时，程序触发的输入框 autofocus 不会弹出软键盘；用户直接触摸输入框仍按浏览器默认行为聚焦并弹出键盘。
+
 ### 历史图片与长工具结果
 
 历史窗口内，解码后不超过 256 KB 的图片可直接在手机以 `<img>` 显示；每次返回（首屏或“加载更早”页）从最新内容向前累计，内联图片总量不超过 1 MB。其他图片以卡片显示大小并可点按加载；超 2 MB 的 tool_result 文本会先显示截断预览，点按后在原位读取并展开完整文本。单张按需图片读取上限 25 MB，原文展开上限 2 MB；超过上限或会话/消息发生变化时提示刷新或在桌面查看。
@@ -135,7 +139,7 @@ harness 默认整体超时 300 秒（可用 `--timeout-ms` 覆盖），每次页
 
 ### Web Remote 计量与开发汇总
 
-开发实例中可由已认证设备读取 `GET /api/dev/metrics` JSON；生产环境不提供该端点。IPC 快照按唯一 `connectionId` 键控，每项仍保留认证 `deviceId`，同设备并发连接不再覆盖彼此；快照只包含当前连接，断开时先写日志再移除。计量主日志按设备伪名、连接 ID、短时间窗 ID 与通道拆成多条 `[INFO] scope=Web Remote 计量` JSON 行，不含响应正文、会话标题或消息内容。字段严格区分：`responseUtf8` 是序列化响应 UTF-8 字节；`appFraming` 与 `base64` 分别是分片 JSON 帧开销和 Base64 payload；`appSent` 是两者合计（或未分片响应字节）；`estimatedDeflateRaw` 是对完整响应单独计算的压缩估算；`wireBytes: null` 明确表示 `ws` API 无法读取 permessage-deflate 后的真实线缆字节，不能把估算称作实测。另记录 calls、累计处理毫秒、分片数与窗口内 `bufferedAmount` 峰值。每 30 秒还汇总事件通道发送字节 Top 5、背压丢弃事件数和 resync 次数；没有事件内容，只保留通道名与字节/计数。静态资源计量记录相对路径、原始文件字节、HTTP 实际 Content-Length、估算压缩字节与耗时；hash 文件使用 `Cache-Control: public, max-age=31536000, immutable` 与 ETag，非 hash 文件使用 `no-cache` 并支持 304；静态字节计量中的 304 发送字节为 0。开发端点只保存在运行时内存，不落入用户数据目录。
+开发实例中可由已认证设备读取 `GET /api/dev/metrics` JSON；生产环境不提供该端点。IPC 快照按唯一 `connectionId` 键控，每项仍保留认证 `deviceId`，同设备并发连接不再覆盖彼此；快照只包含当前连接，断开时先写日志再移除。计量主日志按设备伪名、连接 ID、短时间窗 ID 与通道拆成多条 `[INFO] scope=Web Remote 计量` JSON 行，不含响应正文、会话标题或消息内容。字段严格区分：`responseUtf8` 是序列化响应 UTF-8 字节；`appFraming` 与 `base64` 分别是分片 JSON 帧开销和 Base64 payload；`appSent` 是两者合计（或未分片响应字节）；`estimatedDeflateRaw` 是对完整响应单独计算的压缩估算；`wireBytes: null` 明确表示 `ws` API 无法读取 permessage-deflate 后的真实线缆字节，不能把估算称作实测。另记录 calls、累计处理毫秒、分片数与窗口内 `bufferedAmount` 峰值。每 30 秒还汇总事件通道发送字节 Top 3、背压丢弃事件数和 resync 次数；摘要行以 `connectionId, bufferedAmountPeak, backpressureDroppedEvents, resyncCount` 开头，事件 Top 3 以 `[channel, bytes]` 紧凑元组放在末尾，目标总行长不超过 300 字符。没有事件内容，只保留通道名与字节/计数。静态资源计量记录相对路径、原始文件字节、HTTP 实际 Content-Length、估算压缩字节与耗时；hash 文件使用 `Cache-Control: public, max-age=31536000, immutable` 与 ETag，非 hash 文件使用 `no-cache` 并支持 304；静态字节计量中的 304 发送字节为 0。开发端点只保存在运行时内存，不落入用户数据目录。
 
 #### 会话列表同步与按需字段
 
@@ -146,7 +150,7 @@ harness 默认整体超时 300 秒（可用 `--timeout-ms` 覆盖），每次页
 
 ### WebSocket 压缩（2026-09-29）
 
-Web Remote WebSocket 为超过 16 KB 的消息启用 per-message deflate；服务端与客户端均禁用 context takeover，zlib 并发限制为 2，避免跨消息压缩状态与过量并发占用。iPhone UA 与 Android UA 的 Chromium harness 对 `/api/ipc` 均收到 HTTP 101，并协商 `permessage-deflate; server_no_context_takeover; client_no_context_takeover`。独立线缆侧探针确认 118,784 B 高重复文本帧在线路上压缩为 335 B，RSV1=true。此结果验证协议与压缩帧；不等同于 iOS Safari 真机验收。CDP 的 `Network.webSocketFrameReceived.payloadData` 是解压后的消息内容，当前 `Network.dataReceived` 未提供 WebSocket 线缆字节，因此不能据 CDP payload 计算实际压缩传输量。
+`/app/` full-ui 每个页面由 `web-electron-shim.ts` 独占一条 `/api/ipc` WebSocket；并发 IPC 调用共享当前 OPEN socket 或尚未完成的 `socketPromise`。自动重连退避定时器不会清空其他调用者已创建的在途连接；轻量配对页 `/` 的 `/api/stream` 是不同页面的独立通道。Web Remote WebSocket 为超过 16 KB 的消息启用 per-message deflate；服务端与客户端均禁用 context takeover，zlib 并发限制为 2，避免跨消息压缩状态与过量并发占用。iPhone UA 与 Android UA 的 Chromium harness 对 `/api/ipc` 均收到 HTTP 101，并协商 `permessage-deflate; server_no_context_takeover; client_no_context_takeover`。独立线缆侧探针确认 118,784 B 高重复文本帧在线路上压缩为 335 B，RSV1=true。此结果验证协议与压缩帧；不等同于 iOS Safari 真机验收。CDP 的 `Network.webSocketFrameReceived.payloadData` 是解压后的消息内容，当前 `Network.dataReceived` 未提供 WebSocket 线缆字节，因此不能据 CDP payload 计算实际压缩传输量。
 
 ### 大会话历史（2026-09-29）
 

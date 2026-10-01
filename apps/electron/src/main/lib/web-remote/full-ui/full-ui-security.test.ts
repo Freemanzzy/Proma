@@ -10,7 +10,7 @@ mock.module('../../main-window-store', () => ({
   getMainWindow: () => fakeMainWindow,
 }))
 
-const { WebRemoteIpcBridge, getWebRemoteMetricsSnapshot, slimWebRemoteSessionMeta, splitUtf8BufferAtBoundaries, isReconstructibleStreamDelta, EVENT_BACKPRESSURE_BYTES, EVENT_RESYNC_LOW_WATER_BYTES } = await import('./web-remote-ipc')
+const { WebRemoteIpcBridge, getWebRemoteMetricsSnapshot, slimWebRemoteSessionMeta, splitUtf8BufferAtBoundaries, isReconstructibleStreamDelta, serializeBackpressureMetricsSummary, EVENT_BACKPRESSURE_BYTES, EVENT_RESYNC_LOW_WATER_BYTES } = await import('./web-remote-ipc')
 
 class FakeWebSocket extends EventEmitter {
   readyState = 1
@@ -39,6 +39,28 @@ async function invoke(ws: FakeWebSocket, channel: string, args: unknown[] = [], 
 }
 
 describe('Web Remote full-ui security policy', () => {
+  test('backpressure summary log row stays under 300 characters with the longest event channel', () => {
+    const row = serializeBackpressureMetricsSummary('a'.repeat(24), {
+      bufferedAmountPeak: 20_000_000,
+      backpressureDroppedEvents: 1_234_567,
+      resyncCount: 1_234,
+      eventBytesByChannel: {
+        'agent:session-metadata-changed': 20_000_000,
+        'agent:stream:event': 18_000_000,
+        'chat:stream:chunk': 10_000_000,
+        'agent:stream:error': 1,
+      },
+    })
+    const parsed = JSON.parse(row)
+    expect(Object.keys(parsed)).toEqual(['connectionId', 'bufferedAmountPeak', 'backpressureDroppedEvents', 'resyncCount', 'v', 'eventBytesTop3'])
+    expect(parsed.eventBytesTop3).toEqual([
+      ['agent:session-metadata-changed', 20_000_000],
+      ['agent:stream:event', 18_000_000],
+      ['chat:stream:chunk', 10_000_000],
+    ])
+    expect(`[INFO] scope=Web Remote 计量 ${row}`.length).toBeLessThanOrEqual(300)
+  })
+
   test('only reconstructible stream delta channels are eligible for backpressure drops', () => {
     expect(isReconstructibleStreamDelta('chat:stream:chunk', { delta: 'x' })).toBe(true)
     expect(isReconstructibleStreamDelta('agent:stream:event', { payload: { kind: 'sdk_delta' } })).toBe(true)
@@ -287,6 +309,42 @@ describe('Web Remote full-ui security policy', () => {
     const events = ws.sent.map((item) => JSON.parse(item)).filter((item) => item.type === 'event')
     expect(events).toHaveLength(1)
     expect(events[0].value.title).toBe('allowed')
+  })
+
+  test('Web Remote stream:complete 去掉5MB messages，桌面仍收到原始事件', async () => {
+    const mainWindow = fakeMainWindow.webContents as unknown as { send: (channel: string, ...args: unknown[]) => unknown }
+    const originalSend = mainWindow.send
+    const desktopCompletePayloads: unknown[] = []
+    mainWindow.send = (channel, ...args) => {
+      if (channel === 'agent:stream:complete') desktopCompletePayloads.push(args[0])
+      return true
+    }
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
+    const ws = client(bridge)
+    const channel = 'agent:stream:complete'
+    const completion = {
+      sessionId: 's-1', runGeneration: 7, startedAt: 10, resultSubtype: 'success',
+      messages: Array.from({ length: 5 }, (_, index) => ({ role: 'assistant', text: `${index}:${'x'.repeat(1024 * 1024)}` })),
+    }
+    const originalEventBytes = Buffer.byteLength(JSON.stringify({ type: 'event', channel, value: completion }))
+    try {
+      mainWindow.send(channel, completion)
+      const frames = ws.sent.map((frame) => JSON.parse(frame))
+      const remoteEvent = frames.find((frame) => frame.type === 'event' && frame.channel === channel)
+      const mobileEventBytes = Buffer.byteLength(JSON.stringify(remoteEvent))
+      expect(originalEventBytes).toBeGreaterThan(5 * 1024 * 1024)
+      expect(remoteEvent.value).toMatchObject({ sessionId: 's-1', runGeneration: 7, startedAt: 10, resultSubtype: 'success' })
+      expect(remoteEvent.value).not.toHaveProperty('messages')
+      expect(mobileEventBytes).toBeLessThan(64 * 1024)
+      expect(frames.some((frame) => frame.type === 'chunk')).toBe(false)
+      const desktopComplete = desktopCompletePayloads[0] as typeof completion
+      expect(desktopComplete.messages).toHaveLength(5)
+      expect(desktopComplete.messages[0]!.text).toHaveLength(1024 * 1024 + 2)
+      expect(getWebRemoteMetricsSnapshot().devices[ws.connectionId]?.eventBytesByChannel[channel]).toBe(mobileEventBytes)
+    } finally {
+      ws.emit('close', 1000, Buffer.from('test complete'))
+      mainWindow.send = originalSend
+    }
   })
 
   test('背压只丢 Agent delta，状态事件和 invoke 响应仍发送', async () => {
