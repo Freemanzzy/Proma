@@ -67,6 +67,8 @@ tailscale serve --https=8443 off
 
 Web Remote full-ui 的 `agent:stream:complete` 只向手机镜像完成状态和元数据，不携带已持久化的 `messages` 列表；renderer 仍通过既有 `agentMessageRefreshAtom` 刷新并调用 `agent:get-sdk-messages` 获取持久化历史。桌面 Electron 收到的完成事件不变。
 
+Android 等触屏设备切换会话时，程序触发的输入框 autofocus 不会弹出软键盘；用户直接触摸输入框仍按浏览器默认行为聚焦并弹出键盘。
+
 ### 历史图片与长工具结果
 
 历史窗口内，解码后不超过 256 KB 的图片可直接在手机以 `<img>` 显示；每次返回（首屏或“加载更早”页）从最新内容向前累计，内联图片总量不超过 1 MB。其他图片以卡片显示大小并可点按加载；超 2 MB 的 tool_result 文本会先显示截断预览，点按后在原位读取并展开完整文本。单张按需图片读取上限 25 MB，原文展开上限 2 MB；超过上限或会话/消息发生变化时提示刷新或在桌面查看。

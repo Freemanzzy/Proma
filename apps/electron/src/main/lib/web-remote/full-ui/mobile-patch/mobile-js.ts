@@ -11,6 +11,22 @@ export const MOBILE_JS = String.raw`(function(){
     write();
     return true;
   }
+  var touchDevice=Number(navigator.maxTouchPoints||0)>0||/(Android|iPhone|iPad|iPod|Mobile)/i.test(String(navigator.userAgent||''));
+  var recentlyTouchedEditor=null;
+  var recentEditorTouchAt=0;
+  if(touchDevice)setIfChanged(document.documentElement,'webRemoteFocusGuard','installed',function(){
+    document.addEventListener('touchstart',function(event){
+      var target=event.target;
+      recentlyTouchedEditor=target instanceof Element?target.closest('input,textarea,[contenteditable="true"]'):null;
+      recentEditorTouchAt=recentlyTouchedEditor?Date.now():0;
+    },true);
+    document.addEventListener('focusin',function(event){
+      var target=event.target;
+      if(!(target instanceof HTMLElement)||!target.matches('input,textarea,[contenteditable="true"]'))return;
+      var userFocused=target===recentlyTouchedEditor&&Date.now()-recentEditorTouchAt<900;
+      if(!userFocused)target.blur();
+    },true);
+  });
   function webRemoteToast(message){
     var toast=document.querySelector('[data-web-remote-toast]');
     if(!toast){toast=document.createElement('div');toast.dataset.webRemoteToast='true';toast.setAttribute('role','status');document.body.appendChild(toast)}

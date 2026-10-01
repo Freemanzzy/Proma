@@ -1146,3 +1146,8 @@
 - 新增 `web-electron-shim.connection.test.ts`：同一页面的多个监听器只创建一个初始 socket；旧 socket 关闭后，在退避窗口内请求创建 replacement，原 timer 到期不会再创建第三条连接。**1 pass / 0 fail**。正式版的两条记录未含 document/JS realm 标识，不能逐条断定这次竞态就是它们的来源；没有证据显示 full-ui 设计了第二条独立 `/api/ipc` 用途。
 - `agent:get-queued-messages` 来源只调查未修改：`useGlobalAgentListeners.ts::restoreQueuedMessages()` 先对 `agentSessionsAtom` 与本地 queue-map keys 去重，逐 session 顺序调用一次。该函数在 hook 首次挂载及 Web Remote `recoverWebRemoteState()`（WebSocket 重连/页面恢复调用）执行，不是 5 秒定时轮询。约 250 次/30 秒可由一次约 250 个 session 的恢复遍历解释；mobile-js 每 5 秒只重复 POST presence，首次列表查找结果会缓存。
 - 更新 `docs/personal/web-remote.md` 的连接生命周期说明；`git diff --check` 通过。
+
+## 2026-10-01: 安卓会话切换不再自动弹出键盘
+
+- 仅在 `mobile-patch/mobile-js.ts` 为触屏设备安装一次性焦点护栏，以 documentElement dataset 标记避免重复注册。输入框/ProseMirror 仅在最近 **900 ms** 有针对该同一编辑器的 `touchstart` 时保留焦点；程序自动聚焦（如切换会话触发的 `autoFocusTrigger`）立即 `blur()`。不改 AgentView/ChatInput；桌面无触屏不受影响。
+- `mobile-patch.test.ts` 覆盖会话切换后的程序焦点被撤销、用户先触摸输入框后的焦点保留；**6 pass / 0 fail**。更新 `docs/personal/web-remote.md`；`git diff --check` 通过。
