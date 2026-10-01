@@ -3,9 +3,39 @@ import {
   buildQueuedMessageSendPayload,
   getQueuedMessageDisplayParts,
   parseQueuedMessageMentions,
+  selectQueuedMessageRecoverySessionIds,
 } from './agent-message-queue'
 
 describe('queued message @file mention path decoding (Agent 侧真实路径)', () => {
+  test('Web Remote queue recovery selects only active running/queued sessions plus existing queue keys', () => {
+    const sessions = [
+      { id: 'running-active' },
+      { id: 'queued-active' },
+      { id: 'idle-active' },
+      { id: 'running-archived', archived: true },
+      { id: 'running-draft', isDraft: true },
+    ]
+    const streamStates = new Map([
+      ['running-active', { running: true, backgroundWaiting: false }],
+      ['running-archived', { running: true, backgroundWaiting: false }],
+      ['running-draft', { running: true, backgroundWaiting: false }],
+    ])
+    const queues = new Map<string, readonly unknown[]>([
+      ['queued-active', [{}]],
+      ['queued-orphan', [{}]],
+    ])
+    expect(selectQueuedMessageRecoverySessionIds({ isWebRemote: true, sessions, streamStates, queues })).toEqual([
+      'running-active', 'queued-active', 'queued-orphan',
+    ])
+  })
+
+  test('desktop queue recovery still checks every listed session and existing queue key', () => {
+    const sessions = [{ id: 'active' }, { id: 'archived', archived: true }]
+    const queues = new Map<string, readonly unknown[]>([['orphan', [{}]]])
+    expect(selectQueuedMessageRecoverySessionIds({ isWebRemote: false, sessions, streamStates: new Map(), queues })).toEqual([
+      'active', 'archived', 'orphan',
+    ])
+  })
   test('decodes percent-encoded @file path back to the real path with spaces', () => {
     const text = '请查看 @file:%2FUsers%2Fme%2FMy%20report.pdf 这份报告'
     const result = parseQueuedMessageMentions(text)

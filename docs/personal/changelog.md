@@ -1178,3 +1178,8 @@
 - 单测 `Agent session metadata synchronization` 新增覆盖同 ID 60 秒节流、不可见 ID 永久抑制及桌面不节流；**10 pass / 0 fail**。`useGlobalAgentListeners.recovery.test.ts` 覆盖未知 stream/title 共用 active 路径；**3 pass / 0 fail**。
 - 一次 `iphone:session-sync`（3 Mbps）通过，两个 reconnect 均恢复，耗时 **2,831 ms / 2,826 ms**，队列/会话清理后仍 **830** 条。Harness 的 metrics 是整套场景聚合值（其中仍有移动端 presence/其他既有读取），归档操作窗口的 `agent:list-sessions` 为 **0**；该 dev 数据无启用模型、现有 harness 未提供持久化 `agent:stream:event` 注入，因此未单独复现“归档会话持续流事件”并切片得到该触发器的前后计数。该通道已由源码定位，active 限流/不可见逻辑由单测覆盖；其他既有全量读取未扩大处理。
 - 更新 `docs/personal/web-remote.md` 中未知会话 Web Remote 恢复行为；`git diff --check` 通过。
+
+## 2026-10-01: 限定排队消息恢复查询范围
+
+- O 检查 `preload/index.ts` 与 `main/ipc.ts` 后确认只有 `getQueuedAgentMessages(sessionId)` 单会话快照接口，没有一次返回全部队列的 IPC；因此未扩展主进程接口。Web Remote 仅查询当前列表中未归档、非草稿且 `running` / `backgroundWaiting` / 有本地队列的会话，再并入现有 queue-map keys；桌面仍检查全部列出的会话与原 queue-map keys。
+- 新增 `selectQueuedMessageRecoverySessionIds()` 及单测：Web Remote 排除闲置 active、归档、draft，仅保留运行/排队与现有队列 key；Desktop 维持全列表。`agent-message-queue.test.ts` **9 pass / 0 fail**。
