@@ -33,6 +33,7 @@ interface IpcClientMetrics {
   byChannel: Record<string, { calls: number; responseUtf8Bytes: number; appFramingBytes: number; base64PayloadBytes: number; appSentBytes: number; estimatedDeflateRawBytes: number; elapsedMs: number; chunks: number; bufferedAmountPeak: number }>
   bufferedAmountPeak: number
   eventBytesByChannel: Record<string, number>
+  streamCompleteCount: number
   backpressureDroppedEvents: number
   resyncCount: number
 }
@@ -285,21 +286,32 @@ function summarize(channel: string): string {
   return labels[channel] ?? `确认执行远程操作：${channel}`
 }
 
+export const WEB_REMOTE_EVENT_CHANNEL_ALIASES: Readonly<Record<string, string>> = Object.freeze({
+  'agent:stream:event': 'se',
+  'agent:stream:complete': 'sc',
+  'agent:stream:error': 'sx',
+  'agent:session-metadata-changed': 'smc',
+  'chat:stream:chunk': 'cc',
+  'chat:stream:complete': 'ccmp',
+  'chat:stream:error': 'cx',
+})
+
 export function serializeBackpressureMetricsSummary(
   connectionId: string,
-  metrics: Pick<IpcClientMetrics, 'bufferedAmountPeak' | 'backpressureDroppedEvents' | 'resyncCount' | 'eventBytesByChannel'>,
+  metrics: Pick<IpcClientMetrics, 'bufferedAmountPeak' | 'backpressureDroppedEvents' | 'resyncCount' | 'streamCompleteCount' | 'eventBytesByChannel'>,
 ): string {
-  const eventBytesTop3 = Object.entries(metrics.eventBytesByChannel)
+  const eventBytesTop2 = Object.entries(metrics.eventBytesByChannel)
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 3)
-    .map(([channel, bytes]) => [channel, bytes])
+    .slice(0, 2)
+    .map(([channel, bytes]) => [WEB_REMOTE_EVENT_CHANNEL_ALIASES[channel] ?? channel, bytes])
   return JSON.stringify({
     connectionId,
     bufferedAmountPeak: metrics.bufferedAmountPeak,
     backpressureDroppedEvents: metrics.backpressureDroppedEvents,
     resyncCount: metrics.resyncCount,
+    scN: metrics.streamCompleteCount,
     v: 2,
-    eventBytesTop3,
+    eventBytesTop2,
   })
 }
 
@@ -376,7 +388,7 @@ export class WebRemoteIpcBridge {
     const connectionId = randomBytes(12).toString('hex')
     const metrics: IpcClientMetrics = {
       connectionId, deviceId, startedAt: Date.now(), byChannel: {}, bufferedAmountPeak: 0,
-      eventBytesByChannel: {}, backpressureDroppedEvents: 0, resyncCount: 0,
+      eventBytesByChannel: {}, streamCompleteCount: 0, backpressureDroppedEvents: 0, resyncCount: 0,
     }
     const client: IpcClient = { ws, deviceId, connectionId, confirmations: new Map(), needsResync: false, metrics }
     this.clients.add(client)
@@ -386,7 +398,7 @@ export class WebRemoteIpcBridge {
     const flushMetrics = () => {
       const channels = Object.entries(metrics.byChannel)
       const hasEventBytes = Object.keys(metrics.eventBytesByChannel).length > 0
-      if (channels.length === 0 && !hasEventBytes && metrics.backpressureDroppedEvents === 0 && metrics.resyncCount === 0 && metrics.bufferedAmountPeak === 0) return
+      if (channels.length === 0 && !hasEventBytes && metrics.streamCompleteCount === 0 && metrics.backpressureDroppedEvents === 0 && metrics.resyncCount === 0 && metrics.bufferedAmountPeak === 0) return
       const windowId = randomBytes(6).toString('hex')
       for (const [channel, metric] of channels) {
         recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 2, w: windowId, d: deviceTag, connectionId, c: channel, n: metric.calls, ms: metric.elapsedMs }))
@@ -398,6 +410,7 @@ export class WebRemoteIpcBridge {
       metrics.byChannel = {}
       metrics.bufferedAmountPeak = 0
       metrics.eventBytesByChannel = {}
+      metrics.streamCompleteCount = 0
       metrics.backpressureDroppedEvents = 0
       metrics.resyncCount = 0
     }
@@ -645,6 +658,7 @@ export class WebRemoteIpcBridge {
       }
       this.sendForClient(client, message)
       client.metrics.eventBytesByChannel[channel] = (client.metrics.eventBytesByChannel[channel] ?? 0) + Buffer.byteLength(message, 'utf8')
+      if (channel === 'agent:stream:complete') client.metrics.streamCompleteCount++
     }
   }
 

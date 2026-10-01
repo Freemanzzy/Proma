@@ -44,21 +44,28 @@ describe('Web Remote full-ui security policy', () => {
       bufferedAmountPeak: 20_000_000,
       backpressureDroppedEvents: 1_234_567,
       resyncCount: 1_234,
+      streamCompleteCount: 123,
       eventBytesByChannel: {
         'agent:session-metadata-changed': 20_000_000,
         'agent:stream:event': 18_000_000,
+        'agent:stream:complete': 15_000_000,
         'chat:stream:chunk': 10_000_000,
-        'agent:stream:error': 1,
+        'unmapped-long-channel-name': 1,
       },
     })
     const parsed = JSON.parse(row)
-    expect(Object.keys(parsed)).toEqual(['connectionId', 'bufferedAmountPeak', 'backpressureDroppedEvents', 'resyncCount', 'v', 'eventBytesTop3'])
-    expect(parsed.eventBytesTop3).toEqual([
-      ['agent:session-metadata-changed', 20_000_000],
-      ['agent:stream:event', 18_000_000],
-      ['chat:stream:chunk', 10_000_000],
+    expect(Object.keys(parsed)).toEqual(['connectionId', 'bufferedAmountPeak', 'backpressureDroppedEvents', 'resyncCount', 'scN', 'v', 'eventBytesTop2'])
+    expect(parsed.scN).toBe(123)
+    expect(parsed.eventBytesTop2).toEqual([
+      ['smc', 20_000_000],
+      ['se', 18_000_000],
     ])
     expect(`[INFO] scope=Web Remote 计量 ${row}`.length).toBeLessThanOrEqual(300)
+    const unknownRow = JSON.parse(serializeBackpressureMetricsSummary('a'.repeat(24), {
+      bufferedAmountPeak: 0, backpressureDroppedEvents: 0, resyncCount: 0, streamCompleteCount: 0,
+      eventBytesByChannel: { 'unmapped-long-channel-name': 1 },
+    }))
+    expect(unknownRow.eventBytesTop2).toEqual([['unmapped-long-channel-name', 1]])
   })
 
   test('only reconstructible stream delta channels are eligible for backpressure drops', () => {
@@ -341,6 +348,7 @@ describe('Web Remote full-ui security policy', () => {
       expect(desktopComplete.messages).toHaveLength(5)
       expect(desktopComplete.messages[0]!.text).toHaveLength(1024 * 1024 + 2)
       expect(getWebRemoteMetricsSnapshot().devices[ws.connectionId]?.eventBytesByChannel[channel]).toBe(mobileEventBytes)
+      expect(getWebRemoteMetricsSnapshot().devices[ws.connectionId]?.streamCompleteCount).toBe(1)
     } finally {
       ws.emit('close', 1000, Buffer.from('test complete'))
       mainWindow.send = originalSend
