@@ -316,8 +316,15 @@ async function verifyAndNotifySendFailure(input: { sessionId?: unknown; userMess
 async function invokeWithToken(channel: string, args: unknown[], confirmToken?: string): Promise<unknown> {
   const ws = await liveSocket()
   const id = `${Date.now()}-${nextId++}`
-  const requestArgs = channel === 'agent:get-sdk-messages' && dataSaverEnabled()
-    ? [args[0], { ...(args[1] && typeof args[1] === 'object' ? args[1] as Record<string, unknown> : {}), budgetBytes: webRemoteHistoryBudgets(true).historyBytes, inlineImageBudgetBytes: webRemoteHistoryBudgets(true).inlineImageBytes }]
+  const paging = args[1] && typeof args[1] === 'object' ? args[1] as Record<string, unknown> : {}
+  const dataSaver = channel === 'agent:get-sdk-messages' && dataSaverEnabled()
+  const budgets = webRemoteHistoryBudgets(dataSaver)
+  const requestArgs = channel === 'agent:get-sdk-messages'
+    ? [args[0], {
+        ...paging,
+        budgetBytes: dataSaver || typeof paging.budgetBytes !== 'number' ? budgets.historyBytes : paging.budgetBytes,
+        inlineImageBudgetBytes: dataSaver || typeof paging.inlineImageBudgetBytes !== 'number' ? budgets.inlineImageBytes : paging.inlineImageBudgetBytes,
+      }]
     : args
   const payload = JSON.stringify({ type: 'invoke', id, channel, args: requestArgs.map(encode), ...(confirmToken ? { confirmToken } : {}) })
   const response = await new Promise<unknown>((resolve, reject) => {

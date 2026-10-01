@@ -7,5 +7,5 @@ export function isWebRemoteDataSaverEnabled(override: string | null | undefined,
 }
 
 export function webRemoteHistoryBudgets(dataSaver: boolean): { historyBytes: number; inlineImageBytes: number } {
-  return dataSaver ? { historyBytes: 256 * 1024, inlineImageBytes: 0 } : { historyBytes: 2 * 1024 * 1024, inlineImageBytes: 1024 * 1024 }
+  return dataSaver ? { historyBytes: 256 * 1024, inlineImageBytes: 0 } : { historyBytes: 1024 * 1024, inlineImageBytes: 1024 * 1024 }
 }

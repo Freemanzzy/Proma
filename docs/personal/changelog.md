@@ -1246,3 +1246,10 @@
 - iPhone `session-sync` dev harness 通过。一个配对设备观测到 4 条 `open`：其中两个不同 page ID（分别对应 harness 初始页面和随后显式再次打开 `/app/`）；后一个页面产生 3 条连接 open，但每次下一条 open 前都有上一条 connection 的 close，属于测试执行的页面切换/断线恢复，不是同页同时双连接。Service Worker `notificationclick` 已使用 `clients.matchAll({type:'window',includeUncontrolled:true})`，优先 `navigate` + `focus` 已有窗口，仅无窗口时 `openWindow`；没有证据支持修改 SW 或 shim 连接竞争逻辑。由此可按 `device hash + page + connectionId` 区分同设备多个页面与同页多次连接。
 - 新增 URL query 后，harness 原先用 `url.endsWith('/api/ipc')` 检查压缩握手，导致查询串下找不到握手记录；改为解析 URL pathname 后检查。`node --check scripts/personal/mobile-harness.mjs`、shim connection test、full-ui security test与 Electron typecheck通过。单独运行 `web-remote-server.test.ts` 在测试 setup 阶段遇到既有 `electron` 命名导出 `app` 缺失，未进入用例；开发版真实 WebSocket 已验证 query 到服务端并记录 `src/page`。
 - harness 完成后测试配对已撤销、临时 Chrome 已退出；临时 harness 会话清理后，`~/.proma-dev` 会话索引仍为 **831**。
+
+## 2026-10-01: 将手机首屏历史预算降至 1 MiB
+
+- 先测后改：同一 `.proma-dev` 目标历史文件 41,914,743 B、会话数 831、iPhone UA、3 Mbps/1 Mbps/50 ms。改前常规调用默认预算为 **2,097,152 B**；首屏可见 **11,329 ms**，Web Remote 计量增量为 `calls=2`、`responseUtf8=2,096,331 B`、`appSent=2,170,230 B`、`bufferedPeak=2,170,069 B`。
+- 非省流量模式的常规/首屏预算改为 **1,048,576 B**，省流量仍 256 KiB；显式“加载更早”保留 2 MiB/页。目标会话首次历史可见 **7,700 ms**；计量增量 `responseUtf8=1,044,145 B`、`appSent=1,075,159 B`、`bufferedPeak=1,074,999 B`。harness 的出站 IPC 参数捕获记录到 `budgetBytes=1,048,576`、`endIndex=null`、内联图片预算 1 MiB；可见耗时约降 32%，响应 UTF-8 字节约降 50%。
+- 计数口径留有差异：两次 harness 的服务端计量增量都报 `calls=2`，出站 CDP 帧捕获仅看到目标首屏 1 条 `get-sdk-messages` 请求。当前服务端按通道聚合，无法凭该窗口将每次响应与请求 ID 对齐；报告采用直接捕获的单条 budget 参数与通道响应总字节，不把 `calls` 差异解释为重复请求已修复。完整 user/assistant/tool 回合若单回合超预算仍按既有规则保留、不拆分。
+- 当前 `.proma-dev` 基准为 831 条，`mobile-harness`/`mobile-preview.sh` 的 real-history 断言已从旧 830 校准到 831。harness 创建的临时 away 会话已删除，配对已撤销、Chrome/profile 清理；索引前后均 831；没有运行 Agent 或发送消息。`web-electron-shim.history-budget.test.ts`、`mobile-budget.test.ts`、Electron typecheck 与脚本语法检查通过。

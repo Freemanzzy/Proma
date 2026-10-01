@@ -405,6 +405,7 @@ async function createHarness(options) {
   const websocketHandshakes = []
   const websocketFramesReceived = []
   const websocketFramesSent = []
+  const historyReadRequests = []
   const websocketDataReceived = []
   const http429Responses = []
   client.on('Network.webSocketCreated', (event) => { websocketUrls.set(event.requestId, event.url) })
@@ -415,7 +416,21 @@ async function createHarness(options) {
   })
   client.on('Network.webSocketFrameSent', (event) => {
     const url = websocketUrls.get(event.requestId)
-    websocketFramesSent.push({ requestId: event.requestId, url, payloadBytes: Buffer.byteLength(event.response?.payloadData ?? '', 'utf8'), opcode: event.response?.opcode })
+    const payloadData = event.response?.payloadData ?? ''
+    websocketFramesSent.push({ requestId: event.requestId, url, payloadBytes: Buffer.byteLength(payloadData, 'utf8'), opcode: event.response?.opcode })
+    if (url && new URL(url).pathname === '/api/ipc') {
+      try {
+        const request = JSON.parse(payloadData)
+        if (request.type === 'invoke' && request.channel === 'agent:get-sdk-messages') {
+          const options = request.args?.[1] && typeof request.args[1] === 'object' ? request.args[1] : {}
+          historyReadRequests.push({
+            budgetBytes: Number.isFinite(options.budgetBytes) ? options.budgetBytes : 2 * 1024 * 1024,
+            endIndex: Number.isInteger(options.endIndex) ? options.endIndex : null,
+            inlineImageBudgetBytes: Number.isFinite(options.inlineImageBudgetBytes) ? options.inlineImageBudgetBytes : 1024 * 1024,
+          })
+        }
+      } catch {}
+    }
   })
   client.on('Network.dataReceived', (event) => {
     const url = websocketUrls.get(event.requestId)
@@ -724,7 +739,7 @@ async function createHarness(options) {
     activeChrome = null
     activeProfile = null
   }
-  return { client, chrome, profile, pair, navigate, installInteractionStreamAudit, loadMetrics, openDrawer, clickSidebarText, clickText, openSession, createHarnessSession, createHarnessSessionRaw, setPermissionMode, inputAndSend, waitText, readHistory, waitForUserSubmission, waitForAssistantReply, waitForRunning, waitForAbortedAssistant, resolveVisibleAskUserA, resolveVisiblePlanApproval, getInteractionStreamEvents, getActiveSessionId: () => activeSessionId, getCreatedSessionIds: () => new Set(createdSessionIds), invokeApi, invokeRaw, websocketUrls, websocketHandshakes, websocketFramesReceived, websocketFramesSent, websocketDataReceived, http429Responses, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, readSessionManifest, close }
+  return { client, chrome, profile, pair, navigate, installInteractionStreamAudit, loadMetrics, openDrawer, clickSidebarText, clickText, openSession, createHarnessSession, createHarnessSessionRaw, setPermissionMode, inputAndSend, waitText, readHistory, waitForUserSubmission, waitForAssistantReply, waitForRunning, waitForAbortedAssistant, resolveVisibleAskUserA, resolveVisiblePlanApproval, getInteractionStreamEvents, getActiveSessionId: () => activeSessionId, getCreatedSessionIds: () => new Set(createdSessionIds), invokeApi, invokeRaw, websocketUrls, websocketHandshakes, websocketFramesReceived, websocketFramesSent, historyReadRequests, websocketDataReceived, http429Responses, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, readSessionManifest, close }
 }
 
 async function runDeadSocket(harness, options, result) {
@@ -1430,7 +1445,7 @@ async function runRealHistory(harness, options, result, deviceId) {
   if (!messagesPath.startsWith(`${root}/`) || !existsSync(messagesPath)) throw new Error('真实历史文件不在开发实例会话目录或不存在')
   const sessionFileBytes = statSync(messagesPath).size
   const initialSessions = await harness.client.evaluate('window.electronAPI.listAgentSessions()')
-  if (!Array.isArray(initialSessions) || initialSessions.length !== 830 || !initialSessions.some((session) => session?.id === sessionId)) {
+  if (!Array.isArray(initialSessions) || initialSessions.length !== 831 || !initialSessions.some((session) => session?.id === sessionId)) {
     throw new Error(`授权视图会话数量或目标会话不匹配：count=${Array.isArray(initialSessions) ? initialSessions.length : -1}`)
   }
   const getMetrics = () => harness.client.evaluate("fetch('/api/dev/metrics',{credentials:'include'}).then(response=>response.ok?response.json():null)")
@@ -1441,7 +1456,7 @@ async function runRealHistory(harness, options, result, deviceId) {
     uploadThroughput: networkProfile.uploadThroughput, connectionType: networkProfile.connectionType,
   })
   // Force a fresh full-list IPC after the shim's short coalescing window so the
-  // 830-session payload is measured on the slow link; keep initialization CSP errors outside the action window.
+  // 831-session payload is measured on the slow link; keep initialization CSP errors outside the action window.
   await delay(12_000)
   const beforeList = await getMetrics()
   const listFrameStart = harness.websocketFramesReceived.length
@@ -1451,7 +1466,7 @@ async function runRealHistory(harness, options, result, deviceId) {
   const afterList = await getMetrics()
   const listFrames = harness.websocketFramesReceived.slice(listFrameStart).filter((item) => item.url && new URL(item.url).pathname === '/api/ipc')
   const listFramePayloadBytes = listFrames.reduce((sum, frame) => sum + frame.payloadBytes, 0)
-  if (!Array.isArray(list) || list.length !== 830 || !list.some((session) => session?.id === sessionId)) {
+  if (!Array.isArray(list) || list.length !== 831 || !list.some((session) => session?.id === sessionId)) {
     throw new Error(`弱网列表返回与授权视图不符：count=${Array.isArray(list) ? list.length : -1}`)
   }
   const metricsDevicesBefore = beforeList?.ipc?.devices ?? {}
@@ -1472,7 +1487,7 @@ async function runRealHistory(harness, options, result, deviceId) {
     elapsedMs: listElapsedMs,
   }
   if (listMetrics.calls < 1 || listMetrics.responseUtf8Bytes <= 0 || listMetrics.appSentBytes <= 0) throw new Error(`弱网会话列表计量为空：${JSON.stringify(listMetrics)}`)
-  // Create a temporary empty session only after the 830-session list measurement. This
+  // Create a temporary empty session only after the 831-session list measurement. This
   // lets the actual history request be a cold UI read without changing the measured list payload.
   const away = await harness.createHarnessSessionRaw(`web-remote-real-history-away-${Date.now()}`)
   await harness.openDrawer()
@@ -1486,6 +1501,7 @@ async function runRealHistory(harness, options, result, deviceId) {
   const point = await harness.client.evaluate(`(() => {const node=document.querySelector('[data-session-switch-id=${quoteJs(sessionId)}]');if(!node)return null;node.scrollIntoView({block:'center'});const r=node.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`)
   if (!point) throw new Error('真实目标会话不在授权侧栏的可见候选中')
   const firstFrameIndex = harness.websocketFramesReceived.length
+  const firstHistoryRequestIndex = harness.historyReadRequests.length
   const startedAt = Date.now()
   await touchAt(harness.client, point.x, point.y)
   const activeSelector = `document.querySelector('[data-session-switch-id=${quoteJs(sessionId)}].agent-session-item-active') !== null`
@@ -1510,6 +1526,7 @@ async function runRealHistory(harness, options, result, deviceId) {
   }, 0)
   const historyFrames = harness.websocketFramesReceived.slice(firstFrameIndex).filter((item) => item.url && new URL(item.url).pathname === '/api/ipc')
   const historyDecodedPayloadBytes = historyFrames.reduce((sum, frame) => sum + frame.payloadBytes, 0)
+  const historyRequestOptions = harness.historyReadRequests.slice(firstHistoryRequestIndex)
   const exceptionWindow = evaluateHarnessExceptionWindow(harness.exceptions, exceptionsBeforeRealHistory)
   result.realHistory = {
     sessionCount: list.length,
@@ -1526,6 +1543,7 @@ async function runRealHistory(harness, options, result, deviceId) {
       wireBytes: null,
       bufferedAmountPeak: Math.max(0, ...Object.values(historyMetricDevicesAfter).map((device) => device?.byChannel?.['agent:get-sdk-messages']?.bufferedAmountPeak ?? 0)),
       websocketDecodedPayloadBytes: historyDecodedPayloadBytes,
+      requestOptions: historyRequestOptions,
     },
     exceptions: exceptionWindow.newActionExceptions,
     newActionExceptions: exceptionWindow.newActionExceptions,

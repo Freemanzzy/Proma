@@ -73,7 +73,7 @@ Android 等触屏设备切换会话时，程序触发的输入框 autofocus 不�
 
 历史窗口内，解码后不超过 256 KB 的图片可直接在手机以 `<img>` 显示；每次返回（首屏或“加载更早”页）从最新内容向前累计，内联图片总量不超过 1 MB。其他图片以卡片显示大小并可点按加载；超 2 MB 的 tool_result 文本会先显示截断预览，点按后在原位读取并展开完整文本。单张按需图片读取上限 25 MB，原文展开上限 2 MB；超过上限或会话/消息发生变化时提示刷新或在桌面查看。
 
-顶部的“省流量模式”开关可手动启用/关闭并记入 localStorage。未手动选择时，浏览器报告 `slow-2g`/`2g` 或 downlink < 1 Mbps 会自动开启。开启后历史尾部预算为 256 KiB，内联图片预算为 0（全部点按加载）；关闭时恢复 2 MiB 历史预算与 1 MiB 图片预算。此预算由 Web Remote shim 仅附加到手机的历史 IPC 参数，不改变桌面行为。
+顶部的“省流量模式”开关可手动启用/关闭并记入 localStorage。未手动选择时，浏览器报告 `slow-2g`/`2g` 或 downlink < 1 Mbps 会自动开启。开启后历史尾部预算为 256 KiB，内联图片预算为 0（全部点按加载）；关闭时首屏/常规历史预算为 1 MiB、内联图片预算为 1 MiB。此预算由 Web Remote shim 仅附加到手机的历史 IPC 参数，不改变桌面行为；显式“加载更早”仍按 2 MiB/页。
 
 
 媒体标记仅由 Web Remote 的历史裁剪层生成，包含会话 ID、SDK 消息 UUID（缺少 UUID 时使用消息索引）及整条消息 SHA-256、块路径与内容校验摘要。按需读取通过 `web-remote:get-history-media` 只读 IPC，并按会话所属工作区授权；定位不唯一、摘要变化、越权或目标不存在均拒绝。桌面 renderer 的 SDK 历史返回不经该移动端裁剪，不包含 Web Remote 标记。
@@ -156,7 +156,7 @@ harness 默认整体超时 300 秒（可用 `--timeout-ms` 覆盖），每次页
 
 ### 大会话历史（2026-09-29）
 
-- 手机通过完整 UI IPC 读取 SDK 历史时，服务端先将 tool_result 文本裁剪至约 16 KB（追加原长度提示），把 base64 图片块替换为含 MIME/尺寸估算的占位；原文提示“完整内容请在桌面查看”。随后按约 2 MiB 序列化字节预算从尾部取完整轮次；未裁剪历史会以 `hasEarlier/startIndex/omittedCount` 元数据标记。tool_use 与其 tool_result 被识别为同一轮，单个超预算轮次不拆分。
+- 手机通过完整 UI IPC 读取 SDK 历史时，服务端先将 tool_result 文本裁剪至约 16 KB（追加原长度提示），把 base64 图片块替换为含 MIME/尺寸估算的占位；原文提示“完整内容请在桌面查看”。首屏/常规读取默认按 1 MiB 序列化字节预算从尾部取完整轮次；省流量模式为 256 KiB；未裁剪历史会以 `hasEarlier/startIndex/omittedCount` 元数据标记。tool_use 与其 tool_result 被识别为同一轮，单个超预算轮次不拆分。
 - 手机通过固定的“加载更早（已省略 N 条）”按钮以 2 MiB 页预算回取并前置到当前列表。此实现复用现有 `agent:get-sdk-messages` session-scope IPC，无新增通道或额外分级；桌面 IPC 返回值不变。React 侧只增加一行事件钩子，手机 DOM 入口由个人版 mobile-patch 添加。
 - 大于 256 KB 的 IPC WebSocket 响应使用约 180 KiB UTF-8 分片并 base64 编码，携带请求 ID、序号和总数；客户端按序重组，任何进度分片都重置 35 秒无进展计时。小响应、ping/pong、断线恢复和 `agent:send-message` 失败提示沿用原路径。
 - 全量大结果单条展开未实现：当前 SDK 历史 IPC 仅提供整段会话读取，不暴露有稳定消息 ID 的单条 tool_result 读取入口；故占位明确要求桌面查看，不在客户端保留或再次传输大原文。
