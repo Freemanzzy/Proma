@@ -339,7 +339,7 @@ describe('Web Remote full-ui security policy', () => {
       expect(frames.some((frame) => frame.type === 'chunk')).toBe(false)
       const desktopComplete = desktopCompletePayloads[0] as typeof completion
       expect(desktopComplete.messages).toHaveLength(5)
-      expect(desktopComplete.messages[0].text).toHaveLength(1024 * 1024 + 2)
+      expect(desktopComplete.messages[0]!.text).toHaveLength(1024 * 1024 + 2)
       expect(getWebRemoteMetricsSnapshot().devices[ws.connectionId]?.eventBytesByChannel[channel]).toBe(mobileEventBytes)
     } finally {
       ws.emit('close', 1000, Buffer.from('test complete'))

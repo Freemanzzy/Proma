@@ -1151,3 +1151,7 @@
 
 - 仅在 `mobile-patch/mobile-js.ts` 为触屏设备安装一次性焦点护栏，以 documentElement dataset 标记避免重复注册。输入框/ProseMirror 仅在最近 **900 ms** 有针对该同一编辑器的 `touchstart` 时保留焦点；程序自动聚焦（如切换会话触发的 `autoFocusTrigger`）立即 `blur()`。不改 AgentView/ChatInput；桌面无触屏不受影响。
 - `mobile-patch.test.ts` 覆盖会话切换后的程序焦点被撤销、用户先触摸输入框后的焦点保留；**6 pass / 0 fail**。更新 `docs/personal/web-remote.md`；`git diff --check` 通过。
+
+## 2026-10-01: 完成事件测试兼容严格索引检查
+
+- 收尾 typecheck 指出大消息完成事件测试读取固定消息索引时需显式确认元素存在；补充非空断言，不改变运行逻辑。workspace typecheck 复跑通过。
