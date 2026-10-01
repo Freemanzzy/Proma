@@ -1211,3 +1211,15 @@
 - `mobile-patch.test.ts` **8 pass / 0 fail**、`mobile-patch-presence.test.ts` **1 pass / 0 fail**；workspace typecheck 与 `build:main` 通过。
 - 全量 `bun test` 使用 900 秒 watchdog 后超时（进程退出码 142）；日志停在 Web Remote server/WebSocket suites，未产生全量 pass/fail 汇总，因此不记为通过，也未重跑。日志：`/tmp/proma-mobile-presence-final-test.log`。
 - 开发实例保持运行，17889/5173 在线，8443→17889；`.proma-dev` 索引核对 **831** 条（父会话确认这是用户实测新增会话，未作删改）。正式 PID `15699` 未变。
+
+## 2026-10-01: 修复 presence 测试的全局隔离
+
+- `new Function` 测试 harness 显式注入 linkedom `location`、`history`、`setTimeout/setInterval/clearTimeout/clearInterval` 假实现；`mobile-patch.test.ts` 的 afterEach 恢复被覆盖的 Linkedom 原型描述符，并在每个假页面开始时清理 presence/history window 标记。通知 deep-link 用例并入既有 `mobile-patch.test.ts`，删除独立测试文件。
+- 根因是测试运行环境没有裸全局 `location`，导致 presence callback 在列表与 fetch 前抛 ReferenceError；并行独立文件中的 Linkedom 原型/窗口标记共享会污染另一个测试。产品逻辑未为测试环境做特例修改。
+- 合并后的 `mobile-patch.test.ts` **9 pass / 0 fail**；全量 `bun test` **676 pass / 0 fail**（100 files，1,691 assertions）；workspace typecheck 与 `build:main` 通过。
+
+## 2026-10-01: presence 测试隔离最终全量验证
+
+- 修复的测试 harness 显式注入 fake `location`、`history` 与全部计时器 API；afterEach 恢复 Linkedom 原型描述符，并清理共享 Window 标记。通知 deep-link 测试已并入 `mobile-patch.test.ts`，独立测试文件移除。根因是裸全局 `location` 在 Bun `new Function` 环境未定义、导致 presence callback 在请求前抛错；跨实例共享的 Linkedom 状态由 fixture 隔离处理，未改产品逻辑迁就测试。
+- 合并后的 `mobile-patch.test.ts` **9 pass / 0 fail**；按 `alarm 900` 运行的全量 `bun test` 正常结束，**676 pass / 0 fail**（100 files，1,691 assertions）；typecheck 与 `build:main` 通过。
+- dev 保持运行：17889/5173 在线，8443→17889；`.proma-dev` **831** 条；正式版 PID `15699` 未变。前一条 900 秒超时记录为修复前结果，本次全量通过已完成复核。

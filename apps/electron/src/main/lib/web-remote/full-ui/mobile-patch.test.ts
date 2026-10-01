@@ -17,24 +17,64 @@ class ManualMutationObserver {
   trigger() { this.callback([], this as unknown as MutationObserver) }
 }
 
-function createMobilePatchHarness(navigatorMock: { maxTouchPoints: number; userAgent: string } = { maxTouchPoints: 5, userAgent: 'Android' }) {
+interface MobilePatchHarnessOptions {
+  search?: string
+  location?: { pathname: string; search: string; reload(): void }
+  history?: { replaceState(state: unknown, title: string, path: string): void }
+}
+
+const mobilePatchPrototypeRestorers: Array<() => void> = []
+
+function restoreDescriptor(target: object, key: string, descriptor: PropertyDescriptor | undefined): void {
+  if (descriptor) Object.defineProperty(target, key, descriptor)
+  else Reflect.deleteProperty(target, key)
+}
+
+function createMobilePatchHarness(
+  navigatorMock: { maxTouchPoints: number; userAgent: string } = { maxTouchPoints: 5, userAgent: 'Android' },
+  options: MobilePatchHarnessOptions = {},
+) {
   ManualMutationObserver.instances = []
   const { window, document } = parseHTML(`<!doctype html><html><body>
     <div data-web-remote-sidebar="left"></div>
     <main data-web-remote-main="true"></main>
     <section data-web-remote-panel="right"><div role="tablist" aria-label="右侧工作区"><div><button role="tab" aria-selected="true">文件</button></div></div></section>
   </body></html>`)
+  const elementPrototype = window.Element.prototype
+  const nodePrototype = window.Node.prototype
+  const originalDescriptors = {
+    innerText: Object.getOwnPropertyDescriptor(elementPrototype, 'innerText'),
+    innerHTML: Object.getOwnPropertyDescriptor(elementPrototype, 'innerHTML'),
+    replaceChildren: Object.getOwnPropertyDescriptor(elementPrototype, 'replaceChildren'),
+    insertBefore: Object.getOwnPropertyDescriptor(nodePrototype, 'insertBefore'),
+  }
+  mobilePatchPrototypeRestorers.push(() => {
+    restoreDescriptor(elementPrototype, 'innerText', originalDescriptors.innerText)
+    restoreDescriptor(elementPrototype, 'innerHTML', originalDescriptors.innerHTML)
+    restoreDescriptor(elementPrototype, 'replaceChildren', originalDescriptors.replaceChildren)
+    restoreDescriptor(nodePrototype, 'insertBefore', originalDescriptors.insertBefore)
+  })
+  for (const key of ['__PROMA_PUSH_PRESENCE_INSTALLED', '__PROMA_WEB_REMOTE_HISTORY_META']) {
+    try { delete (window as any)[key] } catch {}
+  }
   Object.defineProperty(window, 'innerWidth', { value: 412, configurable: true })
   Object.defineProperty(window, 'innerHeight', { value: 915, configurable: true })
   Object.defineProperty(window, 'screen', { value: { width: 412 }, configurable: true })
   Object.defineProperty(window, 'visualViewport', { value: null, configurable: true })
   const pendingTimeouts: Array<() => void> = []
   const pendingIntervals: Array<() => void> = []
-  ;(window as any).setTimeout = (callback: () => void) => { pendingTimeouts.push(callback); return pendingTimeouts.length }
-  ;(window as any).clearTimeout = () => {}
-  ;(window as any).setInterval = (callback: () => void) => { pendingIntervals.push(callback); return pendingIntervals.length }
+  const fakeSetTimeout = (callback: () => void) => { pendingTimeouts.push(callback); return pendingTimeouts.length }
+  const fakeClearTimeout = () => {}
+  const fakeSetInterval = (callback: () => void) => { pendingIntervals.push(callback); return pendingIntervals.length }
+  const fakeClearInterval = () => {}
+  ;(window as any).setTimeout = fakeSetTimeout
+  ;(window as any).clearTimeout = fakeClearTimeout
+  ;(window as any).setInterval = fakeSetInterval
+  ;(window as any).clearInterval = fakeClearInterval
   ;(window as any).requestAnimationFrame = (callback: FrameRequestCallback) => callback(0)
-  ;(window as any).location = { pathname: '/app/', search: '', reload() {} }
+  const location = options.location ?? { pathname: '/app/', search: options.search ?? '', reload() {} }
+  const history = options.history ?? { replaceState: (_state: unknown, _title: string, path: string) => { location.pathname = path; location.search = '' } }
+  Object.defineProperty(window, 'location', { configurable: true, value: location })
   Object.defineProperty(window.Element.prototype, 'innerText', {
     configurable: true,
     get(this: Element) { return this.textContent ?? '' },
@@ -76,9 +116,8 @@ function createMobilePatchHarness(navigatorMock: { maxTouchPoints: number; userA
   const html = renderWebRemoteMobilePatch()
   const script = html.match(/<script nonce="__PROMA_NONCE__">([\s\S]*?)<\/script>/)?.[1]
   if (!script) throw new Error('mobile patch script not found')
-  const location = (window as any).location ?? { pathname: '/app/', search: '' }
-  const run = new Function('window', 'document', 'MutationObserver', 'HTMLElement', 'Element', 'NodeFilter', 'fetch', 'navigator', 'location', script)
-  run(window, document, ManualMutationObserver, window.HTMLElement, window.Element, window.NodeFilter, fetchMock, navigatorMock, location)
+  const run = new Function('window', 'document', 'MutationObserver', 'HTMLElement', 'Element', 'NodeFilter', 'fetch', 'navigator', 'location', 'history', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval', script)
+  run(window, document, ManualMutationObserver, window.HTMLElement, window.Element, window.NodeFilter, fetchMock, navigatorMock, location, history, fakeSetTimeout, fakeSetInterval, fakeClearTimeout, fakeClearInterval)
   const ensureObserver = ManualMutationObserver.instances[0]
   const syncRightObserver = ManualMutationObserver.instances[1]
   const syncMenuObserver = ManualMutationObserver.instances[2]
@@ -89,11 +128,15 @@ function createMobilePatchHarness(navigatorMock: { maxTouchPoints: number; userA
     let guard = 0
     while (pendingTimeouts.length > 0 && guard++ < 100) pendingTimeouts.shift()?.()
   }
-  return { window, document, writes, observers: [ensureObserver, syncRightObserver, syncMenuObserver], resolveSubscription, fetchRequests, flushTimeouts, flushIntervals: () => pendingIntervals.forEach((callback) => callback()), pendingTimeoutCount: () => pendingTimeouts.length }
+  const flushNextTimeout = () => pendingTimeouts.shift()?.()
+  return { window, document, location, history, writes, observers: [ensureObserver, syncRightObserver, syncMenuObserver], resolveSubscription, fetchRequests, flushTimeouts, flushNextTimeout, flushIntervals: () => pendingIntervals.forEach((callback) => callback()), pendingTimeoutCount: () => pendingTimeouts.length }
 }
 
 describe('renderWebRemoteMobilePatch DOM write convergence', () => {
-  afterEach(() => { ManualMutationObserver.instances = [] })
+  afterEach(() => {
+    for (const restore of mobilePatchPrototypeRestorers.splice(0).reverse()) restore()
+    ManualMutationObserver.instances = []
+  })
 
   test('媒体占位点击后原位显示图片，长文本点击后原位展开', async () => {
     const { window, document, observers } = createMobilePatchHarness()
@@ -245,6 +288,32 @@ describe('renderWebRemoteMobilePatch DOM write convergence', () => {
     expect(activeListCalls).toBe(1)
     const request = fetchRequests.find((item) => item.url === '/api/push/presence')
     expect(JSON.parse(String((request?.options as { body?: string })?.body))).toMatchObject({ sessionId: 'active-session' })
+  })
+
+  test('通知 deep-link 按指定 ID 查 active 列表一次并使用完整标题选会话', async () => {
+    const { window, document, location, flushNextTimeout } = createMobilePatchHarness(
+      { maxTouchPoints: 5, userAgent: 'Android' },
+      { search: '?session=deep-session' },
+    )
+    let activeCalls = 0
+    let fullCalls = 0
+    let targetClicks = 0
+    ;(window as any).electronAPI = {
+      listActiveAgentSessions: async () => { activeCalls++; return [{ id: 'deep-session', title: 'Deep link target' }] },
+      listAgentSessions: async () => { fullCalls++; return [{ id: 'wrong-full-list', title: 'Deep link target' }] },
+    }
+    const target = document.createElement('button')
+    target.textContent = 'Deep link target'
+    target.addEventListener('click', () => { targetClicks++ })
+    document.querySelector('[data-web-remote-sidebar="left"]')!.appendChild(target)
+
+    flushNextTimeout()
+    await Bun.sleep(0)
+    await Bun.sleep(0)
+    expect(activeCalls).toBe(1)
+    expect(fullCalls).toBe(0)
+    expect(targetClicks).toBe(1)
+    expect(location.search).toBe('')
   })
 
   test('无法解析的媒体标记被替换为提示文本，不会在 observer 中反复处理', async () => {

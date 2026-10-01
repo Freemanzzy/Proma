@@ -2,7 +2,6 @@ export const MOBILE_JS = String.raw`(function(){
   function start(){
     if (window.innerWidth >= 768 && (window.screen?.width ?? window.innerWidth) >= 768) return;
   var body=document.body;
-  setIfChanged(document.documentElement,'webRemoteHistoryMetaScope','current-document',function(){try{delete window.__PROMA_WEB_REMOTE_HISTORY_META}catch{}});
   var rightPanelTimer=0;
   var boundScrollers=new WeakSet();
   var viewport=window.visualViewport;
@@ -244,7 +243,8 @@ export const MOBILE_JS = String.raw`(function(){
       if (title && title.parentElement !== topbar) topbar.insertBefore(title, panelToggle);
       var refresh=topbar.querySelector('[data-web-remote-refresh]'); if(refresh&&refresh.nextSibling!==panelToggle)topbar.insertBefore(refresh,panelToggle);
     }
-    if (setIfChanged(document.documentElement,'webRemotePushPresence','installed',function(){})) {
+    if (!window.__PROMA_PUSH_PRESENCE_INSTALLED) {
+      window.__PROMA_PUSH_PRESENCE_INSTALLED=true;
       var presenceSession=null; var presenceLookup=null; var presenceResolved=false; var presenceResolvedKey=''; var presenceLookupKey='';
       var currentPresenceSessionId=function(requested){
         if(requested)return requested;
