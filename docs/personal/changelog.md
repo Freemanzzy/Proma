@@ -1138,3 +1138,11 @@
 
 - 30 秒 v2 背压摘要调整字段顺序为 `connectionId`、`bufferedAmountPeak`、`backpressureDroppedEvents`、`resyncCount` 在前；事件 Top 5 缩为 Top 3，改用 `[channel, bytes]` 紧凑元组并置于末尾。摘要行保留 `v:2`；window/device 仍可由同连接相邻的 IPC v2 计量行关联。
 - 长通道场景使用 `agent:session-metadata-changed`，构造 24 位 connectionId、较大峰值/计数后，含 `[INFO] scope=Web Remote 计量 ` 前缀的整行 **287 字符**（≤300）。`full-ui-security.test.ts` **29 pass / 0 fail**；同步更新 `docs/personal/web-remote.md`；`git diff --check` 通过。
+
+## 2026-10-01: 修复 IPC 重连退避与新连接竞态
+
+- J 调查确认 `/app/` full-ui 的唯一 `/api/ipc` 创建点是 `web-electron-shim.ts::connect()`；renderer 的所有 preload IPC listener/invoke 共用模块级 `socket` / `socketPromise`，mobile-patch 的通知 presence 使用 HTTP，Service Worker 不创建 WebSocket。轻量根页 `/` 的 `/api/stream` 是独立页面/协议，不是 PWA `/app/` 的第二条 full-ui IPC 连接。
+- 找到可复现的重复建连竞态：旧 socket close 安排了 reconnect timer；若其他请求在退避 timer 触发前已创建 replacement socket，而 timer 无条件清空 `socketPromise`，replacement 仍 CONNECTING 时 timer 的 `connect()` 会再创建第三条 socket。修复为 timer 到期直接调用 `connect()`，由其 OPEN/socketPromise 检查复用现有连接。
+- 新增 `web-electron-shim.connection.test.ts`：同一页面的多个监听器只创建一个初始 socket；旧 socket 关闭后，在退避窗口内请求创建 replacement，原 timer 到期不会再创建第三条连接。**1 pass / 0 fail**。正式版的两条记录未含 document/JS realm 标识，不能逐条断定这次竞态就是它们的来源；没有证据显示 full-ui 设计了第二条独立 `/api/ipc` 用途。
+- `agent:get-queued-messages` 来源只调查未修改：`useGlobalAgentListeners.ts::restoreQueuedMessages()` 先对 `agentSessionsAtom` 与本地 queue-map keys 去重，逐 session 顺序调用一次。该函数在 hook 首次挂载及 Web Remote `recoverWebRemoteState()`（WebSocket 重连/页面恢复调用）执行，不是 5 秒定时轮询。约 250 次/30 秒可由一次约 250 个 session 的恢复遍历解释；mobile-js 每 5 秒只重复 POST presence，首次列表查找结果会缓存。
+- 更新 `docs/personal/web-remote.md` 的连接生命周期说明；`git diff --check` 通过。

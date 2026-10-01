@@ -148,7 +148,7 @@ harness 默认整体超时 300 秒（可用 `--timeout-ms` 覆盖），每次页
 
 ### WebSocket 压缩（2026-09-29）
 
-Web Remote WebSocket 为超过 16 KB 的消息启用 per-message deflate；服务端与客户端均禁用 context takeover，zlib 并发限制为 2，避免跨消息压缩状态与过量并发占用。iPhone UA 与 Android UA 的 Chromium harness 对 `/api/ipc` 均收到 HTTP 101，并协商 `permessage-deflate; server_no_context_takeover; client_no_context_takeover`。独立线缆侧探针确认 118,784 B 高重复文本帧在线路上压缩为 335 B，RSV1=true。此结果验证协议与压缩帧；不等同于 iOS Safari 真机验收。CDP 的 `Network.webSocketFrameReceived.payloadData` 是解压后的消息内容，当前 `Network.dataReceived` 未提供 WebSocket 线缆字节，因此不能据 CDP payload 计算实际压缩传输量。
+`/app/` full-ui 每个页面由 `web-electron-shim.ts` 独占一条 `/api/ipc` WebSocket；并发 IPC 调用共享当前 OPEN socket 或尚未完成的 `socketPromise`。自动重连退避定时器不会清空其他调用者已创建的在途连接；轻量配对页 `/` 的 `/api/stream` 是不同页面的独立通道。Web Remote WebSocket 为超过 16 KB 的消息启用 per-message deflate；服务端与客户端均禁用 context takeover，zlib 并发限制为 2，避免跨消息压缩状态与过量并发占用。iPhone UA 与 Android UA 的 Chromium harness 对 `/api/ipc` 均收到 HTTP 101，并协商 `permessage-deflate; server_no_context_takeover; client_no_context_takeover`。独立线缆侧探针确认 118,784 B 高重复文本帧在线路上压缩为 335 B，RSV1=true。此结果验证协议与压缩帧；不等同于 iOS Safari 真机验收。CDP 的 `Network.webSocketFrameReceived.payloadData` 是解压后的消息内容，当前 `Network.dataReceived` 未提供 WebSocket 线缆字节，因此不能据 CDP payload 计算实际压缩传输量。
 
 ### 大会话历史（2026-09-29）
 

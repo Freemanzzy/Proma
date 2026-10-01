@@ -118,7 +118,8 @@ function scheduleReconnect(): void {
   if (reconnectTimer !== undefined) return
   reconnectTimer = window.setTimeout(() => {
     reconnectTimer = undefined
-    socketPromise = null
+    // Another caller may have already recreated the socket while this backoff was pending.
+    // connect() itself reuses an OPEN socket or the current in-flight socketPromise.
     void connect()
   }, reconnectDelay)
   reconnectDelay = Math.min(reconnectDelay * 2, 5000)
