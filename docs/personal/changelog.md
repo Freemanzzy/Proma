@@ -1170,3 +1170,11 @@
 - 计量：`agent:stream:complete` 每 30 秒窗口约 1 KB（上一版单次约 5.3 MB），Agent 完成窗口 bufferedAmountPeak 约 573 KB（上一版约 5.5 MB）；背压丢弃与 resync 均为 0。
 - 待查：Agent 运行期间 `agent:list-sessions` 每 30–60 秒一次、每次约 525 KB；安装后 Wi-Fi 阶段同设备仍出现过两条同时关闭的连接；Top3 有 3 项时计量行仍达 332 字符截断上限。列入下一批。
 - 详见本机交接 `install-result-2026-10-01-3.md`。
+
+## 2026-10-01: 限制 Web Remote 未知会话恢复刷新
+
+- L 源码确认与简报一致：`useGlobalAgentListeners.ts` 的未知 `agent:stream:event` session 分支和未知 `agent:title-updated` session 分支均直接调用 `fetchAndMergeAgentSessionSnapshot()` → `listAgentSessions()`；开发 `session-sync` harness 及正式版简报计量也观察到 830/934 全量请求，故按计划在这两处改用共享的未知会话刷新函数。
+- Web Remote 使用 `listActiveAgentSessions()` 并以 `includeArchived=false` 合并；每个 session ID 用 `shouldRefreshUnknownAgentSession()` 节流 **60 秒**，同次请求并发事件合并；若 active 快照没有该 ID，则记录为已知不可见，后续事件不再查询。Desktop 仍走原 `listAgentSessions()` 全量逻辑；automation-graduated 等未列入范围的快照刷新未改。
+- 单测 `Agent session metadata synchronization` 新增覆盖同 ID 60 秒节流、不可见 ID 永久抑制及桌面不节流；**10 pass / 0 fail**。`useGlobalAgentListeners.recovery.test.ts` 覆盖未知 stream/title 共用 active 路径；**3 pass / 0 fail**。
+- 一次 `iphone:session-sync`（3 Mbps）通过，两个 reconnect 均恢复，耗时 **2,831 ms / 2,826 ms**，队列/会话清理后仍 **830** 条。Harness 的 metrics 是整套场景聚合值（其中仍有移动端 presence/其他既有读取），归档操作窗口的 `agent:list-sessions` 为 **0**；该 dev 数据无启用模型、现有 harness 未提供持久化 `agent:stream:event` 注入，因此未单独复现“归档会话持续流事件”并切片得到该触发器的前后计数。该通道已由源码定位，active 限流/不可见逻辑由单测覆盖；其他既有全量读取未扩大处理。
+- 更新 `docs/personal/web-remote.md` 中未知会话 Web Remote 恢复行为；`git diff --check` 通过。
