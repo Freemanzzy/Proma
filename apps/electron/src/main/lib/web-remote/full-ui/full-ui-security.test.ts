@@ -289,6 +289,42 @@ describe('Web Remote full-ui security policy', () => {
     expect(events[0].value.title).toBe('allowed')
   })
 
+  test('Web Remote stream:complete 去掉5MB messages，桌面仍收到原始事件', async () => {
+    const mainWindow = fakeMainWindow.webContents as unknown as { send: (channel: string, ...args: unknown[]) => unknown }
+    const originalSend = mainWindow.send
+    const desktopCompletePayloads: unknown[] = []
+    mainWindow.send = (channel, ...args) => {
+      if (channel === 'agent:stream:complete') desktopCompletePayloads.push(args[0])
+      return true
+    }
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
+    const ws = client(bridge)
+    const channel = 'agent:stream:complete'
+    const completion = {
+      sessionId: 's-1', runGeneration: 7, startedAt: 10, resultSubtype: 'success',
+      messages: Array.from({ length: 5 }, (_, index) => ({ role: 'assistant', text: `${index}:${'x'.repeat(1024 * 1024)}` })),
+    }
+    const originalEventBytes = Buffer.byteLength(JSON.stringify({ type: 'event', channel, value: completion }))
+    try {
+      mainWindow.send(channel, completion)
+      const frames = ws.sent.map((frame) => JSON.parse(frame))
+      const remoteEvent = frames.find((frame) => frame.type === 'event' && frame.channel === channel)
+      const mobileEventBytes = Buffer.byteLength(JSON.stringify(remoteEvent))
+      expect(originalEventBytes).toBeGreaterThan(5 * 1024 * 1024)
+      expect(remoteEvent.value).toMatchObject({ sessionId: 's-1', runGeneration: 7, startedAt: 10, resultSubtype: 'success' })
+      expect(remoteEvent.value).not.toHaveProperty('messages')
+      expect(mobileEventBytes).toBeLessThan(64 * 1024)
+      expect(frames.some((frame) => frame.type === 'chunk')).toBe(false)
+      const desktopComplete = desktopCompletePayloads[0] as typeof completion
+      expect(desktopComplete.messages).toHaveLength(5)
+      expect(desktopComplete.messages[0].text).toHaveLength(1024 * 1024 + 2)
+      expect(getWebRemoteMetricsSnapshot().devices[ws.connectionId]?.eventBytesByChannel[channel]).toBe(mobileEventBytes)
+    } finally {
+      ws.emit('close', 1000, Buffer.from('test complete'))
+      mainWindow.send = originalSend
+    }
+  })
+
   test('背压只丢 Agent delta，状态事件和 invoke 响应仍发送', async () => {
     const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
     bridge.registerInvoke('agent:list-workspaces', async () => [{ id: 'ws-1', slug: 'one' }])

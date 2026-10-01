@@ -1127,3 +1127,9 @@
 - 手机：用户确认 OPPO 与 iPhone 蜂窝下响应达标，发消息不再误报“未送达”，页面不卡不断线。
 - 计量 v2 发现：每轮 Agent 完成时 `agent:stream:complete` 携带完整已持久化消息列表（约 5.3 MB），造成约 5.5 MB 积压峰值，背压不覆盖；同一设备加载页面时会同时建立两个连接；单连接 30 秒内 `agent:get-queued-messages` 可达 250 次。列入下一批。
 - 详见本机交接 `install-result-2026-10-01-2.md`。
+
+## 2026-10-01: 手机 stream:complete 移除重复持久化消息
+
+- 仅在 full-ui Web Remote 广播前对 `agent:stream:complete` 的 remoteValue 去掉 `messages`；主进程发出的原始 payload 与桌面 Electron renderer 不变。核对 `useGlobalAgentListeners.ts`：complete handler 不读取 `data.messages`，仍只调用一次 `bumpRefresh()`；`AgentView.tsx` 的 refreshVersion effect 随后使用既有 `getAgentSessionSDKMessages(sessionId)` 读取持久化历史，无需增加 shim IPC 请求，也不改上游组件。
+- 5 条合成、每条约 1 MiB 的消息列表：测试中原始 event **5,243,195 B**，手机下发 event **137 B**（减少 **5,243,058 B**）；桌面 spy 收到原完整 5 条消息，手机事件保留 sessionId/runGeneration/startedAt/resultSubtype 且没有 `messages`，不再产生分块。
+- `full-ui-security.test.ts` **28 pass / 0 fail**；`useGlobalAgentListeners.recovery.test.ts` **2 pass / 0 fail**，验证 complete 使用现有一次刷新路径并保持 AgentView 历史补拉依赖。同步更新 `docs/personal/web-remote.md`；`git diff --check` 通过。

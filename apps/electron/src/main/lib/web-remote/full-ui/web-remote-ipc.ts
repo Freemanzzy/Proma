@@ -580,6 +580,13 @@ export class WebRemoteIpcBridge {
       return
     }
     let remoteValue = value
+    if (channel === 'agent:stream:complete' && value && typeof value === 'object' && !Array.isArray(value)) {
+      // STREAM_COMPLETE carries already-persisted messages for the local renderer's race-free finalization.
+      // The mobile renderer refreshes the session history from its existing tail-history path, so do not
+      // mirror the potentially multi-megabyte duplicate message list over every Web Remote connection.
+      const { messages: _messages, ...mobileComplete } = value as Record<string, unknown>
+      remoteValue = mobileComplete
+    }
     if (channel === 'agent:session-metadata-changed' && value && typeof value === 'object') {
       const change = value as { epoch?: unknown; sequence?: unknown; action?: unknown; workspaceId?: unknown; previousWorkspaceId?: unknown; clearedFields?: unknown; session?: unknown }
       const currentWorkspaceAllowed = typeof change.workspaceId === 'string' && this.workspaceAllowed(change.workspaceId)
