@@ -50,6 +50,9 @@ describe('Web Remote IPC connection coalescing', () => {
       shim.ipcRenderer.on('second-listener', () => {})
       expect(instances).toHaveLength(1)
       const first = instances[0]!
+      expect(first.url.searchParams.get('src')).toBe('shim')
+      const pageId = first.url.searchParams.get('page')
+      expect(pageId).toBeString()
       first.readyState = FakeSocket.OPEN
       first.onopen?.()
 
@@ -58,6 +61,7 @@ describe('Web Remote IPC connection coalescing', () => {
       first.onclose?.()
       shim.ipcRenderer.on('recovery-request', () => {})
       expect(instances).toHaveLength(2)
+      expect(instances[1]!.url.searchParams.get('page')).toBe(pageId)
       await new Promise((resolve) => setTimeout(resolve, 350))
       expect(instances).toHaveLength(2)
 

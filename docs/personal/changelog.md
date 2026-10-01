@@ -1239,3 +1239,10 @@
 - 改前/改后用同一 `iphone:session-sync` harness、3 Mbps/1 Mbps/50 ms、dev **831** 条索引：`agent:list-active-sessions` 从 **13 次 / 825,491 B** 降到 **6 次 / 381,732 B**；`agent:count-archived-sessions` 从 **18 次 / 1,181 B** 降到 **14 次 / 917 B**。两次 reconnect 均通过，最终索引仍 831，harness 清理通过；归档动作窗口 full-list 调用 0。
 - 同一 harness 的 `agent:list-sessions` 全程聚合数为 **3 次 / 1,381,478 B → 4 次 / 1,841,852 B**，不属于 P 改动通道，且该 suite 含 presence/标题/测试操作等既有读取，metrics 未按单个会话切换动作切片；不把它归因于本改动，保留为既有独立调用需另行归因。
 - `ipc-request-dedupe.test.ts` **3 pass / 0 fail**，覆盖 active 五并发合一、3 秒复用、归档计数复用及 metadata 事件使后续请求失效。`docs/personal/web-remote.md` 已补充契约；`git diff --check` 通过。
+
+## 2026-10-01: IPC open 日志标记来源与页面
+
+- Full-UI shim 在 `/api/ipc` WebSocket URL 增加 `src=shim&page=<随机 page ID>`；page ID 存在当前 `window`，同页重连保持不变，新页面生成新值。服务端只接受固定来源枚举与 8–64 位安全字符 page 值，v2 `event:open` 增加 `src`/`page`，不记录会话 ID 或标题。
+- iPhone `session-sync` dev harness 通过。一个配对设备观测到 4 条 `open`：其中两个不同 page ID（分别对应 harness 初始页面和随后显式再次打开 `/app/`）；后一个页面产生 3 条连接 open，但每次下一条 open 前都有上一条 connection 的 close，属于测试执行的页面切换/断线恢复，不是同页同时双连接。Service Worker `notificationclick` 已使用 `clients.matchAll({type:'window',includeUncontrolled:true})`，优先 `navigate` + `focus` 已有窗口，仅无窗口时 `openWindow`；没有证据支持修改 SW 或 shim 连接竞争逻辑。由此可按 `device hash + page + connectionId` 区分同设备多个页面与同页多次连接。
+- 新增 URL query 后，harness 原先用 `url.endsWith('/api/ipc')` 检查压缩握手，导致查询串下找不到握手记录；改为解析 URL pathname 后检查。`node --check scripts/personal/mobile-harness.mjs`、shim connection test、full-ui security test与 Electron typecheck通过。单独运行 `web-remote-server.test.ts` 在测试 setup 阶段遇到既有 `electron` 命名导出 `app` 缺失，未进入用例；开发版真实 WebSocket 已验证 query 到服务端并记录 `src/page`。
+- harness 完成后测试配对已撤销、临时 Chrome 已退出；临时 harness 会话清理后，`~/.proma-dev` 会话索引仍为 **831**。

@@ -303,7 +303,11 @@ async function assertIpcCompressionHandshake(harness, options, result) {
   const end = Date.now() + 15_000
   let response
   while (Date.now() < end) {
-    response = harness.websocketHandshakes.find((item) => item.url?.endsWith('/api/ipc') && /permessage-deflate/i.test(websocketExtensions(item.headers)))
+    response = harness.websocketHandshakes.find((item) => {
+      try {
+        return new URL(item.url ?? '', 'http://127.0.0.1').pathname === '/api/ipc' && /permessage-deflate/i.test(websocketExtensions(item.headers))
+      } catch { return false }
+    })
     if (response) break
     await delay(100)
   }

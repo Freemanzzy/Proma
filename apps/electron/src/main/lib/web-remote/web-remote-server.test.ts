@@ -34,6 +34,7 @@ let webPreloadPath: string
 let webPreloadSourcePaths: string[]
 let allowPreloadRebuild = false
 let iconDir: string
+const ipcConnectionSources: Array<{ src?: string; page?: string }> = []
 const iconFixtures: Record<string, Buffer> = {
   'apple-touch-icon.png': Buffer.from('fixture-apple-touch-icon'),
   'icon-192.png': Buffer.from('fixture-icon-192'),
@@ -65,7 +66,7 @@ beforeAll(async () => {
     if (!allowPreloadRebuild) return { success: false, error: 'test rebuild disabled' }
     writeFileSync(webPreloadPath, 'window.__PRELOAD_RECOVERED__=true;'.repeat(200))
     return { success: true }
-  }, ipcBridge: { attachWebSocket: (ws: WebSocket) => ws.send(Buffer.from(JSON.stringify({ type: 'ready' }))) } as never })
+  }, ipcBridge: { attachWebSocket: (ws: WebSocket, _deviceId: string, source?: { src?: string; page?: string }) => { ipcConnectionSources.push(source ?? {}); ws.send(Buffer.from(JSON.stringify({ type: 'ready' }))) } } as never })
   await server.start(0)
   port = (server.httpServer.address() as { port: number }).port
 })
@@ -151,14 +152,16 @@ describe('WebRemoteServer loopback integration', () => {
     expect(JSON.parse(received.text).type).toBe('ready')
   })
 
-  test('受信 Tailnet 设备的 /api/ipc WebSocket 升级通过', async () => {
+  test('受信 Tailnet 设备的 /api/ipc upgrade 记录 shim page 来源', async () => {
+    const page = 'page-test-123456'
     const received = await new Promise<string>((resolve, reject) => {
-      const client = new WebSocket(`ws://127.0.0.1:${port}/api/ipc`, { headers: { Origin: 'https://proma.example', 'Tailscale-User-Login': 'lee@example.com', 'X-Forwarded-For': '100.90.1.2' } })
+      const client = new WebSocket(`ws://127.0.0.1:${port}/api/ipc?src=shim&page=${page}`, { headers: { Origin: 'https://proma.example', 'Tailscale-User-Login': 'lee@example.com', 'X-Forwarded-For': '100.90.1.2' } })
       const timer = setTimeout(() => { client.close(); reject(new Error('受信设备 IPC WS ready 超时')) }, 2_000)
       client.once('message', (data: Buffer) => { clearTimeout(timer); resolve(data.toString()); client.close() })
       client.once('error', reject)
     })
     expect(JSON.parse(received).type).toBe('ready')
+    expect(ipcConnectionSources.at(-1)).toEqual({ src: 'shim', page })
   })
 
   test('受信 Tailnet 设备的 API 与 /app/ 静态资源均通过，根页跳转到 /app/', async () => {

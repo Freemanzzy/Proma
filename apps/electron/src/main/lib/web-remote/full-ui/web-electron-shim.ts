@@ -115,6 +115,16 @@ function notify(channel: string, value: unknown): void {
   for (const listener of [...(listeners.get(channel) ?? [])]) listener(event, decode(value))
 }
 
+function getWebRemotePageId(): string {
+  const remoteWindow = window as Window & { __PROMA_WEB_REMOTE_PAGE_ID__?: string }
+  if (remoteWindow.__PROMA_WEB_REMOTE_PAGE_ID__) return remoteWindow.__PROMA_WEB_REMOTE_PAGE_ID__
+  const pageId = typeof window.crypto?.randomUUID === 'function'
+    ? window.crypto.randomUUID()
+    : `page-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
+  Object.defineProperty(remoteWindow, '__PROMA_WEB_REMOTE_PAGE_ID__', { configurable: false, enumerable: false, value: pageId })
+  return pageId
+}
+
 function scheduleReconnect(): void {
   if (reconnectTimer !== undefined) return
   reconnectTimer = window.setTimeout(() => {
@@ -132,6 +142,8 @@ function connect(): Promise<WebSocket> {
   socketPromise = new Promise<WebSocket>((resolve, reject) => {
     const url = new URL('/api/ipc', window.location.href)
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+    url.searchParams.set('src', 'shim')
+    url.searchParams.set('page', getWebRemotePageId())
     const next = new WebSocket(url)
     socket = next
     next.onopen = () => {

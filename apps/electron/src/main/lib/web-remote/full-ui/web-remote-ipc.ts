@@ -54,6 +54,11 @@ export interface WebRemoteMetricsSnapshot {
   devices: Record<string, IpcClientMetrics>
 }
 
+export interface WebRemoteIpcConnectionSource {
+  src: 'shim' | 'other'
+  page?: string
+}
+
 const remoteMetrics: WebRemoteMetricsSnapshot = { generatedAt: new Date().toISOString(), devices: {} }
 
 export function getWebRemoteMetricsSnapshot(): WebRemoteMetricsSnapshot {
@@ -384,7 +389,7 @@ export class WebRemoteIpcBridge {
   private *invokeHandlersKeys(): Iterable<string> { yield* this.invokeHandlers.keys() }
   private *eventHandlersKeys(): Iterable<string> { yield* this.eventHandlers.keys() }
 
-  attachWebSocket(ws: WebSocket, deviceId: string): string {
+  attachWebSocket(ws: WebSocket, deviceId: string, source: WebRemoteIpcConnectionSource = { src: 'other' }): string {
     const connectionId = randomBytes(12).toString('hex')
     const metrics: IpcClientMetrics = {
       connectionId, deviceId, startedAt: Date.now(), byChannel: {}, bufferedAmountPeak: 0,
@@ -394,7 +399,7 @@ export class WebRemoteIpcBridge {
     this.clients.add(client)
     remoteMetrics.devices[connectionId] = metrics
     const deviceTag = createHash('sha256').update(deviceId).digest('hex').slice(0, 10)
-    recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 2, connectionId, d: deviceTag, event: 'open' }))
+    recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 2, connectionId, d: deviceTag, src: source.src, ...(source.page ? { page: source.page } : {}), event: 'open' }))
     const flushMetrics = () => {
       const channels = Object.entries(metrics.byChannel)
       const hasEventBytes = Object.keys(metrics.eventBytesByChannel).length > 0
