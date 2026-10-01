@@ -1199,3 +1199,9 @@
 - 全量 `bun test`：**673 pass / 0 fail**（100 files，1,680 assertions）；workspace `bun run typecheck` 通过；`build:main`、`build:renderer`、`build:web-preload` 均通过。Renderer 保留 >500 KB chunk warning。
 - 最终 `git diff --check` 通过；分支为 `fix/mobile-list-trigger-20261001`，工作树干净；`personal` 与 `origin/personal` 均停在基线 `479597f0`，version **0.19.58**。
 - dev 保持运行（launcher PID **21747**；17889/5173 在线；8443→17889），`.proma-dev` 会话数 **830**；正式 Proma PID `15699` 未变。未 merge、push、打包或安装。
+
+## 2026-10-01: 手机 presence 查询不再拉全量会话
+
+- mobile-patch 的 presence session 解析优先用路由/活跃 Agent 行 ID 与当前 `__PROMA_WEB_REMOTE_HISTORY_META.sessionId`；缺少 ID 时只用 `listActiveAgentSessions()` 回退按标题查找。结果以 session ID+标题为 key 缓存，5 秒心跳只复用结果并 POST presence，不调用全量 `listAgentSessions()`。通知 deep-link 需要标题时按指定 ID 查 active 列表，取得完整目标会话后再点击侧栏项。加载更早的末级 fallback 同样改为 active list。
+- 为避免新 document 复用上一页遗留的 history metadata，mobile-patch 用 documentElement dataset 标记将 history metadata 作用域限定在当前页面；presence 安装标记也改为 document dataset 幂等标记。测试 harness 显式把 `window.location` 注入 `new Function` 的 `location` 参数，修复 Bun 测试环境裸全局缺失造成的误失败。
+- `mobile-patch.test.ts` **8 pass / 0 fail**，覆盖 HISTORY_META 不发列表、无 ID 时只查 active list、同标题心跳复用；新增 `mobile-patch-presence.test.ts` **1 pass / 0 fail**，验证 `?session=` 只调 active list 一次、取得 title 并选择深链目标，full list 调用 0 次。`git diff --check` 通过。

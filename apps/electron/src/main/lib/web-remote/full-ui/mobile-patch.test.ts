@@ -29,9 +29,10 @@ function createMobilePatchHarness(navigatorMock: { maxTouchPoints: number; userA
   Object.defineProperty(window, 'screen', { value: { width: 412 }, configurable: true })
   Object.defineProperty(window, 'visualViewport', { value: null, configurable: true })
   const pendingTimeouts: Array<() => void> = []
+  const pendingIntervals: Array<() => void> = []
   ;(window as any).setTimeout = (callback: () => void) => { pendingTimeouts.push(callback); return pendingTimeouts.length }
   ;(window as any).clearTimeout = () => {}
-  ;(window as any).setInterval = () => 1
+  ;(window as any).setInterval = (callback: () => void) => { pendingIntervals.push(callback); return pendingIntervals.length }
   ;(window as any).requestAnimationFrame = (callback: FrameRequestCallback) => callback(0)
   ;(window as any).location = { pathname: '/app/', search: '', reload() {} }
   Object.defineProperty(window.Element.prototype, 'innerText', {
@@ -67,12 +68,17 @@ function createMobilePatchHarness(navigatorMock: { maxTouchPoints: number; userA
   ;(window as any).Notification = { permission: 'granted' }
   let resolveSubscription!: (response: { ok: boolean; json: () => Promise<{ subscribed: boolean }> }) => void
   const subscriptionResponse = new Promise<{ ok: boolean; json: () => Promise<{ subscribed: boolean }> }>((resolve) => { resolveSubscription = resolve })
-  const fetchMock = () => subscriptionResponse
+  const fetchRequests: Array<{ url: string; options?: unknown }> = []
+  const fetchMock = (input: string | URL, options?: unknown) => {
+    fetchRequests.push({ url: String(input), options })
+    return subscriptionResponse
+  }
   const html = renderWebRemoteMobilePatch()
   const script = html.match(/<script nonce="__PROMA_NONCE__">([\s\S]*?)<\/script>/)?.[1]
   if (!script) throw new Error('mobile patch script not found')
-  const run = new Function('window', 'document', 'MutationObserver', 'HTMLElement', 'Element', 'NodeFilter', 'fetch', 'navigator', script)
-  run(window, document, ManualMutationObserver, window.HTMLElement, window.Element, window.NodeFilter, fetchMock, navigatorMock)
+  const location = (window as any).location ?? { pathname: '/app/', search: '' }
+  const run = new Function('window', 'document', 'MutationObserver', 'HTMLElement', 'Element', 'NodeFilter', 'fetch', 'navigator', 'location', script)
+  run(window, document, ManualMutationObserver, window.HTMLElement, window.Element, window.NodeFilter, fetchMock, navigatorMock, location)
   const ensureObserver = ManualMutationObserver.instances[0]
   const syncRightObserver = ManualMutationObserver.instances[1]
   const syncMenuObserver = ManualMutationObserver.instances[2]
@@ -83,7 +89,7 @@ function createMobilePatchHarness(navigatorMock: { maxTouchPoints: number; userA
     let guard = 0
     while (pendingTimeouts.length > 0 && guard++ < 100) pendingTimeouts.shift()?.()
   }
-  return { window, document, writes, observers: [ensureObserver, syncRightObserver, syncMenuObserver], resolveSubscription, flushTimeouts, pendingTimeoutCount: () => pendingTimeouts.length }
+  return { window, document, writes, observers: [ensureObserver, syncRightObserver, syncMenuObserver], resolveSubscription, fetchRequests, flushTimeouts, flushIntervals: () => pendingIntervals.forEach((callback) => callback()), pendingTimeoutCount: () => pendingTimeouts.length }
 }
 
 describe('renderWebRemoteMobilePatch DOM write convergence', () => {
@@ -192,12 +198,53 @@ describe('renderWebRemoteMobilePatch DOM write convergence', () => {
     expect(document.documentElement.dataset.webRemoteFocusGuard).toBe('installed')
   })
 
-  test('presence 定时心跳不再调用全量列表，解析后复用当前 session id', () => {
+  test('presence fallback只查 active 列表，5秒心跳复用同一标题/当前会话的解析结果', () => {
     const source = renderWebRemoteMobilePatch()
-    expect(source).toContain('var presenceSession=null; var presenceTitle=\'\'; var presenceLookup=null; var presenceResolved=false;')
-    expect(source).toContain('var lookup=forceLookup||titleText!==presenceTitle||!presenceResolved;')
-    expect(source).toContain('window.setInterval(function(){reportPresence(false)},5000)')
-    expect(source).not.toContain('window.setInterval(reportPresence,5000)')
+    expect(source).toContain('var presenceSession=null; var presenceLookup=null; var presenceResolved=false; var presenceResolvedKey=\'\'; var presenceLookupKey=\'\';')
+    expect(source).toContain('window.electronAPI?.listActiveAgentSessions?.()')
+    expect(source).not.toContain('window.electronAPI?.listAgentSessions?.()')
+    expect(source).toContain('var lookup=!presenceResolved||lookupKey!==presenceResolvedKey;')
+    expect(source).toContain('window.setInterval(function(){reportPresence()},5000)')
+  })
+
+  test('presence prefers HISTORY_META.sessionId and makes no session-list request', async () => {
+    const { window, document, fetchRequests, flushIntervals } = createMobilePatchHarness()
+    let fullListCalls = 0
+    let activeListCalls = 0
+    ;(window as any).__PROMA_WEB_REMOTE_HISTORY_META = { sessionId: 'history-session' }
+    ;(window as any).electronAPI = {
+      listAgentSessions: async () => { fullListCalls++; return [] },
+      listActiveAgentSessions: async () => { activeListCalls++; return [] },
+    }
+    const title = document.createElement('button')
+    title.setAttribute('aria-label', '会话菜单：History Session')
+    document.body.appendChild(title)
+    flushIntervals()
+    await Bun.sleep(0)
+    expect(fullListCalls).toBe(0)
+    expect(activeListCalls).toBe(0)
+    const request = fetchRequests.find((item) => item.url === '/api/push/presence')
+    expect(JSON.parse(String((request?.options as { body?: string })?.body))).toMatchObject({ sessionId: 'history-session' })
+  })
+
+  test('presence 解析在无当前 session ID 时只回退到 active 列表', async () => {
+    const { window, document, fetchRequests, flushIntervals } = createMobilePatchHarness()
+    let fullListCalls = 0
+    let activeListCalls = 0
+    ;(window as any).electronAPI = {
+      listAgentSessions: async () => { fullListCalls++; return [{ id: 'full-only', title: 'Presence Session' }] },
+      listActiveAgentSessions: async () => { activeListCalls++; return [{ id: 'active-session', title: 'Presence Session' }] },
+    }
+    const title = document.createElement('button')
+    title.setAttribute('aria-label', '会话菜单：Presence Session')
+    document.body.appendChild(title)
+    flushIntervals()
+    await Bun.sleep(0)
+    await Bun.sleep(0)
+    expect(fullListCalls).toBe(0)
+    expect(activeListCalls).toBe(1)
+    const request = fetchRequests.find((item) => item.url === '/api/push/presence')
+    expect(JSON.parse(String((request?.options as { body?: string })?.body))).toMatchObject({ sessionId: 'active-session' })
   })
 
   test('无法解析的媒体标记被替换为提示文本，不会在 observer 中反复处理', async () => {
