@@ -1155,3 +1155,9 @@
 ## 2026-10-01: 完成事件测试兼容严格索引检查
 
 - 收尾 typecheck 指出大消息完成事件测试读取固定消息索引时需显式确认元素存在；补充非空断言，不改变运行逻辑。workspace typecheck 复跑通过。
+
+## 2026-10-01: stream:complete / WebSocket / Android focus 收尾验证
+
+- 全量 `bun test`：**667 pass / 0 fail**（100 files，1,655 assertions）；workspace `bun run typecheck` 通过；`build:main`、`build:renderer`、`build:web-preload` 均通过。Renderer 有既有 >500 KB chunk warning。
+- 开发实例按要求重新启动：launcher PID 7836，17889/5173 在线，临时 Serve 8443→17889；最终 `.proma-dev` 会话索引仍 **830** 条。正式 Proma PID `95991` 未变。
+- 最终 `git diff --check` 通过。未 merge、未 push、未打包或安装。
