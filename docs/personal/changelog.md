@@ -1246,3 +1246,8 @@
 ## 2026-10-02: 反馈记录：安卓重复通知
 
 - backlog“用户反馈收集”新增：安卓同时收到 PWA 与 Chrome 两条相同通知。核对服务端只有 1 个安卓推送订阅；来源待截图确认；记录合并方案（通知 tag）与推送发送计数。
+
+## 2026-10-02: 反馈记录：手机端对话内本地图片无法显示；新增 cliproxy-image Skill
+
+- backlog“用户反馈收集”新增：手机端 Markdown 本地图片显示“图片无法读取”。根因为 `file:resolve-path` 返回 `proma-file://` 协议 URL，手机浏览器无法加载；方案记入 backlog。
+- 工作区新增 Skill `cliproxy-image`（不在本仓库）：经本机 CLIProxyAPI 的 `/v1/images/generations` 与 `/v1/images/edits` 用 GPT 订阅文生图/图生图，图片存会话工作台并以 Markdown 图片语法显示。实测文生图约 28 s、图生图约 41–47 s，均 HTTP 200。

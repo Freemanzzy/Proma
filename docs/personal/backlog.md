@@ -18,6 +18,7 @@
 |---|---|---|---|
 | 2026-10-01 | 手机端无法调整思考强度，只能开/关 | 手机 | 思考按钮在桌面靠鼠标悬停弹出强度滑块，点击只切换 off/high；手机无悬停，滑块不可达。方案：触屏点击改为打开面板（滑块含“关闭”档），优先只改 mobile-patch，必要时上游 AgentThinkingPopover 改一行；桌面不变。只有声明了思考档位的模型才有滑块 |
 | 2026-10-02 | 安卓同时收到“桌面 App（PWA）”和“Chrome”两条相同通知，关闭 Chrome 页面后仍如此 | OPPO | 服务端 push-subscriptions.json 只有 1 个安卓订阅（09-28 创建），按设计每个事件只推送 1 次；第二条来源未证实（候选：页面内通知路径、安卓把同一推送同时归到 Chrome 与 WebAPK）。待用户提供通知栏截图与长按所属应用。方案：Service Worker `showNotification` 加按会话的 `tag` + `renotify:false` 合并重复；服务端推送发送写 `[INFO]` 计数，便于对照。与“同设备双连接”无直接因果：推送不依赖页面打开，双连接需两个活着的页面，装上 dedupe 分支后看 `open` 行 `page` 区分 |
+| 2026-10-02 | 手机端对话里的本地图片显示“图片无法读取”（桌面正常；与省流量开关无关） | OPPO | 根因：Markdown 图片经 `file:resolve-path` 解析，服务端路径授权通过（计量有调用、无拒绝），但返回的是 `proma-file://` 自定义协议 URL，手机浏览器无法加载 → `<img>` onError。方案：Web Remote 下 shim 对 `file:resolve-path` 的图片结果改为经 `file:read-binary-base64`（已在路径授权范围内）转 data URL，或新增按 token 的 HTTP 图片端点；遵循省流量模式（大图点按加载）。影响新建的 `cliproxy-image` Skill 在手机上显示生成图 |
 
 ## 后续待办（按建议优先级）
 
