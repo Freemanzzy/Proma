@@ -1205,3 +1205,9 @@
 - mobile-patch 的 presence session 解析优先用路由/活跃 Agent 行 ID 与当前 `__PROMA_WEB_REMOTE_HISTORY_META.sessionId`；缺少 ID 时只用 `listActiveAgentSessions()` 回退按标题查找。结果以 session ID+标题为 key 缓存，5 秒心跳只复用结果并 POST presence，不调用全量 `listAgentSessions()`。通知 deep-link 需要标题时按指定 ID 查 active 列表，取得完整目标会话后再点击侧栏项。加载更早的末级 fallback 同样改为 active list。
 - 为避免新 document 复用上一页遗留的 history metadata，mobile-patch 用 documentElement dataset 标记将 history metadata 作用域限定在当前页面；presence 安装标记也改为 document dataset 幂等标记。测试 harness 显式把 `window.location` 注入 `new Function` 的 `location` 参数，修复 Bun 测试环境裸全局缺失造成的误失败。
 - `mobile-patch.test.ts` **8 pass / 0 fail**，覆盖 HISTORY_META 不发列表、无 ID 时只查 active list、同标题心跳复用；新增 `mobile-patch-presence.test.ts` **1 pass / 0 fail**，验证 `?session=` 只调 active list 一次、取得 title 并选择深链目标，full list 调用 0 次。`git diff --check` 通过。
+
+## 2026-10-01: Presence 省流补丁验证状态补记
+
+- `mobile-patch.test.ts` **8 pass / 0 fail**、`mobile-patch-presence.test.ts` **1 pass / 0 fail**；workspace typecheck 与 `build:main` 通过。
+- 全量 `bun test` 使用 900 秒 watchdog 后超时（进程退出码 142）；日志停在 Web Remote server/WebSocket suites，未产生全量 pass/fail 汇总，因此不记为通过，也未重跑。日志：`/tmp/proma-mobile-presence-final-test.log`。
+- 开发实例保持运行，17889/5173 在线，8443→17889；`.proma-dev` 索引核对 **831** 条（父会话确认这是用户实测新增会话，未作删改）。正式 PID `15699` 未变。
