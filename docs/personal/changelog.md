@@ -1251,3 +1251,7 @@
 
 - backlog“用户反馈收集”新增：手机端 Markdown 本地图片显示“图片无法读取”。根因为 `file:resolve-path` 返回 `proma-file://` 协议 URL，手机浏览器无法加载；方案记入 backlog。
 - 工作区新增 Skill `cliproxy-image`（不在本仓库）：经本机 CLIProxyAPI 的 `/v1/images/generations` 与 `/v1/images/edits` 用 GPT 订阅文生图/图生图，图片存会话工作台并以 Markdown 图片语法显示。实测文生图约 28 s、图生图约 41–47 s，均 HTTP 200。
+
+## 2026-10-02: cliproxy-image 同步到全部工作区并加入新工作区模板
+
+- `cliproxy-image` 1.0.1（脚本路径改为相对 Skill 目录）复制到 5 个工作区，并放入 `~/.proma/default-skills/` 使新建工作区自动带上。依据源码 `seedDefaultSkills()` 只同步安装包内置 slug、`removeRetiredDefaultSkills()` 只删退役列表，个人 Skill 不会被覆盖；约定写入 backlog“测试与开发数据约定”。
