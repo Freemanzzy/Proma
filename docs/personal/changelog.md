@@ -1119,3 +1119,11 @@
 
 - 全量 `bun test`：**662 pass / 0 fail**（99 files，1,632 assertions）；workspace `bun run typecheck` 通过；Electron `build:main`、`build:renderer`、`build:web-preload` 均通过。Renderer 保留 >500 KB chunk warning。
 - 最终 `git diff --check` 通过，开发启动器运行、17889/5173 在线、临时 8443→17889 保持开启；`.proma-dev` 会话数 **830**，正式版 PID `28971` 未变。未 merge、未 push、未打包或安装。
+
+## 2026-10-01: 安装 ed95818c（手机发送确认与背压批次）
+
+- Claude Code 12:14 用 `install-update.sh` 安装 `ed95818c`（0.19.58），EXIT=0，备份校验通过，前后快照一致；钥匙串弹窗 1 次。previous 轮换为 `2f13f490`。
+- 健康检查：17888 监听、Serve 仅 443 → 17888、main.log 无 `[FATAL]`/`[ERROR]`、17 个启用任务无过期、会话 942 / 渠道 7 与安装前一致。调度器 10-01 01:00 / 02:00 已到点运行（用户确认），09-30 停摆在重启后恢复。
+- 手机：用户确认 OPPO 与 iPhone 蜂窝下响应达标，发消息不再误报“未送达”，页面不卡不断线。
+- 计量 v2 发现：每轮 Agent 完成时 `agent:stream:complete` 携带完整已持久化消息列表（约 5.3 MB），造成约 5.5 MB 积压峰值，背压不覆盖；同一设备加载页面时会同时建立两个连接；单连接 30 秒内 `agent:get-queued-messages` 可达 250 次。列入下一批。
+- 详见本机交接 `install-result-2026-10-01-2.md`。
