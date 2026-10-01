@@ -1133,3 +1133,8 @@
 - 仅在 full-ui Web Remote 广播前对 `agent:stream:complete` 的 remoteValue 去掉 `messages`；主进程发出的原始 payload 与桌面 Electron renderer 不变。核对 `useGlobalAgentListeners.ts`：complete handler 不读取 `data.messages`，仍只调用一次 `bumpRefresh()`；`AgentView.tsx` 的 refreshVersion effect 随后使用既有 `getAgentSessionSDKMessages(sessionId)` 读取持久化历史，无需增加 shim IPC 请求，也不改上游组件。
 - 5 条合成、每条约 1 MiB 的消息列表：测试中原始 event **5,243,195 B**，手机下发 event **137 B**（减少 **5,243,058 B**）；桌面 spy 收到原完整 5 条消息，手机事件保留 sessionId/runGeneration/startedAt/resultSubtype 且没有 `messages`，不再产生分块。
 - `full-ui-security.test.ts` **28 pass / 0 fail**；`useGlobalAgentListeners.recovery.test.ts` **2 pass / 0 fail**，验证 complete 使用现有一次刷新路径并保持 AgentView 历史补拉依赖。同步更新 `docs/personal/web-remote.md`；`git diff --check` 通过。
+
+## 2026-10-01: 压缩背压计量摘要行
+
+- 30 秒 v2 背压摘要调整字段顺序为 `connectionId`、`bufferedAmountPeak`、`backpressureDroppedEvents`、`resyncCount` 在前；事件 Top 5 缩为 Top 3，改用 `[channel, bytes]` 紧凑元组并置于末尾。摘要行保留 `v:2`；window/device 仍可由同连接相邻的 IPC v2 计量行关联。
+- 长通道场景使用 `agent:session-metadata-changed`，构造 24 位 connectionId、较大峰值/计数后，含 `[INFO] scope=Web Remote 计量 ` 前缀的整行 **287 字符**（≤300）。`full-ui-security.test.ts` **29 pass / 0 fail**；同步更新 `docs/personal/web-remote.md`；`git diff --check` 通过。

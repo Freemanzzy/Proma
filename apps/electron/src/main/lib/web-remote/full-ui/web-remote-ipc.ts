@@ -285,6 +285,24 @@ function summarize(channel: string): string {
   return labels[channel] ?? `确认执行远程操作：${channel}`
 }
 
+export function serializeBackpressureMetricsSummary(
+  connectionId: string,
+  metrics: Pick<IpcClientMetrics, 'bufferedAmountPeak' | 'backpressureDroppedEvents' | 'resyncCount' | 'eventBytesByChannel'>,
+): string {
+  const eventBytesTop3 = Object.entries(metrics.eventBytesByChannel)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([channel, bytes]) => [channel, bytes])
+  return JSON.stringify({
+    connectionId,
+    bufferedAmountPeak: metrics.bufferedAmountPeak,
+    backpressureDroppedEvents: metrics.backpressureDroppedEvents,
+    resyncCount: metrics.resyncCount,
+    v: 2,
+    eventBytesTop3,
+  })
+}
+
 export function isReconstructibleStreamDelta(channel: string, value: unknown): boolean {
   if (channel === 'chat:stream:chunk') return true
   if (channel !== 'agent:stream:event' || !value || typeof value !== 'object') return false
@@ -365,8 +383,8 @@ export class WebRemoteIpcBridge {
     remoteMetrics.devices[connectionId] = metrics
     const flushMetrics = () => {
       const channels = Object.entries(metrics.byChannel)
-      const eventBytesTop5 = Object.entries(metrics.eventBytesByChannel).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([channel, bytes]) => ({ channel, bytes }))
-      if (channels.length === 0 && eventBytesTop5.length === 0 && metrics.backpressureDroppedEvents === 0 && metrics.resyncCount === 0 && metrics.bufferedAmountPeak === 0) return
+      const hasEventBytes = Object.keys(metrics.eventBytesByChannel).length > 0
+      if (channels.length === 0 && !hasEventBytes && metrics.backpressureDroppedEvents === 0 && metrics.resyncCount === 0 && metrics.bufferedAmountPeak === 0) return
       const windowId = randomBytes(6).toString('hex')
       const deviceTag = createHash('sha256').update(deviceId).digest('hex').slice(0, 10)
       for (const [channel, metric] of channels) {
@@ -374,7 +392,7 @@ export class WebRemoteIpcBridge {
         recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 2, w: windowId, d: deviceTag, connectionId, c: channel, responseUtf8: metric.responseUtf8Bytes, appFraming: metric.appFramingBytes, base64: metric.base64PayloadBytes, appSent: metric.appSentBytes }))
         recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 2, w: windowId, d: deviceTag, connectionId, c: channel, estimatedDeflateRaw: metric.estimatedDeflateRawBytes, wireBytes: null, chunks: metric.chunks, bufferedPeak: metric.bufferedAmountPeak }))
       }
-      recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 2, w: windowId, d: deviceTag, connectionId, bufferedAmountPeak: metrics.bufferedAmountPeak, eventBytesTop5, backpressureDroppedEvents: metrics.backpressureDroppedEvents, resyncCount: metrics.resyncCount }))
+      recordPersonalInfo('Web Remote 计量', serializeBackpressureMetricsSummary(connectionId, metrics))
       metrics.startedAt = Date.now()
       metrics.byChannel = {}
       metrics.bufferedAmountPeak = 0
