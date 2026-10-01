@@ -1170,3 +1170,56 @@
 - 计量：`agent:stream:complete` 每 30 秒窗口约 1 KB（上一版单次约 5.3 MB），Agent 完成窗口 bufferedAmountPeak 约 573 KB（上一版约 5.5 MB）；背压丢弃与 resync 均为 0。
 - 待查：Agent 运行期间 `agent:list-sessions` 每 30–60 秒一次、每次约 525 KB；安装后 Wi-Fi 阶段同设备仍出现过两条同时关闭的连接；Top3 有 3 项时计量行仍达 332 字符截断上限。列入下一批。
 - 详见本机交接 `install-result-2026-10-01-3.md`。
+
+## 2026-10-01: 限制 Web Remote 未知会话恢复刷新
+
+- L 源码确认与简报一致：`useGlobalAgentListeners.ts` 的未知 `agent:stream:event` session 分支和未知 `agent:title-updated` session 分支均直接调用 `fetchAndMergeAgentSessionSnapshot()` → `listAgentSessions()`；开发 `session-sync` harness 及正式版简报计量也观察到 830/934 全量请求，故按计划在这两处改用共享的未知会话刷新函数。
+- Web Remote 使用 `listActiveAgentSessions()` 并以 `includeArchived=false` 合并；每个 session ID 用 `shouldRefreshUnknownAgentSession()` 节流 **60 秒**，同次请求并发事件合并；若 active 快照没有该 ID，则记录为已知不可见，后续事件不再查询。Desktop 仍走原 `listAgentSessions()` 全量逻辑；automation-graduated 等未列入范围的快照刷新未改。
+- 单测 `Agent session metadata synchronization` 新增覆盖同 ID 60 秒节流、不可见 ID 永久抑制及桌面不节流；**10 pass / 0 fail**。`useGlobalAgentListeners.recovery.test.ts` 覆盖未知 stream/title 共用 active 路径；**3 pass / 0 fail**。
+- 一次 `iphone:session-sync`（3 Mbps）通过，两个 reconnect 均恢复，耗时 **2,831 ms / 2,826 ms**，队列/会话清理后仍 **830** 条。Harness 的 metrics 是整套场景聚合值（其中仍有移动端 presence/其他既有读取），归档操作窗口的 `agent:list-sessions` 为 **0**；该 dev 数据无启用模型、现有 harness 未提供持久化 `agent:stream:event` 注入，因此未单独复现“归档会话持续流事件”并切片得到该触发器的前后计数。该通道已由源码定位，active 限流/不可见逻辑由单测覆盖；其他既有全量读取未扩大处理。
+- 更新 `docs/personal/web-remote.md` 中未知会话 Web Remote 恢复行为；`git diff --check` 通过。
+
+## 2026-10-01: 限定排队消息恢复查询范围
+
+- O 检查 `preload/index.ts` 与 `main/ipc.ts` 后确认只有 `getQueuedAgentMessages(sessionId)` 单会话快照接口，没有一次返回全部队列的 IPC；因此未扩展主进程接口。Web Remote 仅查询当前列表中未归档、非草稿且 `running` / `backgroundWaiting` / 有本地队列的会话，再并入现有 queue-map keys；桌面仍检查全部列出的会话与原 queue-map keys。
+- 新增 `selectQueuedMessageRecoverySessionIds()` 及单测：Web Remote 排除闲置 active、归档、draft，仅保留运行/排队与现有队列 key；Desktop 维持全列表。`agent-message-queue.test.ts` **9 pass / 0 fail**。
+
+## 2026-10-01: 记录 full-ui WebSocket 建立事件
+
+- 每条 `/api/ipc` 连接建立时，在当前 30 秒窗口前立即写 v2 `[INFO] scope=Web Remote 计量` 行：`{"v":2,"connectionId":"…","d":"…","event":"open"}`；`d` 是 SHA-256 设备伪名，不写原始 deviceId、事件内容或标题。
+- 单测 `每条 IPC 连接建立时记录 v2 open 事件与设备哈希` 验证事件值、connectionId 和 10 位设备哈希，且日志不含原始测试 deviceId。`full-ui-security.test.ts` **30 pass / 0 fail**；`docs/personal/web-remote.md` 已同步；`git diff --check` 通过。
+
+## 2026-10-01: 计量摘要改为 Top 2 短别名并统计完成次数
+
+- 背压摘要从 event Top 3 改为 Top 2；加入当前 30 秒窗口 `agent:stream:complete` 次数 `scN`。已知通道别名为 `agent:stream:event`→`se`、`agent:stream:complete`→`sc`、`agent:session-metadata-changed`→`smc`、`agent:stream:error`→`sx`、`chat:stream:chunk`→`cc`、`chat:stream:complete`→`ccmp`、`chat:stream:error`→`cx`；未登记别名的通道保留原名。`scN` 每窗口 flush 后归零。
+- `full-ui-security.test.ts` 验证 complete 事件计数、Top2/别名顺序、未知名称保留与真实最长会话元数据通道场景。含 `[INFO] scope=Web Remote 计量 ` 的构造长行 **223 字符**（≤300）；**30 pass / 0 fail**。更新 `docs/personal/web-remote.md`；`git diff --check` 通过。
+
+## 2026-10-01: 运行期列表与恢复计量批次收尾验证
+
+- 全量 `bun test`：**673 pass / 0 fail**（100 files，1,680 assertions）；workspace `bun run typecheck` 通过；`build:main`、`build:renderer`、`build:web-preload` 均通过。Renderer 保留 >500 KB chunk warning。
+- 最终 `git diff --check` 通过；分支为 `fix/mobile-list-trigger-20261001`，工作树干净；`personal` 与 `origin/personal` 均停在基线 `479597f0`，version **0.19.58**。
+- dev 保持运行（launcher PID **21747**；17889/5173 在线；8443→17889），`.proma-dev` 会话数 **830**；正式 Proma PID `15699` 未变。未 merge、push、打包或安装。
+
+## 2026-10-01: 手机 presence 查询不再拉全量会话
+
+- mobile-patch 的 presence session 解析优先用路由/活跃 Agent 行 ID 与当前 `__PROMA_WEB_REMOTE_HISTORY_META.sessionId`；缺少 ID 时只用 `listActiveAgentSessions()` 回退按标题查找。结果以 session ID+标题为 key 缓存，5 秒心跳只复用结果并 POST presence，不调用全量 `listAgentSessions()`。通知 deep-link 需要标题时按指定 ID 查 active 列表，取得完整目标会话后再点击侧栏项。加载更早的末级 fallback 同样改为 active list。
+- 为避免新 document 复用上一页遗留的 history metadata，mobile-patch 用 documentElement dataset 标记将 history metadata 作用域限定在当前页面；presence 安装标记也改为 document dataset 幂等标记。测试 harness 显式把 `window.location` 注入 `new Function` 的 `location` 参数，修复 Bun 测试环境裸全局缺失造成的误失败。
+- `mobile-patch.test.ts` **8 pass / 0 fail**，覆盖 HISTORY_META 不发列表、无 ID 时只查 active list、同标题心跳复用；新增 `mobile-patch-presence.test.ts` **1 pass / 0 fail**，验证 `?session=` 只调 active list 一次、取得 title 并选择深链目标，full list 调用 0 次。`git diff --check` 通过。
+
+## 2026-10-01: Presence 省流补丁验证状态补记
+
+- `mobile-patch.test.ts` **8 pass / 0 fail**、`mobile-patch-presence.test.ts` **1 pass / 0 fail**；workspace typecheck 与 `build:main` 通过。
+- 全量 `bun test` 使用 900 秒 watchdog 后超时（进程退出码 142）；日志停在 Web Remote server/WebSocket suites，未产生全量 pass/fail 汇总，因此不记为通过，也未重跑。日志：`/tmp/proma-mobile-presence-final-test.log`。
+- 开发实例保持运行，17889/5173 在线，8443→17889；`.proma-dev` 索引核对 **831** 条（父会话确认这是用户实测新增会话，未作删改）。正式 PID `15699` 未变。
+
+## 2026-10-01: 修复 presence 测试的全局隔离
+
+- `new Function` 测试 harness 显式注入 linkedom `location`、`history`、`setTimeout/setInterval/clearTimeout/clearInterval` 假实现；`mobile-patch.test.ts` 的 afterEach 恢复被覆盖的 Linkedom 原型描述符，并在每个假页面开始时清理 presence/history window 标记。通知 deep-link 用例并入既有 `mobile-patch.test.ts`，删除独立测试文件。
+- 根因是测试运行环境没有裸全局 `location`，导致 presence callback 在列表与 fetch 前抛 ReferenceError；并行独立文件中的 Linkedom 原型/窗口标记共享会污染另一个测试。产品逻辑未为测试环境做特例修改。
+- 合并后的 `mobile-patch.test.ts` **9 pass / 0 fail**；全量 `bun test` **676 pass / 0 fail**（100 files，1,691 assertions）；workspace typecheck 与 `build:main` 通过。
+
+## 2026-10-01: presence 测试隔离最终全量验证
+
+- 修复的测试 harness 显式注入 fake `location`、`history` 与全部计时器 API；afterEach 恢复 Linkedom 原型描述符，并清理共享 Window 标记。通知 deep-link 测试已并入 `mobile-patch.test.ts`，独立测试文件移除。根因是裸全局 `location` 在 Bun `new Function` 环境未定义、导致 presence callback 在请求前抛错；跨实例共享的 Linkedom 状态由 fixture 隔离处理，未改产品逻辑迁就测试。
+- 合并后的 `mobile-patch.test.ts` **9 pass / 0 fail**；按 `alarm 900` 运行的全量 `bun test` 正常结束，**676 pass / 0 fail**（100 files，1,691 assertions）；typecheck 与 `build:main` 通过。
+- dev 保持运行：17889/5173 在线，8443→17889；`.proma-dev` **831** 条；正式版 PID `15699` 未变。前一条 900 秒超时记录为修复前结果，本次全量通过已完成复核。

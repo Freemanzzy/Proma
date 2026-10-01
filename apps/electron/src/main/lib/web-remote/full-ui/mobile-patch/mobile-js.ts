@@ -197,7 +197,7 @@ export const MOBILE_JS = String.raw`(function(){
             var title=sessionButton?sessionButton.getAttribute('aria-label').replace(/^会话菜单：/,''):'';
             var sessionId=currentMeta.sessionId||requested;
             if(!sessionId){
-              var sessions=await window.electronAPI?.listAgentSessions?.();
+              var sessions=await window.electronAPI?.listActiveAgentSessions?.();
               var session=(sessions||[]).find(function(item){return item.title===title});
               sessionId=session&&session.id;
             }
@@ -245,27 +245,47 @@ export const MOBILE_JS = String.raw`(function(){
     }
     if (!window.__PROMA_PUSH_PRESENCE_INSTALLED) {
       window.__PROMA_PUSH_PRESENCE_INSTALLED=true;
-      var presenceSession=null; var presenceTitle=''; var presenceLookup=null; var presenceResolved=false;
-      var lookupPresenceSession=function(titleText,requested){
-        if(presenceLookup)return presenceLookup;
-        presenceLookup=Promise.resolve(window.electronAPI?.listAgentSessions?.()).then(function(items){
-          presenceSession=(items||[]).find(function(item){return requested?item.id===requested:item.title===titleText})||null;
-          presenceTitle=titleText; presenceResolved=true; return presenceSession;
-        }).catch(function(){return null}).finally(function(){presenceLookup=null});
+      var presenceSession=null; var presenceLookup=null; var presenceResolved=false; var presenceResolvedKey=''; var presenceLookupKey='';
+      var currentPresenceSessionId=function(requested){
+        if(requested)return requested;
+        var activeChat=document.querySelector('[data-session-switch-id][data-session-switch-type="chat"].session-item-selected');
+        if(activeChat)return null;
+        var activeAgent=document.querySelector('[data-session-switch-id][data-session-switch-type="agent"].agent-session-item-active');
+        var activeId=activeAgent&&activeAgent.getAttribute('data-session-switch-id');
+        if(activeId)return activeId;
+        var historyMeta=window.__PROMA_WEB_REMOTE_HISTORY_META;
+        return typeof historyMeta?.sessionId==='string'?historyMeta.sessionId:null;
+      };
+      var lookupPresenceSession=function(titleText,requested,requireTitle){
+        var sessionId=currentPresenceSessionId(requested);
+        var lookupKey=JSON.stringify([sessionId||null,titleText,requireTitle===true]);
+        if(presenceLookup&&presenceLookupKey===lookupKey)return presenceLookup;
+        presenceLookupKey=lookupKey;
+        if(sessionId&&!requireTitle){
+          presenceSession={id:sessionId,title:titleText}; presenceResolvedKey=lookupKey; presenceResolved=true; presenceLookup=null;
+          return Promise.resolve(presenceSession);
+        }
+        presenceLookup=Promise.resolve(window.electronAPI?.listActiveAgentSessions?.()).then(function(items){
+          var session=(items||[]).find(function(item){return requested?item.id===requested:sessionId?item.id===sessionId:item.title===titleText})||null;
+          if(presenceLookupKey===lookupKey){presenceSession=session;presenceResolvedKey=lookupKey;presenceResolved=true}
+          return session;
+        }).catch(function(){return null}).finally(function(){if(presenceLookupKey===lookupKey)presenceLookup=null});
         return presenceLookup;
       };
-      var reportPresence=function(forceLookup){
+      var reportPresence=function(){
         var button=document.querySelector('button[aria-label^="会话菜单："]'); var titleText=button?button.getAttribute('aria-label').replace(/^会话菜单：/,''):'';
         var requested=new URLSearchParams(location.search).get('session');
-        var lookup=forceLookup||titleText!==presenceTitle||!presenceResolved;
+        var candidateId=currentPresenceSessionId(requested);
+        var lookupKey=JSON.stringify([candidateId||null,titleText,false]);
+        var lookup=!presenceResolved||lookupKey!==presenceResolvedKey;
         var sessionPromise=lookup?lookupPresenceSession(titleText,requested):Promise.resolve(presenceSession);
         sessionPromise.then(function(session){
           fetch('/api/push/presence',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:session?.id||null,visible:document.visibilityState==='visible'&&!!session})}).catch(function(){});
         });
       };
-      document.addEventListener('visibilitychange',function(){reportPresence(document.visibilityState==='visible')}); window.setInterval(function(){reportPresence(false)},5000); window.addEventListener('popstate',function(){reportPresence(true)});
+      document.addEventListener('visibilitychange',function(){reportPresence()}); window.setInterval(function(){reportPresence()},5000); window.addEventListener('popstate',function(){reportPresence()});
       var requestedSession=new URLSearchParams(location.search).get('session');
-      if(requestedSession){var tries=0;var requestedMeta=null;var selectRequested=function(){var metadata=requestedMeta?Promise.resolve(requestedMeta):lookupPresenceSession('',requestedSession);metadata.then(function(session){if(!session)return;requestedMeta=session;var candidates=Array.from(document.querySelectorAll('button,[role="button"], [data-web-remote-sidebar] *'));var target=candidates.find(function(node){return node.innerText?.trim()===session.title});if(target){target.click();history.replaceState(null,'',location.pathname);setTimeout(function(){reportPresence(true)},800)}else if(tries++<40)setTimeout(selectRequested,250)}).catch(function(){})};setTimeout(selectRequested,500)}
+      if(requestedSession){var tries=0;var requestedMeta=null;var selectRequested=function(){var metadata=requestedMeta?Promise.resolve(requestedMeta):lookupPresenceSession('',requestedSession,true);metadata.then(function(session){if(!session)return;requestedMeta=session;var candidates=Array.from(document.querySelectorAll('button,[role="button"], [data-web-remote-sidebar] *'));var target=candidates.find(function(node){return node.innerText?.trim()===session.title});if(target){target.click();history.replaceState(null,'',location.pathname);setTimeout(function(){reportPresence()},800)}else if(tries++<40)setTimeout(selectRequested,250)}).catch(function(){})};setTimeout(selectRequested,500)}
     }
     if (title) {
       var selectedTab=document.querySelector('[data-web-remote-panel="right"] [role="tab"][aria-selected="true"]');

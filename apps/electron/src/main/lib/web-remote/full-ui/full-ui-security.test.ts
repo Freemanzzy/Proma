@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test'
+import { describe, expect, mock, spyOn, test } from 'bun:test'
 import { EventEmitter } from 'node:events'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -44,21 +44,28 @@ describe('Web Remote full-ui security policy', () => {
       bufferedAmountPeak: 20_000_000,
       backpressureDroppedEvents: 1_234_567,
       resyncCount: 1_234,
+      streamCompleteCount: 123,
       eventBytesByChannel: {
         'agent:session-metadata-changed': 20_000_000,
         'agent:stream:event': 18_000_000,
+        'agent:stream:complete': 15_000_000,
         'chat:stream:chunk': 10_000_000,
-        'agent:stream:error': 1,
+        'unmapped-long-channel-name': 1,
       },
     })
     const parsed = JSON.parse(row)
-    expect(Object.keys(parsed)).toEqual(['connectionId', 'bufferedAmountPeak', 'backpressureDroppedEvents', 'resyncCount', 'v', 'eventBytesTop3'])
-    expect(parsed.eventBytesTop3).toEqual([
-      ['agent:session-metadata-changed', 20_000_000],
-      ['agent:stream:event', 18_000_000],
-      ['chat:stream:chunk', 10_000_000],
+    expect(Object.keys(parsed)).toEqual(['connectionId', 'bufferedAmountPeak', 'backpressureDroppedEvents', 'resyncCount', 'scN', 'v', 'eventBytesTop2'])
+    expect(parsed.scN).toBe(123)
+    expect(parsed.eventBytesTop2).toEqual([
+      ['smc', 20_000_000],
+      ['se', 18_000_000],
     ])
     expect(`[INFO] scope=Web Remote 计量 ${row}`.length).toBeLessThanOrEqual(300)
+    const unknownRow = JSON.parse(serializeBackpressureMetricsSummary('a'.repeat(24), {
+      bufferedAmountPeak: 0, backpressureDroppedEvents: 0, resyncCount: 0, streamCompleteCount: 0,
+      eventBytesByChannel: { 'unmapped-long-channel-name': 1 },
+    }))
+    expect(unknownRow.eventBytesTop2).toEqual([['unmapped-long-channel-name', 1]])
   })
 
   test('only reconstructible stream delta channels are eligible for backpressure drops', () => {
@@ -341,6 +348,7 @@ describe('Web Remote full-ui security policy', () => {
       expect(desktopComplete.messages).toHaveLength(5)
       expect(desktopComplete.messages[0]!.text).toHaveLength(1024 * 1024 + 2)
       expect(getWebRemoteMetricsSnapshot().devices[ws.connectionId]?.eventBytesByChannel[channel]).toBe(mobileEventBytes)
+      expect(getWebRemoteMetricsSnapshot().devices[ws.connectionId]?.streamCompleteCount).toBe(1)
     } finally {
       ws.emit('close', 1000, Buffer.from('test complete'))
       mainWindow.send = originalSend
@@ -386,6 +394,23 @@ describe('Web Remote full-ui security policy', () => {
     expect(ws.sent.map((frame) => JSON.parse(frame).type).filter((type) => type === 'resync')).toHaveLength(1)
     expect(ws.sent.map((frame) => JSON.parse(frame)).some((frame) => frame.type === 'event' && frame.channel === 'agent:stream:event')).toBe(true)
     ws.emit('close', 1000, Buffer.from('test complete'))
+  })
+
+  test('每条 IPC 连接建立时记录 v2 open 事件与设备哈希', () => {
+    const info = spyOn(console, 'info').mockImplementation(() => {})
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
+    const ws = client(bridge)
+    try {
+      const openLine = info.mock.calls.map(([line]) => String(line)).find((line) => line.includes('"event":"open"'))
+      expect(openLine).toBeDefined()
+      const record = JSON.parse(openLine!.slice(openLine!.indexOf('{')))
+      expect(record).toMatchObject({ v: 2, connectionId: ws.connectionId, event: 'open' })
+      expect(record.d).toMatch(/^[0-9a-f]{10}$/)
+      expect(openLine).not.toContain('device-1')
+    } finally {
+      ws.emit('close', 1000, Buffer.from('test complete'))
+      info.mockRestore()
+    }
   })
 
   test('同一设备的并发连接保留独立积压指标与事件通道字节', async () => {

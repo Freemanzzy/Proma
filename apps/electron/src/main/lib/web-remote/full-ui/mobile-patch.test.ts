@@ -17,23 +17,64 @@ class ManualMutationObserver {
   trigger() { this.callback([], this as unknown as MutationObserver) }
 }
 
-function createMobilePatchHarness(navigatorMock: { maxTouchPoints: number; userAgent: string } = { maxTouchPoints: 5, userAgent: 'Android' }) {
+interface MobilePatchHarnessOptions {
+  search?: string
+  location?: { pathname: string; search: string; reload(): void }
+  history?: { replaceState(state: unknown, title: string, path: string): void }
+}
+
+const mobilePatchPrototypeRestorers: Array<() => void> = []
+
+function restoreDescriptor(target: object, key: string, descriptor: PropertyDescriptor | undefined): void {
+  if (descriptor) Object.defineProperty(target, key, descriptor)
+  else Reflect.deleteProperty(target, key)
+}
+
+function createMobilePatchHarness(
+  navigatorMock: { maxTouchPoints: number; userAgent: string } = { maxTouchPoints: 5, userAgent: 'Android' },
+  options: MobilePatchHarnessOptions = {},
+) {
   ManualMutationObserver.instances = []
   const { window, document } = parseHTML(`<!doctype html><html><body>
     <div data-web-remote-sidebar="left"></div>
     <main data-web-remote-main="true"></main>
     <section data-web-remote-panel="right"><div role="tablist" aria-label="右侧工作区"><div><button role="tab" aria-selected="true">文件</button></div></div></section>
   </body></html>`)
+  const elementPrototype = window.Element.prototype
+  const nodePrototype = window.Node.prototype
+  const originalDescriptors = {
+    innerText: Object.getOwnPropertyDescriptor(elementPrototype, 'innerText'),
+    innerHTML: Object.getOwnPropertyDescriptor(elementPrototype, 'innerHTML'),
+    replaceChildren: Object.getOwnPropertyDescriptor(elementPrototype, 'replaceChildren'),
+    insertBefore: Object.getOwnPropertyDescriptor(nodePrototype, 'insertBefore'),
+  }
+  mobilePatchPrototypeRestorers.push(() => {
+    restoreDescriptor(elementPrototype, 'innerText', originalDescriptors.innerText)
+    restoreDescriptor(elementPrototype, 'innerHTML', originalDescriptors.innerHTML)
+    restoreDescriptor(elementPrototype, 'replaceChildren', originalDescriptors.replaceChildren)
+    restoreDescriptor(nodePrototype, 'insertBefore', originalDescriptors.insertBefore)
+  })
+  for (const key of ['__PROMA_PUSH_PRESENCE_INSTALLED', '__PROMA_WEB_REMOTE_HISTORY_META']) {
+    try { delete (window as any)[key] } catch {}
+  }
   Object.defineProperty(window, 'innerWidth', { value: 412, configurable: true })
   Object.defineProperty(window, 'innerHeight', { value: 915, configurable: true })
   Object.defineProperty(window, 'screen', { value: { width: 412 }, configurable: true })
   Object.defineProperty(window, 'visualViewport', { value: null, configurable: true })
   const pendingTimeouts: Array<() => void> = []
-  ;(window as any).setTimeout = (callback: () => void) => { pendingTimeouts.push(callback); return pendingTimeouts.length }
-  ;(window as any).clearTimeout = () => {}
-  ;(window as any).setInterval = () => 1
+  const pendingIntervals: Array<() => void> = []
+  const fakeSetTimeout = (callback: () => void) => { pendingTimeouts.push(callback); return pendingTimeouts.length }
+  const fakeClearTimeout = () => {}
+  const fakeSetInterval = (callback: () => void) => { pendingIntervals.push(callback); return pendingIntervals.length }
+  const fakeClearInterval = () => {}
+  ;(window as any).setTimeout = fakeSetTimeout
+  ;(window as any).clearTimeout = fakeClearTimeout
+  ;(window as any).setInterval = fakeSetInterval
+  ;(window as any).clearInterval = fakeClearInterval
   ;(window as any).requestAnimationFrame = (callback: FrameRequestCallback) => callback(0)
-  ;(window as any).location = { pathname: '/app/', search: '', reload() {} }
+  const location = options.location ?? { pathname: '/app/', search: options.search ?? '', reload() {} }
+  const history = options.history ?? { replaceState: (_state: unknown, _title: string, path: string) => { location.pathname = path; location.search = '' } }
+  Object.defineProperty(window, 'location', { configurable: true, value: location })
   Object.defineProperty(window.Element.prototype, 'innerText', {
     configurable: true,
     get(this: Element) { return this.textContent ?? '' },
@@ -67,12 +108,16 @@ function createMobilePatchHarness(navigatorMock: { maxTouchPoints: number; userA
   ;(window as any).Notification = { permission: 'granted' }
   let resolveSubscription!: (response: { ok: boolean; json: () => Promise<{ subscribed: boolean }> }) => void
   const subscriptionResponse = new Promise<{ ok: boolean; json: () => Promise<{ subscribed: boolean }> }>((resolve) => { resolveSubscription = resolve })
-  const fetchMock = () => subscriptionResponse
+  const fetchRequests: Array<{ url: string; options?: unknown }> = []
+  const fetchMock = (input: string | URL, options?: unknown) => {
+    fetchRequests.push({ url: String(input), options })
+    return subscriptionResponse
+  }
   const html = renderWebRemoteMobilePatch()
   const script = html.match(/<script nonce="__PROMA_NONCE__">([\s\S]*?)<\/script>/)?.[1]
   if (!script) throw new Error('mobile patch script not found')
-  const run = new Function('window', 'document', 'MutationObserver', 'HTMLElement', 'Element', 'NodeFilter', 'fetch', 'navigator', script)
-  run(window, document, ManualMutationObserver, window.HTMLElement, window.Element, window.NodeFilter, fetchMock, navigatorMock)
+  const run = new Function('window', 'document', 'MutationObserver', 'HTMLElement', 'Element', 'NodeFilter', 'fetch', 'navigator', 'location', 'history', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval', script)
+  run(window, document, ManualMutationObserver, window.HTMLElement, window.Element, window.NodeFilter, fetchMock, navigatorMock, location, history, fakeSetTimeout, fakeSetInterval, fakeClearTimeout, fakeClearInterval)
   const ensureObserver = ManualMutationObserver.instances[0]
   const syncRightObserver = ManualMutationObserver.instances[1]
   const syncMenuObserver = ManualMutationObserver.instances[2]
@@ -83,11 +128,15 @@ function createMobilePatchHarness(navigatorMock: { maxTouchPoints: number; userA
     let guard = 0
     while (pendingTimeouts.length > 0 && guard++ < 100) pendingTimeouts.shift()?.()
   }
-  return { window, document, writes, observers: [ensureObserver, syncRightObserver, syncMenuObserver], resolveSubscription, flushTimeouts, pendingTimeoutCount: () => pendingTimeouts.length }
+  const flushNextTimeout = () => pendingTimeouts.shift()?.()
+  return { window, document, location, history, writes, observers: [ensureObserver, syncRightObserver, syncMenuObserver], resolveSubscription, fetchRequests, flushTimeouts, flushNextTimeout, flushIntervals: () => pendingIntervals.forEach((callback) => callback()), pendingTimeoutCount: () => pendingTimeouts.length }
 }
 
 describe('renderWebRemoteMobilePatch DOM write convergence', () => {
-  afterEach(() => { ManualMutationObserver.instances = [] })
+  afterEach(() => {
+    for (const restore of mobilePatchPrototypeRestorers.splice(0).reverse()) restore()
+    ManualMutationObserver.instances = []
+  })
 
   test('媒体占位点击后原位显示图片，长文本点击后原位展开', async () => {
     const { window, document, observers } = createMobilePatchHarness()
@@ -192,12 +241,79 @@ describe('renderWebRemoteMobilePatch DOM write convergence', () => {
     expect(document.documentElement.dataset.webRemoteFocusGuard).toBe('installed')
   })
 
-  test('presence 定时心跳不再调用全量列表，解析后复用当前 session id', () => {
+  test('presence fallback只查 active 列表，5秒心跳复用同一标题/当前会话的解析结果', () => {
     const source = renderWebRemoteMobilePatch()
-    expect(source).toContain('var presenceSession=null; var presenceTitle=\'\'; var presenceLookup=null; var presenceResolved=false;')
-    expect(source).toContain('var lookup=forceLookup||titleText!==presenceTitle||!presenceResolved;')
-    expect(source).toContain('window.setInterval(function(){reportPresence(false)},5000)')
-    expect(source).not.toContain('window.setInterval(reportPresence,5000)')
+    expect(source).toContain('var presenceSession=null; var presenceLookup=null; var presenceResolved=false; var presenceResolvedKey=\'\'; var presenceLookupKey=\'\';')
+    expect(source).toContain('window.electronAPI?.listActiveAgentSessions?.()')
+    expect(source).not.toContain('window.electronAPI?.listAgentSessions?.()')
+    expect(source).toContain('var lookup=!presenceResolved||lookupKey!==presenceResolvedKey;')
+    expect(source).toContain('window.setInterval(function(){reportPresence()},5000)')
+  })
+
+  test('presence prefers HISTORY_META.sessionId and makes no session-list request', async () => {
+    const { window, document, fetchRequests, flushIntervals } = createMobilePatchHarness()
+    let fullListCalls = 0
+    let activeListCalls = 0
+    ;(window as any).__PROMA_WEB_REMOTE_HISTORY_META = { sessionId: 'history-session' }
+    ;(window as any).electronAPI = {
+      listAgentSessions: async () => { fullListCalls++; return [] },
+      listActiveAgentSessions: async () => { activeListCalls++; return [] },
+    }
+    const title = document.createElement('button')
+    title.setAttribute('aria-label', '会话菜单：History Session')
+    document.body.appendChild(title)
+    flushIntervals()
+    await Bun.sleep(0)
+    expect(fullListCalls).toBe(0)
+    expect(activeListCalls).toBe(0)
+    const request = fetchRequests.find((item) => item.url === '/api/push/presence')
+    expect(JSON.parse(String((request?.options as { body?: string })?.body))).toMatchObject({ sessionId: 'history-session' })
+  })
+
+  test('presence 解析在无当前 session ID 时只回退到 active 列表', async () => {
+    const { window, document, fetchRequests, flushIntervals } = createMobilePatchHarness()
+    let fullListCalls = 0
+    let activeListCalls = 0
+    ;(window as any).electronAPI = {
+      listAgentSessions: async () => { fullListCalls++; return [{ id: 'full-only', title: 'Presence Session' }] },
+      listActiveAgentSessions: async () => { activeListCalls++; return [{ id: 'active-session', title: 'Presence Session' }] },
+    }
+    const title = document.createElement('button')
+    title.setAttribute('aria-label', '会话菜单：Presence Session')
+    document.body.appendChild(title)
+    flushIntervals()
+    await Bun.sleep(0)
+    await Bun.sleep(0)
+    expect(fullListCalls).toBe(0)
+    expect(activeListCalls).toBe(1)
+    const request = fetchRequests.find((item) => item.url === '/api/push/presence')
+    expect(JSON.parse(String((request?.options as { body?: string })?.body))).toMatchObject({ sessionId: 'active-session' })
+  })
+
+  test('通知 deep-link 按指定 ID 查 active 列表一次并使用完整标题选会话', async () => {
+    const { window, document, location, flushNextTimeout } = createMobilePatchHarness(
+      { maxTouchPoints: 5, userAgent: 'Android' },
+      { search: '?session=deep-session' },
+    )
+    let activeCalls = 0
+    let fullCalls = 0
+    let targetClicks = 0
+    ;(window as any).electronAPI = {
+      listActiveAgentSessions: async () => { activeCalls++; return [{ id: 'deep-session', title: 'Deep link target' }] },
+      listAgentSessions: async () => { fullCalls++; return [{ id: 'wrong-full-list', title: 'Deep link target' }] },
+    }
+    const target = document.createElement('button')
+    target.textContent = 'Deep link target'
+    target.addEventListener('click', () => { targetClicks++ })
+    document.querySelector('[data-web-remote-sidebar="left"]')!.appendChild(target)
+
+    flushNextTimeout()
+    await Bun.sleep(0)
+    await Bun.sleep(0)
+    expect(activeCalls).toBe(1)
+    expect(fullCalls).toBe(0)
+    expect(targetClicks).toBe(1)
+    expect(location.search).toBe('')
   })
 
   test('无法解析的媒体标记被替换为提示文本，不会在 observer 中反复处理', async () => {

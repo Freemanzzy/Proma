@@ -6,6 +6,7 @@ import {
   getAgentSessionMetadataRevision,
   mergeAgentSessionSnapshotWithChanges,
   recordAgentSessionMetadataChange,
+  shouldRefreshUnknownAgentSession,
   upsertAgentSession,
   type AgentSessionMetadataEventCursor,
 } from './agent-session-list'
@@ -20,6 +21,23 @@ const change = (overrides: Partial<AgentSessionMetadataChange> = {}): AgentSessi
 })
 
 describe('Agent session metadata synchronization', () => {
+  test('Web Remote throttles repeated unknown session refreshes and remembers invisible IDs', () => {
+    const state = { lastAttemptAt: new Map<string, number>(), knownInvisibleSessionIds: new Set<string>() }
+    const options = { sessionId: 'session-unknown', isWebRemote: true, state }
+    expect(shouldRefreshUnknownAgentSession({ ...options, now: 1_000 })).toBe(true)
+    expect(shouldRefreshUnknownAgentSession({ ...options, now: 60_999 })).toBe(false)
+    expect(shouldRefreshUnknownAgentSession({ ...options, now: 61_000 })).toBe(true)
+    state.knownInvisibleSessionIds.add('session-unknown')
+    expect(shouldRefreshUnknownAgentSession({ ...options, now: 200_000 })).toBe(false)
+  })
+
+  test('desktop unknown session refresh path is not throttled by Web Remote state', () => {
+    const state = { lastAttemptAt: new Map<string, number>(), knownInvisibleSessionIds: new Set<string>(['session-unknown']) }
+    const options = { sessionId: 'session-unknown', isWebRemote: false, state }
+    expect(shouldRefreshUnknownAgentSession({ ...options, now: 1_000 })).toBe(true)
+    expect(shouldRefreshUnknownAgentSession({ ...options, now: 1_001 })).toBe(true)
+    expect(state.lastAttemptAt.size).toBe(0)
+  })
   test('accepts a new boot at sequence 1 but rejects delayed events from a retired epoch', () => {
     const cursor: AgentSessionMetadataEventCursor = { epoch: null, sequence: 0, retiredEpochs: new Set() }
     expect(acceptAgentSessionMetadataChange(cursor, change({ epoch: 'boot-a', sequence: 12 }))).toBe(true)

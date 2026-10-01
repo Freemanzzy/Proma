@@ -1,5 +1,6 @@
 import { resolveSkillMentionName, EMPTY_SKILL_MENTION_NAMES } from './skill-mention-name'
 import type { AgentStreamState } from '@/atoms/agent-atoms'
+import type { AgentSessionMeta } from '@proma/shared'
 import type { QuotedSelection } from '@/atoms/preview-atoms'
 import {
   buildQuotedSelectionLabel,
@@ -7,6 +8,27 @@ import {
   parseQuotedSelectionMention,
 } from './quoted-selection'
 import { ENCODED_MENTION_VALUE_PATTERN, PLAIN_MENTION_VALUE_PATTERN } from './mention-patterns'
+
+export function selectQueuedMessageRecoverySessionIds({
+  isWebRemote,
+  sessions,
+  streamStates,
+  queues,
+}: {
+  isWebRemote: boolean
+  sessions: readonly Pick<AgentSessionMeta, 'id' | 'archived' | 'isDraft'>[]
+  streamStates: ReadonlyMap<string, Pick<AgentStreamState, 'running' | 'backgroundWaiting'>>
+  queues: ReadonlyMap<string, readonly unknown[]>
+}): string[] {
+  const sessionIds = isWebRemote
+    ? sessions.filter((session) => {
+      if (session.archived || session.isDraft) return false
+      const state = streamStates.get(session.id)
+      return state?.running === true || state?.backgroundWaiting === true || (queues.get(session.id)?.length ?? 0) > 0
+    }).map((session) => session.id)
+    : sessions.map((session) => session.id)
+  return [...new Set([...sessionIds, ...queues.keys()])]
+}
 
 export type QueueDropPlacement = 'before' | 'after'
 

@@ -6,6 +6,36 @@ interface AgentSessionTreeLike {
   childSessions: readonly Pick<AgentSessionMeta, 'id'>[]
 }
 
+export const WEB_REMOTE_UNKNOWN_SESSION_REFRESH_COOLDOWN_MS = 60_000
+
+export interface UnknownAgentSessionRefreshState {
+  lastAttemptAt: Map<string, number>
+  knownInvisibleSessionIds: Set<string>
+}
+
+/** Gate repeated remote-only list refreshes for the same session without changing desktop recovery. */
+export function shouldRefreshUnknownAgentSession({
+  sessionId,
+  isWebRemote,
+  now,
+  state,
+}: {
+  sessionId: string
+  isWebRemote: boolean
+  now: number
+  state: UnknownAgentSessionRefreshState
+}): boolean {
+  if (!isWebRemote) return true
+  if (state.knownInvisibleSessionIds.has(sessionId)) return false
+  for (const [id, attemptedAt] of state.lastAttemptAt) {
+    if (now - attemptedAt >= WEB_REMOTE_UNKNOWN_SESSION_REFRESH_COOLDOWN_MS) state.lastAttemptAt.delete(id)
+  }
+  const lastAttemptAt = state.lastAttemptAt.get(sessionId)
+  if (lastAttemptAt !== undefined && now - lastAttemptAt < WEB_REMOTE_UNKNOWN_SESSION_REFRESH_COOLDOWN_MS) return false
+  state.lastAttemptAt.set(sessionId, now)
+  return true
+}
+
 const DELEGATION_STATUS_ICON_CLASS: Readonly<Record<SessionIndicatorStatus, string>> = {
   idle: 'text-foreground/40',
   running: 'text-blue-500',

@@ -88,7 +88,7 @@ import {
   shouldActivateExternalAgentRun,
   shouldRevealDelegatedSession,
 } from '@/lib/external-agent-run'
-import { getAgentSessionMetadataRevision, mergeAgentSessionSnapshotWithChanges, recordAgentSessionMetadataChange, upsertAgentSession, selectDelegatedSession } from '@/lib/agent-session-list'
+import { getAgentSessionMetadataRevision, mergeAgentSessionSnapshotWithChanges, recordAgentSessionMetadataChange, shouldRefreshUnknownAgentSession, upsertAgentSession, selectDelegatedSession } from '@/lib/agent-session-list'
 import {
   getAgentCompletionMarkers,
   getDelegatedCompletionAttention,
@@ -102,7 +102,7 @@ import { arePathsEqual, getInactiveSessionFileChangePaths, getSessionFileChangeK
 import { rememberStopGenerationTarget } from '@/lib/stop-generation-target'
 import { doesWorkspaceChangeAffectPreview } from '@/components/diff/preview-open-path'
 import { openPreviewInStore } from '@/components/diff/preview-opener'
-import { removeQueuedMessage, createQueuedAgentStreamState, createAgentQueuedMessage } from '@/lib/agent-message-queue'
+import { removeQueuedMessage, createQueuedAgentStreamState, createAgentQueuedMessage, selectQueuedMessageRecoverySessionIds } from '@/lib/agent-message-queue'
 import { createAgentStreamEventBatcher } from '@/lib/agent-stream-event-batcher'
 import { getChangedWorkspaceComponentFromSdkMessage, shouldRevealChangedWorkspaceComponentImmediately } from '@/lib/agent-component-activation'
 import {
@@ -1124,10 +1124,14 @@ export function useGlobalAgentListeners(): void {
     // 队列由主进程持有。reload 后只将还在主进程队列中的项合并到本地，
     // 使用 queueMessageId 去重，绝不覆盖用户在 reload 窗口内刚更新的本地投影。
     const restoreQueuedMessages = async (): Promise<void> => {
-      const sessionIds = new Set<string>([
-        ...store.get(agentSessionsAtom).map((session) => session.id),
-        ...store.get(agentSessionMessageQueueAtom).keys(),
-      ])
+      const queues = store.get(agentSessionMessageQueueAtom)
+      const isWebRemote = (window as Window & { __PROMA_WEB_REMOTE__?: boolean }).__PROMA_WEB_REMOTE__ === true
+      const sessionIds = selectQueuedMessageRecoverySessionIds({
+        isWebRemote,
+        sessions: store.get(agentSessionsAtom),
+        streamStates: store.get(agentStreamingStatesAtom),
+        queues,
+      })
       for (const sessionId of sessionIds) {
         const snapshots = await window.electronAPI.getQueuedAgentMessages(sessionId)
         if (snapshots.length === 0) continue
@@ -1193,6 +1197,24 @@ export function useGlobalAgentListeners(): void {
       const snapshotRevision = getAgentSessionMetadataRevision()
       const sessions = await window.electronAPI.listAgentSessions()
       store.set(agentSessionsAtom, (prev) => mergeAgentSessionSnapshotWithChanges(prev, sessions, snapshotRevision, true))
+    }
+
+    const unknownAgentSessionRefreshState = {
+      lastAttemptAt: new Map<string, number>(),
+      knownInvisibleSessionIds: new Set<string>(),
+    }
+    const refreshUnknownAgentSession = async (sessionId: string): Promise<void> => {
+      const isWebRemote = (window as Window & { __PROMA_WEB_REMOTE__?: boolean }).__PROMA_WEB_REMOTE__ === true
+      if (!shouldRefreshUnknownAgentSession({ sessionId, isWebRemote, now: Date.now(), state: unknownAgentSessionRefreshState })) return
+      if (!isWebRemote) {
+        await fetchAndMergeAgentSessionSnapshot()
+        return
+      }
+
+      const snapshotRevision = getAgentSessionMetadataRevision()
+      const sessions = await window.electronAPI.listActiveAgentSessions()
+      store.set(agentSessionsAtom, (prev) => mergeAgentSessionSnapshotWithChanges(prev, sessions, snapshotRevision, false))
+      if (!sessions.some((session) => session.id === sessionId)) unknownAgentSessionRefreshState.knownInvisibleSessionIds.add(sessionId)
     }
 
     const recoverWebRemoteState = async (): Promise<void> => {
@@ -1278,10 +1300,10 @@ export function useGlobalAgentListeners(): void {
         }
 
 
-        // 如果收到未知会话的事件（跨工作区场景），立即刷新会话列表
+        // 如果收到未知会话的事件，仅在 Web Remote 下拉取一次 active 列表；归档/越权 ID 会记入不可见集合。
         const knownSessions = store.get(agentSessionsAtom)
         if (!knownSessions.some((s) => s.id === sessionId)) {
-          void fetchAndMergeAgentSessionSnapshot().catch(console.error)
+          void refreshUnknownAgentSession(sessionId).catch(console.error)
         }
 
         // Phase 2: 直接累积 SDKMessage 到 liveMessagesMapAtom（跳过 replay 消息，避免与持久化消息重复）
@@ -2069,8 +2091,8 @@ export function useGlobalAgentListeners(): void {
         }))
         return
       }
-      // 外部桥接可能先发标题、后发 run-start；仅在本地未知该会话时走恢复性全量同步。
-      void fetchAndMergeAgentSessionSnapshot().catch(console.error)
+      // 外部桥接可能先发标题、后发 run-start；未知会话统一走 Web Remote active 去重策略。
+      void refreshUnknownAgentSession(sessionId).catch(console.error)
     })
 
     const cleanupActiveWorktreeUpdated = window.electronAPI.onAgentActiveWorktreeUpdated((session) => {

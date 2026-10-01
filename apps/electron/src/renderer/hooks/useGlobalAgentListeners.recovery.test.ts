@@ -3,6 +3,27 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 describe('Web Remote listener recovery', () => {
+  test('unknown stream/title triggers share the Web Remote active-only refresh path', () => {
+    const source = readFileSync(join(import.meta.dir, 'useGlobalAgentListeners.ts'), 'utf8')
+    const start = source.indexOf('const refreshUnknownAgentSession = async (sessionId: string): Promise<void> => {')
+    const end = source.indexOf('\n    const recoverWebRemoteState', start)
+    expect(start).toBeGreaterThanOrEqual(0)
+    expect(end).toBeGreaterThan(start)
+    const refresh = source.slice(start, end)
+    expect(refresh).toContain('shouldRefreshUnknownAgentSession')
+    expect(refresh).toContain('fetchAndMergeAgentSessionSnapshot()')
+    expect(refresh).toContain('listActiveAgentSessions()')
+    expect(refresh).toContain('mergeAgentSessionSnapshotWithChanges(prev, sessions, snapshotRevision, false)')
+    expect(refresh).toContain('knownInvisibleSessionIds.add(sessionId)')
+
+    const streamStart = source.indexOf('// 如果收到未知会话的事件')
+    const streamEnd = source.indexOf('// Phase 2:', streamStart)
+    expect(source.slice(streamStart, streamEnd)).toContain('refreshUnknownAgentSession(sessionId)')
+    const titleStart = source.indexOf('// 外部桥接可能先发标题、后发 run-start；未知会话统一走 Web Remote active 去重策略。')
+    const titleEnd = source.indexOf('const cleanupActiveWorktreeUpdated', titleStart)
+    expect(source.slice(titleStart, titleEnd)).toContain('refreshUnknownAgentSession(sessionId)')
+  })
+
   test('complete keeps the existing single history refresh path for mobile events', () => {
     const listenerSource = readFileSync(join(import.meta.dir, 'useGlobalAgentListeners.ts'), 'utf8')
     const viewSource = readFileSync(join(import.meta.dir, '../components/agent/AgentView.tsx'), 'utf8')
