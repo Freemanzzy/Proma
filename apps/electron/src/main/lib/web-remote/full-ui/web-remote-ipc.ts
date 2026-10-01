@@ -13,6 +13,10 @@ import { getWebRemoteChannelPolicy, getDeclaredWebRemoteChannels, type WebRemote
 import { readWebRemoteHistoryMedia, selectWebRemoteHistoryWindow } from './sdk-history-window'
 
 const REQUEST_TIMEOUT_MS = 30_000
+const AGENT_SEND_ACCEPT_WINDOW_MS = 1_500
+export const EVENT_BACKPRESSURE_BYTES = 1_000_000
+export const EVENT_RESYNC_LOW_WATER_BYTES = 256 * 1024
+const EVENT_RESYNC_POLL_MS = 100
 const CONFIRM_TTL_MS = 60_000
 const WEB_REMOTE_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024
 const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024
@@ -22,16 +26,31 @@ const HEAVY_SESSION_BASELINE = process.env.NODE_ENV !== 'production' && process.
 type InvokeHandler = (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
 type EventHandler = (event: IpcMainEvent, ...args: unknown[]) => void
 
+interface IpcClientMetrics {
+  connectionId: string
+  deviceId: string
+  startedAt: number
+  byChannel: Record<string, { calls: number; responseUtf8Bytes: number; appFramingBytes: number; base64PayloadBytes: number; appSentBytes: number; estimatedDeflateRawBytes: number; elapsedMs: number; chunks: number; bufferedAmountPeak: number }>
+  bufferedAmountPeak: number
+  eventBytesByChannel: Record<string, number>
+  backpressureDroppedEvents: number
+  resyncCount: number
+}
+
 interface IpcClient {
   ws: WebSocket
   deviceId: string
+  connectionId: string
   confirmations: Map<string, { token: string; expiresAt: number }>
-  metrics: { startedAt: number; byChannel: Record<string, { calls: number; responseUtf8Bytes: number; appFramingBytes: number; base64PayloadBytes: number; appSentBytes: number; estimatedDeflateRawBytes: number; elapsedMs: number; chunks: number; bufferedAmountPeak: number }> }
+  needsResync: boolean
+  resyncTimer?: ReturnType<typeof setTimeout>
+  metrics: IpcClientMetrics
 }
 
 export interface WebRemoteMetricsSnapshot {
   generatedAt: string
-  devices: Record<string, IpcClient['metrics']>
+  /** Snapshots are keyed by unique connectionId; each value retains its authenticated deviceId. */
+  devices: Record<string, IpcClientMetrics>
 }
 
 const remoteMetrics: WebRemoteMetricsSnapshot = { generatedAt: new Date().toISOString(), devices: {} }
@@ -266,6 +285,46 @@ function summarize(channel: string): string {
   return labels[channel] ?? `确认执行远程操作：${channel}`
 }
 
+export function isReconstructibleStreamDelta(channel: string, value: unknown): boolean {
+  if (channel === 'chat:stream:chunk') return true
+  if (channel !== 'agent:stream:event' || !value || typeof value !== 'object') return false
+  const record = value as { payload?: { kind?: unknown } | null; event?: { type?: unknown } | null }
+  return record.payload?.kind === 'sdk_delta' || record.event?.type === 'text_delta'
+}
+
+export function splitUtf8BufferAtBoundaries(bytes: Buffer, maxBytes: number): Buffer[] {
+  if (!Number.isInteger(maxBytes) || maxBytes < 4) throw new Error('UTF-8 chunk size must be at least four bytes')
+  const chunks: Buffer[] = []
+  for (let offset = 0; offset < bytes.byteLength;) {
+    let end = Math.min(offset + maxBytes, bytes.byteLength)
+    if (end < bytes.byteLength) while (end > offset && (bytes[end]! & 0xc0) === 0x80) end--
+    if (end === offset) throw new Error('UTF-8 character exceeds chunk size')
+    chunks.push(bytes.subarray(offset, end))
+    offset = end
+  }
+  return chunks
+}
+
+export async function waitForAgentSendAcceptance<T>(operation: () => T | Promise<T>, acceptWindowMs = AGENT_SEND_ACCEPT_WINDOW_MS): Promise<T | { accepted: true }> {
+  let timedOut = false
+  const operationResult = Promise.resolve().then(operation).then(
+    (value) => ({ kind: 'result' as const, value }),
+    (error: unknown) => {
+      if (timedOut) console.warn('[Web Remote full-ui] agent:send-message accepted; later execution failed:', error instanceof Error ? error.message : String(error))
+      return { kind: 'error' as const, error }
+    },
+  )
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<{ kind: 'accepted' }>((resolve) => {
+    timer = setTimeout(() => { timedOut = true; resolve({ kind: 'accepted' }) }, acceptWindowMs)
+  })
+  const result = await Promise.race([operationResult, timeout])
+  if (timer) clearTimeout(timer)
+  if (result.kind === 'accepted') return { accepted: true }
+  if (result.kind === 'error') throw result.error
+  return result.value
+}
+
 export class WebRemoteIpcBridge {
   private readonly invokeHandlers = new WebRemoteRegistrationTable<InvokeHandler>()
   private readonly eventHandlers = new WebRemoteRegistrationTable<EventHandler>()
@@ -295,37 +354,50 @@ export class WebRemoteIpcBridge {
   private *invokeHandlersKeys(): Iterable<string> { yield* this.invokeHandlers.keys() }
   private *eventHandlersKeys(): Iterable<string> { yield* this.eventHandlers.keys() }
 
-  attachWebSocket(ws: WebSocket, deviceId: string): void {
-    const metrics: IpcClient['metrics'] = { startedAt: Date.now(), byChannel: {} }
-    const client: IpcClient = { ws, deviceId, confirmations: new Map(), metrics }
+  attachWebSocket(ws: WebSocket, deviceId: string): string {
+    const connectionId = randomBytes(12).toString('hex')
+    const metrics: IpcClientMetrics = {
+      connectionId, deviceId, startedAt: Date.now(), byChannel: {}, bufferedAmountPeak: 0,
+      eventBytesByChannel: {}, backpressureDroppedEvents: 0, resyncCount: 0,
+    }
+    const client: IpcClient = { ws, deviceId, connectionId, confirmations: new Map(), needsResync: false, metrics }
     this.clients.add(client)
-    remoteMetrics.devices[deviceId] = metrics
+    remoteMetrics.devices[connectionId] = metrics
     const flushMetrics = () => {
       const channels = Object.entries(metrics.byChannel)
-      if (channels.length === 0) return
+      const eventBytesTop5 = Object.entries(metrics.eventBytesByChannel).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([channel, bytes]) => ({ channel, bytes }))
+      if (channels.length === 0 && eventBytesTop5.length === 0 && metrics.backpressureDroppedEvents === 0 && metrics.resyncCount === 0 && metrics.bufferedAmountPeak === 0) return
       const windowId = randomBytes(6).toString('hex')
       const deviceTag = createHash('sha256').update(deviceId).digest('hex').slice(0, 10)
       for (const [channel, metric] of channels) {
-        recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 1, w: windowId, d: deviceTag, c: channel, n: metric.calls, ms: metric.elapsedMs }))
-        recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 1, w: windowId, d: deviceTag, c: channel, responseUtf8: metric.responseUtf8Bytes, appFraming: metric.appFramingBytes, base64: metric.base64PayloadBytes, appSent: metric.appSentBytes }))
-        recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 1, w: windowId, d: deviceTag, c: channel, estimatedDeflateRaw: metric.estimatedDeflateRawBytes, wireBytes: null, chunks: metric.chunks, bufferedPeak: metric.bufferedAmountPeak }))
+        recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 2, w: windowId, d: deviceTag, connectionId, c: channel, n: metric.calls, ms: metric.elapsedMs }))
+        recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 2, w: windowId, d: deviceTag, connectionId, c: channel, responseUtf8: metric.responseUtf8Bytes, appFraming: metric.appFramingBytes, base64: metric.base64PayloadBytes, appSent: metric.appSentBytes }))
+        recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 2, w: windowId, d: deviceTag, connectionId, c: channel, estimatedDeflateRaw: metric.estimatedDeflateRawBytes, wireBytes: null, chunks: metric.chunks, bufferedPeak: metric.bufferedAmountPeak }))
       }
+      recordPersonalInfo('Web Remote 计量', JSON.stringify({ v: 2, w: windowId, d: deviceTag, connectionId, bufferedAmountPeak: metrics.bufferedAmountPeak, eventBytesTop5, backpressureDroppedEvents: metrics.backpressureDroppedEvents, resyncCount: metrics.resyncCount }))
       metrics.startedAt = Date.now()
       metrics.byChannel = {}
+      metrics.bufferedAmountPeak = 0
+      metrics.eventBytesByChannel = {}
+      metrics.backpressureDroppedEvents = 0
+      metrics.resyncCount = 0
     }
     const metricsTimer = setInterval(flushMetrics, 30_000)
     metricsTimer.unref?.()
     ws.once('close', (code: number, reason: Buffer) => {
       flushMetrics()
       clearInterval(metricsTimer)
-      recordPersonalInfo('Web Remote 计量', JSON.stringify({ deviceId, event: 'close', code, reason: reason.toString().slice(0, 120) }))
+      if (client.resyncTimer) clearTimeout(client.resyncTimer)
+      delete remoteMetrics.devices[connectionId]
+      recordPersonalInfo('Web Remote 计量', JSON.stringify({ deviceId, connectionId, event: 'close', code, reason: reason.toString().slice(0, 120) }))
     })
     this.ensureWrapped()
-    this.sendRaw(ws, JSON.stringify({ type: 'ready' }))
+    this.sendForClient(client, JSON.stringify({ type: 'ready' }))
     ws.on('message', (raw) => { void this.handleMessage(client, raw.toString()) })
     const remove = () => { this.clients.delete(client) }
     ws.once('close', remove)
     ws.once('error', remove)
+    return connectionId
   }
 
   private ensureWrapped(): void {
@@ -480,6 +552,28 @@ export class WebRemoteIpcBridge {
     return true
   }
 
+  private bufferedAmount(client: IpcClient): number {
+    const amount = (client.ws as unknown as { bufferedAmount?: number }).bufferedAmount ?? 0
+    client.metrics.bufferedAmountPeak = Math.max(client.metrics.bufferedAmountPeak, amount)
+    return amount
+  }
+
+  private scheduleResync(client: IpcClient): void {
+    if (client.resyncTimer || client.ws.readyState !== WebSocket.OPEN) return
+    client.resyncTimer = setTimeout(() => {
+      client.resyncTimer = undefined
+      if (client.ws.readyState !== WebSocket.OPEN || !client.needsResync) return
+      if (this.bufferedAmount(client) < EVENT_RESYNC_LOW_WATER_BYTES) {
+        this.sendForClient(client, JSON.stringify({ type: 'resync' }))
+        client.metrics.resyncCount++
+        client.needsResync = false
+        return
+      }
+      this.scheduleResync(client)
+    }, EVENT_RESYNC_POLL_MS)
+    client.resyncTimer.unref?.()
+  }
+
   private broadcast(channel: string, value: unknown): void {
     if (!this.eventAllowed(channel, value)) {
       if (!this.loggedUnknown.has(channel) && !this.policy(channel)) { this.loggedUnknown.add(channel); console.warn(`[Web Remote] 未登记事件默认拒绝: ${channel}`) }
@@ -513,7 +607,19 @@ export class WebRemoteIpcBridge {
       payload = { __proma_web_remote_error: 'serialization_failed', channel }
     }
     const message = JSON.stringify({ type: 'event', channel, value: payload })
-    for (const client of this.clients) if (client.ws.readyState === WebSocket.OPEN) this.sendRaw(client.ws, message)
+    const droppableDelta = isReconstructibleStreamDelta(channel, value)
+    for (const client of this.clients) {
+      if (client.ws.readyState !== WebSocket.OPEN) continue
+      const bufferedAmount = this.bufferedAmount(client)
+      if (droppableDelta && bufferedAmount > EVENT_BACKPRESSURE_BYTES) {
+        client.metrics.backpressureDroppedEvents++
+        client.needsResync = true
+        this.scheduleResync(client)
+        continue
+      }
+      this.sendForClient(client, message)
+      client.metrics.eventBytesByChannel[channel] = (client.metrics.eventBytesByChannel[channel] ?? 0) + Buffer.byteLength(message, 'utf8')
+    }
   }
 
   private async handleMessage(client: IpcClient, raw: string): Promise<void> {
@@ -543,11 +649,13 @@ export class WebRemoteIpcBridge {
     const metricStart = Date.now()
     let metricRawBytes = 0
     try {
-      const value = await Promise.race([Promise.resolve(handler(fakeEvent(sender), ...args)), new Promise<never>((_, reject) => setTimeout(() => reject(new Error('IPC 请求超时')), REQUEST_TIMEOUT_MS))])
+      const value = channel === 'agent:send-message'
+        ? await waitForAgentSendAcceptance(() => handler(fakeEvent(sender), ...args))
+        : await Promise.race([Promise.resolve(handler(fakeEvent(sender), ...args)), new Promise<never>((_, reject) => setTimeout(() => reject(new Error('IPC 请求超时')), REQUEST_TIMEOUT_MS))])
       const result = encodeWebRemoteValue(this.filterResult(channel, SLIM_SESSION_LIST_CHANNELS.has(channel) ? slimWebRemoteSessionMeta(value) : value, args))
       const response = JSON.stringify({ type: 'response', id, ok: true, value: result })
       metricRawBytes = Buffer.byteLength(response)
-      const bufferedPeak = this.sendRaw(client.ws, response)
+      const bufferedPeak = this.sendForClient(client, response)
       this.recordIpcMetric(client, channel, response, metricRawBytes, Date.now() - metricStart, bufferedPeak)
     } catch (error) {
       try { this.send(client, { type: 'response', id, ok: false, error: serializeError(error) }) }
@@ -555,10 +663,15 @@ export class WebRemoteIpcBridge {
     }
   }
 
-  private send(client: IpcClient, message: unknown): void { if (client.ws.readyState === WebSocket.OPEN) this.sendRaw(client.ws, JSON.stringify(message)) }
+  private send(client: IpcClient, message: unknown): void { if (client.ws.readyState === WebSocket.OPEN) this.sendForClient(client, JSON.stringify(message)) }
+  private sendForClient(client: IpcClient, message: string): number {
+    const peak = this.sendRaw(client.ws, message)
+    client.metrics.bufferedAmountPeak = Math.max(client.metrics.bufferedAmountPeak, peak)
+    return peak
+  }
   private recordIpcMetric(client: IpcClient, channel: string, message: string, rawBytes: number, elapsedMs: number, bufferedPeak: number): void {
     const bytes = Buffer.from(message, 'utf8')
-    const chunkCount = bytes.byteLength > 256 * 1024 ? Math.ceil(bytes.byteLength / (180 * 1024)) : 1
+    let chunkCount = 1
     let appSentBytes = bytes.byteLength
     let appFramingBytes = 0
     let base64PayloadBytes = 0
@@ -566,12 +679,13 @@ export class WebRemoteIpcBridge {
       appSentBytes = 0
       let requestId: string | undefined
       try { requestId = (JSON.parse(message) as { id?: string }).id } catch {}
+      const chunks = splitUtf8BufferAtBoundaries(bytes, 180 * 1024)
+      chunkCount = chunks.length
       for (let index = 0; index < chunkCount; index++) {
-        const data = bytes.subarray(index * 180 * 1024, Math.min((index + 1) * 180 * 1024, bytes.byteLength)).toString('base64')
+        const data = chunks[index]!.toString('utf8')
         const frame = JSON.stringify({ type: 'chunk', id: '000000000000000000000000', requestId, seq: index, total: chunkCount, data })
         const frameBytes = Buffer.byteLength(frame)
         const dataBytes = Buffer.byteLength(data)
-        base64PayloadBytes += dataBytes
         appFramingBytes += frameBytes - dataBytes
         appSentBytes += frameBytes
       }
@@ -597,10 +711,11 @@ export class WebRemoteIpcBridge {
     let requestId: string | undefined
     try { requestId = (JSON.parse(message) as { id?: string }).id } catch {}
     const transferId = randomBytes(12).toString('hex')
-    const total = Math.ceil(bytes.byteLength / chunkBytes)
+    const chunks = splitUtf8BufferAtBoundaries(bytes, chunkBytes)
+    const total = chunks.length
     let bufferedPeak = getBufferedAmount()
     for (let seq = 0; seq < total; seq++) {
-      const data = bytes.subarray(seq * chunkBytes, Math.min((seq + 1) * chunkBytes, bytes.byteLength)).toString('base64')
+      const data = chunks[seq]!.toString('utf8')
       const frame = JSON.stringify({ type: 'chunk', id: transferId, requestId, seq, total, data })
       ;(ws as unknown as { send(data: string): void }).send(frame)
       bufferedPeak = Math.max(bufferedPeak, getBufferedAmount())

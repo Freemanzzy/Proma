@@ -1050,3 +1050,72 @@
 - iPhone 出现 2 次 1006 异常断开后自动重连，体验未受影响，继续观察。
 - 调度器重启后首次到点触发（10-01 01:00 / 02:00）用户选择先安装；已建一次性只读核对任务 02:40 执行，结论写入本机交接 `scheduler-check-2026-10-01.md`。
 - 详见本机交接 `install-result-2026-10-01.md`。
+
+## 2026-10-01: 手机发送 1.5 秒内确认接收
+
+- Web Remote full-ui 对 `agent:send-message` 特殊处理：调用原 handler 后，1.5 秒内结束则照常返回；1.5 秒内 reject 原样返回；仍运行则返回 `{ accepted: true }`，并消费后续 rejection、记 `[WARN]`。其他 IPC 通道维持原 30 秒超时。
+- 未改 `ipc.ts` 或桌面 renderer。核对 `AgentView.tsx`：`sendAgentMessage()` 的 resolve 值未读取，仅挂接 `.catch()` 处理发送错误，因此不依赖成功返回值；长运行错误继续由既有 Agent 事件呈现。
+- 定向单测 `apps/electron/src/main/lib/web-remote/full-ui/full-ui.test.ts`：**10 pass / 0 fail**，覆盖立即拒绝、窗口内完成及窗口外迟到拒绝；后续拒绝被消费。`git diff --check` 通过。未运行全量测试（留待收尾）。
+
+## 2026-10-01: 手机发送超时后核对会话记录
+
+- 手机 shim 将 `agent:send-message` 的 IPC 响应与分块停滞超时单独延长到 **60 秒**；其他通道保持 **35 秒**。WebSocket 断开仍立即拒绝在途请求。
+- 发送因超时/连接不确定而失败时，先显示“发送确认较慢，正在核对…”，然后对本会话调用一次 `agent:get-sdk-messages`（尾部预算 **128 KiB**），只检查最近返回的用户消息是否包含本次文本前 **200** 字。找到则撤掉提示并按已接收处理；未找到或核对失败则提示“可能未送达，请刷新确认后再重发”。确定性拒绝仍保留原错误提示，`denied` / `needsConfirm` 分支不变。
+- 新增 `web-electron-shim.test.ts` 覆盖找到、未找到、核对失败三种路径；连同步骤 A 定向测试 **13 pass / 0 fail**。全量测试与构建留待收尾。
+
+## 2026-10-01: Web Remote 大响应分块改为 UTF-8 文本帧
+
+- 侧栏核对：`LeftSidebar.tsx` 首屏/活跃视图已调用 `listActiveAgentSessions()` 与归档计数；归档视图才追加 `listArchivedAgentSessions()`，且已复用 `refreshAgentSidebarSessions(includeArchived)`。因此 C1 无需代码改动，也未触碰 `LeftSidebar.tsx`。
+- 对超过 **256 KiB** 的 full-ui IPC 响应，仍按约 **180 KiB** 块大小发送，但现在按 UTF-8 字符边界切分并以文本帧传输；shim 直接按序拼接文本，不再 base64 解码。发送与计量使用相同切块函数，`base64PayloadBytes` 对新文本帧为 0，`appSentBytes` 包含帧开销。
+- 单测覆盖 CJK/emoji 边界分块、帧重组一致及上限；Web Remote 定向测试 **37 pass / 0 fail**。`git diff --check` 与全量 typecheck/构建留待后续收尾。
+- 改前 830 会话 3 Mbps 基准采用 2026-09-30 已记录的 `agent:list-sessions`：responseUtf8 **459,810 B**、appSent **613,404 B**。本机当前 dev 未运行，改后真实 830 会话 metrics/harness 测量安排在后续 dev 启动验证中采集；不得以模拟估算冒充实测。
+
+## 2026-10-01: 发送核对兼容 SDK 历史消息结构
+
+- 收尾代码复核发现 `agent:get-sdk-messages` 返回持久化 SDK 结构 `{ type: 'user', message: { content } }`，不只存在旧式 `{ role: 'user', content }`。修正发送核对器兼容两种结构，避免真实 SDK 用户消息被误判为缺失；测试改用实际 SDK 包装结构覆盖。
+- 定向 `web-electron-shim.test.ts` **4 pass / 0 fail**，`git diff --check` 通过。
+
+## 2026-10-01: 手机列表分块实测与 full-ui 积压调查
+
+- 开发实例通过 `mobile-preview.sh start` 启动；17889、5173 与临时 8443→17889 均在线；正式版 PID 28971 未变。使用 `iphone:real-history` harness，网络仿真下行 **3,000,000 bit/s**、上行 **1,000,000 bit/s**、RTT **50 ms**。首次误选的最大 JSONL 属于归档会话，harness 在选中阶段安全失败并按应用 API 清理自建会话；随后改用最大活跃会话重跑成功。最终 manifest **830 → 830**，清理确认通过。
+- **C 改后 830 列表实测**：830 条列表、单次 `agent:list-sessions` responseUtf8 **459,810 B**、appSent **501,278 B**、base64 payload **0 B**、IPC **1,491 ms**、发送采样 bufferedPeak **2,545,869 B**。对照 2026-09-30 改前 responseUtf8 **459,810 B** / appSent **613,404 B**，responseUtf8 不变，appSent 减少 **112,126 B（18.28%）**，帧开销从 **153,594 B** 降至 **41,468 B**。改后首次显示真实大会话 **4,334 ms**，会话 JSONL **41,914,743 B**；history 两次请求合计 responseUtf8 **2,096,331 B** / appSent **2,170,230 B**，`wireBytes=null`。
+- **积压来源占比（本轮可观测的请求范围）**：
+
+  | 来源/帧类型 | responseUtf8 | appSent | 占本轮已量化列表+历史响应 appSent | 观测边界 |
+  |---|---:|---:|---:|---|
+  | IPC response（列表 + 历史，含大响应文本分块） | 2,556,141 B | 2,671,508 B | 100% | 两类 response 的 `/api/dev/metrics` 差分；不是整个页面的总流量 |
+  | agent 流事件 | 未测 | 未测 | 不可计算 | 开发数据无可用模型渠道；现有 harness 没有持续流事件注入/历史事件回放入口，本轮未伪造或改 harness |
+  | session-metadata 事件 | 未测 | 未测 | 不可计算 | 实测窗口未产生元数据变更事件 |
+  | 其他帧/页面控制流量 | 未测 | 未测 | 不可计算 | harness 汇总结果未提供全连接按帧类型的原始分项 |
+
+- **bufferedAmount / 背压结论草稿**：当前只能取得 IPC response 发送路径同步采样出的峰值（列表 **2,545,869 B**、历史 **2,170,069 B**），没有每 5 秒采样数据；不能用该值推断持续事件流积压。本轮因此没有复现或排除 agent-event 积压。代码审阅确认 `full-ui` 的 `broadcast()` 与 invoke response 均直接 `sendRaw()`，没有 `bufferedAmount` 上限、队列限流或丢弃策略；另一个 `web-remote-events.ts` Hub 有独立的 **1,000,000 B** 阈值、文本 delta 合并及超限丢弃/刷新策略，但不能视为 full-ui 的保护。`bufferedAmountPeak` 存在于每个 `IpcClient` 的独立 metrics 对象，故内存累积按连接分别进行；但快照以 `deviceId` 为键，同设备新连接会覆盖旧连接快照，日志也没有稳定连接 ID，外部观测不能可靠比较同设备多个并发窗口。建议后续另行批准加入只读采样/事件回放能力后再做完整归因；本轮未修工具或 harness。
+- 3 个初始化期既有 WebAssembly/CSP 异常为基线，real-history 动作期新增 **0**；HTTP 429 状态响应 **0**。`/tmp` harness 日志显示授权设备已撤销、Chrome/profile 已清理；开发 `~/.proma-dev` 最终仍为 **830** 条。dev 保持运行，供用户体验；未关闭临时 8443。
+
+## 2026-10-01: 手机发送与弱网调整收尾验证
+
+- 全量 `bun test`：**657 pass / 0 fail**（98 files，1,600 assertions）；workspace `bun run typecheck` 通过；Electron `build:main`、`build:renderer`、`build:web-preload` 均通过。Renderer 构建保留已有 >500 KB chunk 警告。
+- 最终 `git diff --check` 通过，分支工作树干净。未 merge、未 push、未打包或安装；正式 Proma PID `28971` 未变。开发启动器仍运行，17889/5173 在线，临时 Serve 8443 仍指向 17889；`~/.proma-dev` 会话数核对为 **830**。
+
+## 2026-10-01: Web Remote 重连由侧栏独占列表快照
+
+- `recoverWebRemoteState()` 不再调用 `fetchAndMergeAgentSessionSnapshot()` 的全量 `agent:list-sessions`，也不再重复调用 `restoreStoppedSessions()` 的 active list。停止态只在 renderer 初始化时用 active list 恢复；WebSocket 重连不销毁 atom 状态。重连列表唯一权威由 `LeftSidebar` 的 `proma-web-remote-reconnected` resync 按当前视图刷新：active 视图拉 active，归档视图拉 active + archived。未改少见未知会话等其他全量刷新点；桌面不使用此重连回调，归档视图也不会被 active-only recover 快照覆盖。
+- 新增 `useGlobalAgentListeners.recovery.test.ts`，验证恢复函数只还原运行快照、排队消息与待处理请求，不调用 full/active/archive 列表；**1 pass / 0 fail**。一次 `iphone:session-sync`（3 Mbps/1 Mbps/50 ms）通过：两次断线重连均恢复成功，耗时 **4,596 ms / 4,353 ms**，UI 的外部改名/新建/删除恢复断言通过；suite 结束配对撤销、Chrome/profile 清理通过。
+- harness 对同一设备的完整 session-sync 生命周期按 metrics 窗口汇总，而不是按重连动作切片：全 suite 的 `agent:list-sessions` 共 **6 次**、每次约 **459.8–460.5 KB**；`agent:list-active-sessions` 共 **18 次**、每次约 **66.2–66.9 KB**。这些列表调用含 session-sync 的初始读取、测试操作及未知会话等既有路径，不能全部归因给重连；本次无法从 harness 汇总值单独分离每个重连瞬间的请求数。代码路径已确认恢复函数本身列表调用 **0 次**，sidebar 的 reconnect listener 每次只触发当前视图的一次权威刷新。
+- **830 条 dev 数据 active 投影仅测量**：未归档 **105** 条；删除 `delegationGoal`、`piSessionFile`、`piEntryBindings` 后，字段投影共 **65,992 B**（按每项 JSON UTF-8 字节求和，不含数组逗号/外层 IPC envelope），平均 **628.50 B/会话**。按实际发送投影逐字段累计 key/value UTF-8 字节的前五名：`title` **6,587 B**、`workspaceId` **5,460 B**、`sdkSessionId` **5,406 B**、`channelId` **5,250 B**、`id` **4,515 B**。运行 metrics 的多次 active 请求每次 responseUtf8 约 **66.2–66.9 KB**，与投影计算相符。正式版简报基准是 934 条数据下每次 1 次全量列表（约 520 KB）+ 1 次 active（约 340 KB）；不同数据集不作精确百分比比较。`~/.proma-dev` 会话索引测试前后仍为 **830**。
+
+## 2026-10-01: full-ui 高积压时丢弃可重建流增量
+
+- full-ui 按连接检查 `bufferedAmount`。超过 **1,000,000 B** 时只丢弃 `chat:stream:chunk` 与 `agent:stream:event` 中 `payload.kind === 'sdk_delta'`（兼容旧式 `event.type === 'text_delta'`），并为该连接置 `needsResync`。不丢弃 `sdk_message`、`proma_event`（含 AskUser/计划/权限交互）、`agent:stream:complete/error`、`agent:session-metadata-changed` 或任意 invoke 响应。
+- 连接缓冲低于 **256 KiB** 时发送一次 WebSocket `resync` 控制帧；手机 shim 将它映射到已有 `proma-web-remote-reconnected` 事件，复用 `__PROMA_WEB_REMOTE_RECOVER` 与 LeftSidebar resync，无新增 IPC channel/权限分级。
+- 单测覆盖 droppable 分类、超阈值增量丢弃、完整/错误/AskUser/metadata 状态帧与 invoke response 保留，以及缓冲回落后只发送一次 resync；`full-ui-security.test.ts` **26 pass / 0 fail**，`git diff --check` 通过。该步骤未增加或修改 channel-policy 项。
+
+## 2026-10-01: 按 WebSocket 连接独立积压计量
+
+- `/api/dev/metrics` 的 `devices` 映射改为以随机 `connectionId` 为键，每项保留 `deviceId`；同一设备的多个并发连接各自拥有独立计量对象。连接关闭时先 flush 最终窗口再删除快照，避免重连导致旧连接覆盖新连接，也避免长期保留断开连接。
+- 每个 30 秒窗口汇总窗口内 `bufferedAmountPeak`、事件通道发送字节 Top 5、`backpressureDroppedEvents` 与 `resyncCount`；现有 IPC 通道字节计量行新增 connectionId。只记 channel、字节与次数，不记事件内容或会话标题，仍写入 `[INFO] scope=Web Remote 计量`。
+- 更新 `docs/personal/web-remote.md` 计量契约。`full-ui-security.test.ts` **27 pass / 0 fail**，覆盖同 deviceId 的两个连接互不覆盖、各自峰值/事件字节/丢弃计数独立及断开后移除。测试输出样例：`{"v":2,"w":"…","d":"…","connectionId":"…","bufferedAmountPeak":1000001,"eventBytesTop5":[{"channel":"agent:session-metadata-changed","bytes":226},{"channel":"agent:stream:event","bytes":194}],"backpressureDroppedEvents":1,"resyncCount":0}`。`git diff --check` 通过。
+
+## 2026-10-01: 重连与事件背压第二部分收尾验证
+
+- 全量 `bun test`：**662 pass / 0 fail**（99 files，1,632 assertions）；workspace `bun run typecheck` 通过；Electron `build:main`、`build:renderer`、`build:web-preload` 均通过。Renderer 保留 >500 KB chunk warning。
+- 最终 `git diff --check` 通过，开发启动器运行、17889/5173 在线、临时 8443→17889 保持开启；`.proma-dev` 会话数 **830**，正式版 PID `28971` 未变。未 merge、未 push、未打包或安装。

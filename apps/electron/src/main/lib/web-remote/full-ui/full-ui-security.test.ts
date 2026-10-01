@@ -10,17 +10,19 @@ mock.module('../../main-window-store', () => ({
   getMainWindow: () => fakeMainWindow,
 }))
 
-const { WebRemoteIpcBridge, getWebRemoteMetricsSnapshot, slimWebRemoteSessionMeta } = await import('./web-remote-ipc')
+const { WebRemoteIpcBridge, getWebRemoteMetricsSnapshot, slimWebRemoteSessionMeta, splitUtf8BufferAtBoundaries, isReconstructibleStreamDelta, EVENT_BACKPRESSURE_BYTES, EVENT_RESYNC_LOW_WATER_BYTES } = await import('./web-remote-ipc')
 
 class FakeWebSocket extends EventEmitter {
   readyState = 1
+  bufferedAmount = 0
+  connectionId = ''
   sent: string[] = []
   send(payload: string): void { this.sent.push(payload) }
 }
 
 function client(bridge: InstanceType<typeof WebRemoteIpcBridge>): FakeWebSocket {
   const ws = new FakeWebSocket()
-  bridge.attachWebSocket(ws as never, 'device-1')
+  ws.connectionId = bridge.attachWebSocket(ws as never, 'device-1')
   ws.sent = []
   return ws
 }
@@ -37,6 +39,25 @@ async function invoke(ws: FakeWebSocket, channel: string, args: unknown[] = [], 
 }
 
 describe('Web Remote full-ui security policy', () => {
+  test('only reconstructible stream delta channels are eligible for backpressure drops', () => {
+    expect(isReconstructibleStreamDelta('chat:stream:chunk', { delta: 'x' })).toBe(true)
+    expect(isReconstructibleStreamDelta('agent:stream:event', { payload: { kind: 'sdk_delta' } })).toBe(true)
+    expect(isReconstructibleStreamDelta('agent:stream:event', { event: { type: 'text_delta' } })).toBe(true)
+    expect(isReconstructibleStreamDelta('agent:stream:event', { payload: { kind: 'sdk_message' } })).toBe(false)
+    expect(isReconstructibleStreamDelta('agent:stream:event', { payload: { kind: 'proma_event' } })).toBe(false)
+    expect(isReconstructibleStreamDelta('agent:stream:complete', { sessionId: 's-1' })).toBe(false)
+  })
+
+  test('UTF-8 text chunk boundaries preserve CJK and emoji without replacement', () => {
+    const source = '边界中文🙂🚀'.repeat(50_000)
+    const chunks = splitUtf8BufferAtBoundaries(Buffer.from(source, 'utf8'), 180 * 1024)
+    const decoder = new TextDecoder('utf-8', { fatal: true })
+    const parts = chunks.map((chunk) => decoder.decode(chunk))
+    const frames = parts.map((data, seq) => JSON.stringify({ type: 'chunk', seq, total: parts.length, data }))
+    expect(parts.length).toBeGreaterThan(1)
+    expect(frames.map((frame) => JSON.parse(frame).data).join('')).toBe(source)
+    expect(chunks.every((chunk) => chunk.byteLength <= 180 * 1024)).toBe(true)
+  })
   const resolvers = {
     getSessionMeta: (id: string) => id === 's-1' ? { workspaceId: 'ws-1' } : id === 's-2' ? { workspaceId: 'ws-2' } : undefined,
     listWorkspaces: () => [{ id: 'ws-1', slug: 'one' }, { id: 'ws-2', slug: 'two' }],
@@ -127,7 +148,7 @@ describe('Web Remote full-ui security policy', () => {
     const chunks = ws.sent.map((frame) => JSON.parse(frame)).filter((frame) => frame.type === 'chunk').sort((a, b) => a.seq - b.seq)
     expect(chunks.length).toBeGreaterThan(1)
     expect(chunks.every((frame) => frame.total === chunks.length && frame.requestId === 'chunked')).toBe(true)
-    const assembled = Buffer.from(chunks.map((frame) => frame.data).join(''), 'base64').toString('utf8')
+    const assembled = chunks.map((frame) => frame.data).join('')
     const response = JSON.parse(assembled)
     expect(response.type).toBe('response')
     expect(response.ok).toBe(true)
@@ -214,7 +235,7 @@ describe('Web Remote full-ui security policy', () => {
     expect(response.value[0]).not.toHaveProperty('delegationGoal')
     expect(response.value[0]).not.toHaveProperty('piSessionFile')
     expect(response.value[0]).not.toHaveProperty('piEntryBindings')
-    const metric = getWebRemoteMetricsSnapshot().devices['device-1']?.byChannel['agent:list-sessions']
+    const metric = getWebRemoteMetricsSnapshot().devices[ws.connectionId]?.byChannel['agent:list-sessions']
     expect(metric).toMatchObject({ calls: 1 })
     expect(metric?.responseUtf8Bytes).toBeGreaterThan(0)
     expect(metric?.appSentBytes).toBeGreaterThan(0)
@@ -266,6 +287,69 @@ describe('Web Remote full-ui security policy', () => {
     const events = ws.sent.map((item) => JSON.parse(item)).filter((item) => item.type === 'event')
     expect(events).toHaveLength(1)
     expect(events[0].value.title).toBe('allowed')
+  })
+
+  test('背压只丢 Agent delta，状态事件和 invoke 响应仍发送', async () => {
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
+    bridge.registerInvoke('agent:list-workspaces', async () => [{ id: 'ws-1', slug: 'one' }])
+    const ws = client(bridge)
+    ws.bufferedAmount = EVENT_BACKPRESSURE_BYTES + 1
+    const mainWindow = (await import('../../main-window-store')).getMainWindow()!
+    mainWindow.webContents.send('agent:stream:event', { sessionId: 's-1', payload: { kind: 'sdk_delta', delta: { type: 'text_delta', contentIndex: 0, delta: 'partial' } } })
+    mainWindow.webContents.send('agent:stream:complete', { sessionId: 's-1' })
+    mainWindow.webContents.send('agent:stream:error', { sessionId: 's-1', error: 'failed' })
+    mainWindow.webContents.send('agent:stream:event', { sessionId: 's-1', payload: { kind: 'proma_event', event: { type: 'ask_user_request', request: { requestId: 'ask-1', sessionId: 's-1' } } } })
+    mainWindow.webContents.send('agent:session-metadata-changed', { epoch: 'epoch-1', sequence: 1, action: 'upsert', workspaceId: 'ws-1', session: { id: 's-1', title: 'kept', workspaceId: 'ws-1', createdAt: 1, updatedAt: 2 } })
+    const response = await invoke(ws, 'agent:list-workspaces')
+    const messages = ws.sent.map((frame) => JSON.parse(frame))
+    expect(messages.some((message) => message.type === 'event' && message.channel === 'agent:stream:event' && message.value.payload?.kind === 'sdk_delta')).toBe(false)
+    expect(messages.some((message) => message.type === 'event' && message.channel === 'agent:stream:event' && message.value.payload?.kind === 'proma_event')).toBe(true)
+    expect(messages.some((message) => message.type === 'event' && message.channel === 'agent:stream:complete')).toBe(true)
+    expect(messages.some((message) => message.type === 'event' && message.channel === 'agent:stream:error')).toBe(true)
+    expect(messages.some((message) => message.type === 'event' && message.channel === 'agent:stream:event' && message.value.payload?.kind === 'proma_event')).toBe(true)
+    expect(messages.some((message) => message.type === 'event' && message.channel === 'agent:session-metadata-changed')).toBe(true)
+    expect(response).toMatchObject({ ok: true, value: [{ id: 'ws-1', slug: 'one' }] })
+    ws.emit('close', 1000, Buffer.from('test complete'))
+  })
+
+  test('buffer recovery below low-water sends exactly one resync signal', async () => {
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
+    const ws = client(bridge)
+    ws.bufferedAmount = EVENT_BACKPRESSURE_BYTES + 1
+    const mainWindow = (await import('../../main-window-store')).getMainWindow()!
+    mainWindow.webContents.send('agent:stream:event', { sessionId: 's-1', payload: { kind: 'sdk_delta', delta: { type: 'text_delta', contentIndex: 0, delta: 'partial' } } })
+    mainWindow.webContents.send('agent:stream:event', { sessionId: 's-1', payload: { kind: 'sdk_delta', delta: { type: 'text_delta', contentIndex: 0, delta: 'partial-2' } } })
+    expect(ws.sent).toHaveLength(0)
+    ws.bufferedAmount = EVENT_RESYNC_LOW_WATER_BYTES - 1
+    for (let i = 0; i < 20 && !ws.sent.some((frame) => JSON.parse(frame).type === 'resync'); i++) await new Promise((resolve) => setTimeout(resolve, 10))
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    expect(ws.sent.map((frame) => JSON.parse(frame).type).filter((type) => type === 'resync')).toHaveLength(1)
+    mainWindow.webContents.send('agent:stream:event', { sessionId: 's-1', payload: { kind: 'sdk_delta', delta: { type: 'text_delta', contentIndex: 0, delta: 'after' } } })
+    expect(ws.sent.map((frame) => JSON.parse(frame).type).filter((type) => type === 'resync')).toHaveLength(1)
+    expect(ws.sent.map((frame) => JSON.parse(frame)).some((frame) => frame.type === 'event' && frame.channel === 'agent:stream:event')).toBe(true)
+    ws.emit('close', 1000, Buffer.from('test complete'))
+  })
+
+  test('同一设备的并发连接保留独立积压指标与事件通道字节', async () => {
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
+    const first = client(bridge)
+    const second = client(bridge)
+    expect(first.connectionId).not.toBe(second.connectionId)
+    first.bufferedAmount = EVENT_BACKPRESSURE_BYTES + 10
+    second.bufferedAmount = 64
+    const mainWindow = (await import('../../main-window-store')).getMainWindow()!
+    mainWindow.webContents.send('agent:stream:event', { sessionId: 's-1', payload: { kind: 'sdk_delta', delta: { type: 'text_delta', contentIndex: 0, delta: 'per-connection' } } })
+    const metrics = getWebRemoteMetricsSnapshot().devices
+    const firstMetrics = metrics[first.connectionId]
+    const secondMetrics = metrics[second.connectionId]
+    expect(firstMetrics).toMatchObject({ connectionId: first.connectionId, deviceId: 'device-1', bufferedAmountPeak: EVENT_BACKPRESSURE_BYTES + 10, backpressureDroppedEvents: 1, resyncCount: 0 })
+    expect(secondMetrics).toMatchObject({ connectionId: second.connectionId, deviceId: 'device-1', backpressureDroppedEvents: 0 })
+    expect(secondMetrics?.eventBytesByChannel['agent:stream:event']).toBeGreaterThan(0)
+    expect(firstMetrics?.eventBytesByChannel['agent:stream:event'] ?? 0).toBe(0)
+    first.emit('close', 1000, Buffer.from('test complete'))
+    second.emit('close', 1000, Buffer.from('test complete'))
+    expect(getWebRemoteMetricsSnapshot().devices[first.connectionId]).toBeUndefined()
+    expect(getWebRemoteMetricsSnapshot().devices[second.connectionId]).toBeUndefined()
   })
 
   test('会话元数据事件按工作区过滤、脱敏并将越权迁移降为移除通知', async () => {
