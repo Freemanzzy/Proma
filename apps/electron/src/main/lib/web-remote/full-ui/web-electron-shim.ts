@@ -339,6 +339,37 @@ async function invokeWithToken(channel: string, args: unknown[], confirmToken?: 
   return channel === 'agent:get-sdk-messages' ? normalizeHistoryWindow(response, typeof args[0] === 'string' ? args[0] : undefined) : response
 }
 
+const WEB_REMOTE_INLINE_IMAGE_MAX_BYTES = 8 * 1024 * 1024
+const webRemoteImageReadCache = new Map<string, Promise<string | null>>()
+const WEB_REMOTE_IMAGE_MIME_TYPES: Readonly<Record<string, string>> = Object.freeze({
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
+})
+
+export async function resolveWebRemoteImageResult<T extends { url: string; resolvedPath: string }>(
+  result: T | null,
+  access: unknown,
+  readBinary: (path: string, access: unknown, maxSize: number) => Promise<unknown>,
+): Promise<T | null> {
+  if (!result) return null
+  const extension = /\.([a-z0-9]+)$/i.exec(result.resolvedPath)?.[1]?.toLowerCase()
+  const mime = extension ? WEB_REMOTE_IMAGE_MIME_TYPES[extension] : undefined
+  // SVG is intentionally left on the existing authorized file URL path rather than embedded as active markup.
+  if (!mime) return result
+  let read = webRemoteImageReadCache.get(result.resolvedPath)
+  if (!read) {
+    read = readBinary(result.resolvedPath, access, WEB_REMOTE_INLINE_IMAGE_MAX_BYTES)
+      .then((value) => typeof value === 'string' ? value : null)
+      .catch((error) => {
+        webRemoteImageReadCache.delete(result.resolvedPath)
+        throw error
+      })
+    webRemoteImageReadCache.set(result.resolvedPath, read)
+  }
+  const base64 = await read
+  if (base64 === null) return null
+  return { ...result, url: `data:${mime};base64,${base64}` }
+}
+
 async function loadEarlierHistory(sessionId: string, endIndex: number): Promise<unknown[]> {
   const messages = await invokeWithToken('agent:get-sdk-messages', [sessionId, { endIndex, budgetBytes: 2 * 1024 * 1024 }])
   if (!Array.isArray(messages)) return []
@@ -420,6 +451,12 @@ async function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
   }
   if (WEB_REMOTE_SESSION_LIST_READ_CHANNELS.has(channel)) {
     return coalesceSessionListRead(inFlightReadRequests, channel, args, () => invokeWithToken(channel, args), 3_000)
+  }
+  if (channel === 'file:resolve-path') {
+    const result = await invokeWithToken(channel, args) as { url: string; resolvedPath: string } | null
+    return resolveWebRemoteImageResult(result, args[1], (path, access, maxSize) => (
+      invokeWithToken('file:read-binary-base64', [path, access, maxSize])
+    ))
   }
   try {
     return await invokeWithToken(channel, args)

@@ -1286,3 +1286,8 @@
 - `renderer/lib/web-remote-recovery.ts` 提供纯状态筛选与终态转换。Web Remote `recoverWebRemoteState` 在取得主进程活跃快照后，结束本地仍标记 running/retrying/backgroundWaiting 但快照已不存在的会话，并对每个缺失会话递增一次 `agentMessageRefreshAtom`；当前会话未在缺失集合时仍按原行为刷新一次。快照仍活跃的会话维持运行态。
 - 修改 `renderer/hooks/useGlobalAgentListeners.ts`，恢复差异处理只被 Web Remote 专属恢复入口调用；renderer 启动初始化和桌面路径保持既有处理。新增 `renderer/lib/web-remote-recovery.test.ts` 与扩展 `useGlobalAgentListeners.recovery.test.ts`，共 **5 pass / 0 fail**；Electron typecheck 通过。
 - 更新 `docs/personal/backlog.md` 反馈状态。
+
+## 2026-10-02: Web Remote 显示对话中的本地图片
+
+- 仅在 full-ui shim 的 `file:resolve-path` 成功结果为目标图片时，使用同一 `resolvedPath` 与原 `access` 参数调用已分级、服务端路径校验的 `file:read-binary-base64`；读取上限 **8 MiB**，返回 MIME 对应的 data URL。对话页面按路径缓存读取 Promise；读取超限返回 `null`。SVG、PDF 等非目标类型维持 `proma-file://` 原结果，未改主进程或授权逻辑。
+- `web-electron-shim.test.ts` 图片读取缓存、非图片原样返回和超限断言均通过；相关 shim 测试 **8 pass / 0 fail**，Electron typecheck 通过。更新 `docs/personal/web-remote.md` 与 `docs/personal/backlog.md`。

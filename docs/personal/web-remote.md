@@ -75,6 +75,8 @@ Android 等触屏设备切换会话时，程序触发的输入框 autofocus 不�
 
 顶部的“省流量模式”开关可手动启用/关闭并记入 localStorage。未手动选择时，浏览器报告 `slow-2g`/`2g` 或 downlink < 1 Mbps 会自动开启。开启后历史尾部预算为 256 KiB，内联图片预算为 0（全部点按加载）；关闭时首屏/常规历史预算为 1 MiB、内联图片预算为 1 MiB。此预算由 Web Remote shim 仅附加到手机的历史 IPC 参数，不改变桌面行为；显式“加载更早”仍按 2 MiB/页。
 
+对话 Markdown 中经 `file:resolve-path` 解析的本地 PNG/JPG/JPEG/GIF/WebP/BMP 图片，Web Remote 使用同一路径授权的 `file:read-binary-base64` 返回 data URL，单张读取上限 8 MiB，并按路径在当前页面缓存；超限返回空结果。SVG、PDF 等其他文件仍使用原有解析结果。桌面行为不变。
+
 
 媒体标记仅由 Web Remote 的历史裁剪层生成，包含会话 ID、SDK 消息 UUID（缺少 UUID 时使用消息索引）及整条消息 SHA-256、块路径与内容校验摘要。按需读取通过 `web-remote:get-history-media` 只读 IPC，并按会话所属工作区授权；定位不唯一、摘要变化、越权或目标不存在均拒绝。桌面 renderer 的 SDK 历史返回不经该移动端裁剪，不包含 Web Remote 标记。
 
