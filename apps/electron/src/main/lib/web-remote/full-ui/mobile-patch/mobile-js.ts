@@ -230,7 +230,7 @@ export const MOBILE_JS = String.raw`(function(){
           var keyResponse=await fetch('/api/push/key',{credentials:'include'}); if(!keyResponse.ok)throw new Error('无法读取推送公钥'); var key=(await keyResponse.json()).publicKey;
           var applicationServerKey=Uint8Array.from(atob(key.replace(/-/g,'+').replace(/_/g,'/')),function(c){return c.charCodeAt(0)});
           var subscription=await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:applicationServerKey});
-          var saved=await fetch('/api/push/subscription',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({subscription:subscription.toJSON(),label:/Android/i.test(navigator.userAgent)?'Android 手机':'iPhone'})}); if(!saved.ok)throw new Error('订阅登记失败'); setNotifyState(notify,true); webRemoteToast('通知已开启');
+          var saved=await fetch('/api/push/subscription',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({subscription:subscription.toJSON(),label:/Android/i.test(navigator.userAgent)?'Android 手机':'iPhone'})}); if(!saved.ok)throw new Error('订阅登记失败'); if(window.__PROMA_WEB_REMOTE_RESET_PUSH_SUBSCRIPTION_CACHE)window.__PROMA_WEB_REMOTE_RESET_PUSH_SUBSCRIPTION_CACHE(); setNotifyState(notify,true); webRemoteToast('通知已开启');
         } catch(error) { var msg=(error&&error.message)||String(error); if((error&&error.name==='NotAllowedError')||/denied|not allowed/i.test(msg)){alert('系统拒绝了推送订阅。请在「设置 → 通知 → Proma」开启通知后再试；iOS 模拟器不支持网页推送，请在真机上开启。');} else {alert('开启通知失败：'+msg);} }
       }); topbar.appendChild(notify);
     }

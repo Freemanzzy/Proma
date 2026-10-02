@@ -1296,3 +1296,9 @@
 
 - `renderer/components/agent/AgentView.tsx` 的 `AgentThinkingPopover` 点击处理仅增加 Web Remote + 触屏条件：打开现有面板并 return，不进入 click 开关逻辑。桌面与非触屏 Web Remote 仍执行原有 click；面板内的模型能力、滑块和“关闭”档不变。
 - 新增 `AgentView.mobile-thinking.test.ts` 检查触屏 open 分支位于原开关逻辑之前且桌面 click 路径仍保留；测试 **1 pass / 0 fail**，Electron typecheck 通过。上游文件仅 `AgentView.tsx`（增加 4 行逻辑）。更新 `docs/personal/backlog.md`。
+
+## 2026-10-02: Web Remote 有推送订阅时抑制页面重复通知
+
+- full-ui shim 暴露查询函数：检查 `navigator.serviceWorker.ready` 的 `pushManager.getSubscription()`，缓存查询结果；订阅成功登记后由 mobile patch 使缓存失效。renderer `sendDesktopNotification` 仅在该 Web Remote 函数返回“已有订阅”时跳过页面 `Notification`，提示音与无订阅回退不变。
+- 服务端推送发送日志改为 `recordPersonalInfo('Web Remote 推送', ...)`，每个结果只写 10 位 SHA-256 设备哈希、kind 与状态，不记录标题、正文或错误详情。
+- `notifications.test.ts`、`web-remote-push.test.ts`、mobile-patch 与 shim 测试共 **23 pass / 0 fail**，Electron typecheck 通过。更新 `docs/personal/web-remote.md` 与 `docs/personal/backlog.md`；双通知实际来源仍待用户截图/手机复测确认。

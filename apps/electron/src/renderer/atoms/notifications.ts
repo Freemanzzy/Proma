@@ -379,6 +379,10 @@ export interface DesktopNotificationOptions {
   force?: boolean
 }
 
+export function shouldCreatePageNotification(hasPushSubscription: boolean): boolean {
+  return !hasPushSubscription
+}
+
 /**
  * 发送桌面通知
  *
@@ -404,6 +408,11 @@ export function sendDesktopNotification(
 
     // Windows 上系统通知由主进程统一发送，渲染进程跳过 Web Notification
     if (detectIsWindows()) return
+
+    const hasWebRemotePushSubscription = (window as Window & {
+      __PROMA_WEB_REMOTE_HAS_PUSH_SUBSCRIPTION?: () => Promise<boolean>
+    }).__PROMA_WEB_REMOTE_HAS_PUSH_SUBSCRIPTION
+    if (hasWebRemotePushSubscription && !shouldCreatePageNotification(await hasWebRemotePushSubscription())) return
 
     const notification = new Notification(title, { body, silent: true })
     notification.onclick = () => {

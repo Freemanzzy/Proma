@@ -370,6 +370,19 @@ export async function resolveWebRemoteImageResult<T extends { url: string; resol
   return { ...result, url: `data:${mime};base64,${base64}` }
 }
 
+let webRemotePushSubscriptionCache: Promise<boolean> | null = null
+
+async function hasWebRemotePushSubscription(): Promise<boolean> {
+  if (!webRemotePushSubscriptionCache) {
+    webRemotePushSubscriptionCache = (async () => {
+      if (!navigator.serviceWorker) return false
+      const registration = await navigator.serviceWorker.ready
+      return Boolean(await registration.pushManager.getSubscription())
+    })().catch(() => false)
+  }
+  return webRemotePushSubscriptionCache
+}
+
 async function loadEarlierHistory(sessionId: string, endIndex: number): Promise<unknown[]> {
   const messages = await invokeWithToken('agent:get-sdk-messages', [sessionId, { endIndex, budgetBytes: 2 * 1024 * 1024 }])
   if (!Array.isArray(messages)) return []
@@ -487,6 +500,8 @@ async function invokeStrict(channel: string, ...args: unknown[]): Promise<unknow
 if (typeof window !== 'undefined') {
   Object.defineProperty(window, '__PROMA_WEB_REMOTE_INVOKE', { configurable: false, enumerable: false, value: invokeStrict })
   Object.defineProperty(window, '__PROMA_WEB_REMOTE_LOAD_EARLIER', { configurable: false, enumerable: false, value: loadEarlierHistory })
+  Object.defineProperty(window, '__PROMA_WEB_REMOTE_HAS_PUSH_SUBSCRIPTION', { configurable: false, enumerable: false, value: hasWebRemotePushSubscription })
+  Object.defineProperty(window, '__PROMA_WEB_REMOTE_RESET_PUSH_SUBSCRIPTION_CACHE', { configurable: false, enumerable: false, value: () => { webRemotePushSubscriptionCache = null } })
 }
 
 function send(channel: string, ...args: unknown[]): void {
