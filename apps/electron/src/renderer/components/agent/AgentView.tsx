@@ -140,6 +140,7 @@ import {
 } from '@/lib/session-reference-drag'
 import { buildQuotedSelectionBlock, expandAgentHistoryQuoteMentions } from '@/lib/quoted-selection'
 import { INSERT_AGENT_INPUT_QUOTE_EVENT, type InsertAgentInputQuoteDetail } from '@/lib/agent-input-quote'
+import { handleThinkingPopoverTriggerClick, shouldOpenThinkingPopoverOnTouch } from '@/lib/thinking-popover-interaction'
 import { createClipboardPendingFile, createClipboardTextDraft, makeUniqueAttachmentName } from '@/lib/clipboard-text-attachment'
 import { copyTextToClipboard } from '@/lib/clipboard'
 import {
@@ -356,6 +357,7 @@ function AgentThinkingPopover({ agentThinking, onToggle, codexConfig }: AgentThi
   }, [])
 
   const handleMouseLeave = React.useCallback(() => {
+    if (isWebRemoteTouchDevice()) return
     hoverTimeout.current = setTimeout(() => setOpen(false), 150)
   }, [])
 
@@ -365,17 +367,15 @@ function AgentThinkingPopover({ agentThinking, onToggle, codexConfig }: AgentThi
     }
   }, [])
 
-  const handleButtonClick = (): void => {
-    if (isWebRemoteFullUi() && (navigator.maxTouchPoints > 0 || window.matchMedia?.('(pointer: coarse)').matches)) {
-      setOpen(true)
-      return
-    }
-    if (codexConfig) {
-      if (!supportsThinkingToggle) return
-      codexConfig.onThinkingLevelChange(isEnabled ? 'off' : 'high')
-      return
-    }
-    onToggle()
+  const handleButtonClick = (event: React.MouseEvent<HTMLButtonElement>): void => {
+    handleThinkingPopoverTriggerClick(event, isWebRemoteTouchDevice(), setOpen, () => {
+      if (codexConfig) {
+        if (!supportsThinkingToggle) return
+        codexConfig.onThinkingLevelChange(isEnabled ? 'off' : 'high')
+        return
+      }
+      onToggle()
+    })
   }
 
   return (
@@ -458,6 +458,14 @@ const WEB_REMOTE_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024
 
 function isWebRemoteFullUi(): boolean {
   return Boolean((window as Window & { __PROMA_WEB_REMOTE__?: boolean }).__PROMA_WEB_REMOTE__)
+}
+
+function isWebRemoteTouchDevice(): boolean {
+  return shouldOpenThinkingPopoverOnTouch(
+    isWebRemoteFullUi(),
+    navigator.maxTouchPoints,
+    window.matchMedia?.('(pointer: coarse)').matches ?? false,
+  )
 }
 
 export function AgentView({ sessionId, embedded = false }: AgentViewProps): React.ReactElement {

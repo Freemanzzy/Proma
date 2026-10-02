@@ -1322,3 +1322,10 @@
 - **缺陷**：iPhone 与安卓点思考按钮都没有出现强度面板。根因（父会话核对 Radix 源码）：`PopoverTrigger` 的 onClick 为 `composeEventHandlers(props.onClick, onOpenToggle)`，我方 `setOpen(true)` 后 Radix 又执行 `prev => !prev`，面板立即关闭；原单测只做源码字符串断言，未覆盖运行行为。修复见下一条记录。
 - 观察：13:28:45 `[WARN] 消息截断后仍超限 (1471K chars)`，为上游 `serializeSDKMessageForStorage` 对超大消息截断后仍超出上限的提示，消息照常落盘；记入 backlog 观察。
 - 详见本机交接 `install-result-2026-10-02.md`。
+
+## 2026-10-02: 修复 Web Remote 触屏思考 Popover 被 Radix 立即关闭
+
+- 根因：Radix `PopoverTrigger` 将应用 `onClick` 与 `onOpenToggle` 通过 `composeEventHandlers` 组合。旧触屏分支 `setOpen(true)` 后没有 `preventDefault()`，Radix 继续 toggle，导致面板关闭。原 `AgentView.mobile-thinking.test.ts` 只检查源码字符串，没有覆盖运行行为。
+- `AgentThinkingPopover.handleButtonClick` 现在接收 React click event；Web Remote 触屏分支先 `preventDefault()`、再 `setOpen(true)`，阻止 Radix 默认 toggle。触屏判断抽为同文件内 `isWebRemoteTouchDevice()`，`handleMouseLeave` 对同一条件不安排延迟关闭；桌面 click 逻辑保持原样。纯交互助手 `thinking-popover-interaction.ts` 可单独验证。
+- 替换源代码字符串断言为运行行为测试：使用 Radix 实际 `composeEventHandlers`、函数式 state 模拟，验证触屏最终 `open === true` 且 `onToggle` / `onThinkingLevelChange` 不调用；桌面 click 不被 preventDefault、执行原 action 且正常 toggle。`AgentView.mobile-thinking.test.ts` **2 pass / 0 fail**。
+- 验收：全量 `bun test` **686 pass / 0 fail，1,750 expect，104 files**；Electron typecheck、`build:main`、`build:renderer`、`build:web-preload` 通过。iPhone 17 Pro 模拟器 Safari 中打开现有会话并点思考按钮，截图确认 Popover 的“思考深度”及档位面板可见：`mobile-thinking-popover-20261002.png`（会话工作台）。模拟器 UDID 为 `C14FA709-871F-4A2A-BA33-B4BFFB352950`，截图由 `xcrun simctl io screenshot` 保存。dev 17889/5173 与 Tailscale Serve 8443 保持运行；未运行 Agent、未新增 dev 会话，基准仍 831。
