@@ -12,6 +12,6 @@ describe('Web Remote 弱网预算', () => {
 
   test('弱网历史窗口 256 KiB 且禁止内联图，正常模式保留默认预算', () => {
     expect(webRemoteHistoryBudgets(true)).toEqual({ historyBytes: 256 * 1024, inlineImageBytes: 0 })
-    expect(webRemoteHistoryBudgets(false)).toEqual({ historyBytes: 2 * 1024 * 1024, inlineImageBytes: 1024 * 1024 })
+    expect(webRemoteHistoryBudgets(false)).toEqual({ historyBytes: 1024 * 1024, inlineImageBytes: 1024 * 1024 })
   })
 })

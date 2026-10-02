@@ -19,9 +19,9 @@ import { toWebRemoteHistory, toWebRemotePermissionRequest, type WebRemoteEvent }
 import { getConfigDirName } from '../config-paths'
 import { resolveWebRemoteIconDir } from './web-remote-policy'
 import { renderWebRemoteIcon, renderWebRemoteManifest, renderWebRemoteStatic } from './web-remote-static'
-import type { WebRemoteIpcBridge } from './full-ui/web-remote-ipc'
+import type { WebRemoteIpcBridge, WebRemoteIpcConnectionSource } from './full-ui/web-remote-ipc'
 import { renderWebRemoteMobilePatch } from './full-ui/mobile-patch'
-import { WebRemotePushStore, mapPushNotice, shouldDedupePush, type PushKind } from './web-remote-push'
+import { WebRemotePushStore, mapPushNotice, serializeWebRemotePushInfo, shouldDedupePush, type PushKind } from './web-remote-push'
 
 const MAX_BODY_BYTES = 100_000
 const MAX_MESSAGE_CHARS = 50_000
@@ -524,7 +524,7 @@ export class WebRemoteServer {
     if (!kind || !shouldDedupePush(sessionId, kind)) return
     const notice = mapPushNotice(sessionId, session.title || '未命名会话', kind, summary)
     const result = await this.pushStore.sendToAll(notice)
-    for (const item of result) console.info(`[Web Remote Push] kind=${kind} status=${item.status ?? 'error'}${item.error ? ` detail=${item.error}` : ''}`)
+    for (const item of result) recordPersonalInfo('Web Remote 推送', serializeWebRemotePushInfo(item.deviceId, kind, item.status))
   }
 
   private latestAssistantSummary(sessionId: string): string {
@@ -683,12 +683,18 @@ export class WebRemoteServer {
     if (!auth) { ws.close(1008, 'unauthorized'); return }
     const device = { id: auth.deviceId }
     ;(ws as WebSocket & { webRemoteDeviceId?: string }).webRemoteDeviceId = device.id
-    if (new URL(req.url ?? '/', 'http://127.0.0.1').pathname === '/api/ipc') {
+    const requestUrl = new URL(req.url ?? '/', 'http://127.0.0.1')
+    if (requestUrl.pathname === '/api/ipc') {
       if (!this.options.ipcBridge) { ws.close(1013, 'full-ui disabled'); return }
       this.connections.set(ws, () => {})
       ws.once('close', () => this.connections.delete(ws))
       ws.once('error', () => this.connections.delete(ws))
-      this.options.ipcBridge.attachWebSocket(ws, device.id)
+      const page = requestUrl.searchParams.get('page')
+      const source: WebRemoteIpcConnectionSource = {
+        src: requestUrl.searchParams.get('src') === 'shim' ? 'shim' : 'other',
+        ...(page && /^[A-Za-z0-9_-]{8,64}$/.test(page) ? { page } : {}),
+      }
+      this.options.ipcBridge.attachWebSocket(ws, device.id, source)
       return
     }
     const connection = {

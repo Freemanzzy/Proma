@@ -37,6 +37,19 @@ describe('Web Remote listener recovery', () => {
     expect(viewSource).toContain('window.electronAPI.getAgentSessionSDKMessages(sessionId)')
     expect(viewSource).toContain('[sessionId, refreshVersion,')
   })
+  test('reconciles stale local runs and refreshes each missing session once only on Web Remote reconnect', () => {
+    const source = readFileSync(join(import.meta.dir, 'useGlobalAgentListeners.ts'), 'utf8')
+    const start = source.indexOf('const recoverWebRemoteState = async (): Promise<void> => {')
+    const end = source.indexOf('\n    }', start)
+    const recovery = source.slice(start, end)
+    expect(recovery).toContain('findMissingActiveAgentSessionIds(')
+    expect(recovery).toContain('settleMissingAgentStreamState')
+    expect(recovery).toContain('store.set(agentMessageRefreshAtom')
+    expect(recovery).toContain('if (activeSessionId && !missingSessionIds.includes(activeSessionId))')
+    expect(source).toContain('__PROMA_WEB_REMOTE_RECOVER = recoverWebRemoteState')
+    expect(source).toContain('restoreActiveSnapshots(), restoreStoppedSessions()')
+  })
+
   test('leaves the reconnect list snapshot to the sidebar resync listener', () => {
     const source = readFileSync(join(import.meta.dir, 'useGlobalAgentListeners.ts'), 'utf8')
     const start = source.indexOf('const recoverWebRemoteState = async (): Promise<void> => {')

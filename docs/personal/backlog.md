@@ -6,7 +6,7 @@
 
 | 分支 | 基于 | 内容 | 验证 | 状态 |
 |---|---|---|---|---|
-| `fix/mobile-dedupe-20261001` | `personal` efc420c1 | P：手机端 `agent:list-active-sessions` / `count-archived-sessions` 并发合并 + 3 秒复用，元数据变更事件使缓存失效（同组操作 13 次 / 825 KB → 6 次 / 382 KB）。Q：IPC WebSocket 带 `src` 与随机 `page` 参数，v2 `open` 行记录来源，用于区分同页双连接与多页面实例。R：非省流量模式首屏历史预算 2 MiB → 1 MiB（41.9 MB 历史弱网首屏 11.3 s → 7.7 s），“加载更早”仍 2 MiB/页 | 全量 678 pass / 0 fail；typecheck 与 main/renderer/web-preload 构建通过；dev 3 Mbps harness | 用户 2026-10-01 决定暂不发布，随下一批合入（合入前与当时的 `personal` 重新 --no-ff 合并并全量回归） |
+| `fix/mobile-dedupe-20261001`（已合入） | `personal` efc420c1 | P：手机端 `agent:list-active-sessions` / `count-archived-sessions` 并发合并 + 3 秒复用，元数据变更事件使缓存失效（同组操作 13 次 / 825 KB → 6 次 / 382 KB）。Q：IPC WebSocket 带 `src` 与随机 `page` 参数，v2 `open` 行记录来源，用于区分同页双连接与多页面实例。R：非省流量模式首屏历史预算 2 MiB → 1 MiB（41.9 MB 历史弱网首屏 11.3 s → 7.7 s），“加载更早”仍 2 MiB/页 | 原分支 678 pass / 0 fail；合入后本批全量 685 pass / 0 fail；typecheck 与 main/renderer/web-preload 构建通过 | 2026-10-02 以 `--no-ff` 合入 `fix/mobile-batch-20261002`（未推送、未发布）；冲突仅在 changelog，双方记录均保留并按时间顺序排列 |
 
 已归档、不合入：开发进程安全完整方案（原 `fix/dev-process-safety-20260930`，约 2,000 行 launchd 托管），以 git bundle 存档于本机会话工作台 `archive/dev-process-safety-20260930.bundle`；评估结论为过重，改走下方“开发启动小修复”。
 
@@ -16,10 +16,11 @@
 
 | 日期 | 反馈 | 设备 | 初步判断 / 方案 |
 |---|---|---|---|
-| 2026-10-01 | 手机端无法调整思考强度，只能开/关 | 手机 | 思考按钮在桌面靠鼠标悬停弹出强度滑块，点击只切换 off/high；手机无悬停，滑块不可达。方案：触屏点击改为打开面板（滑块含“关闭”档），优先只改 mobile-patch，必要时上游 AgentThinkingPopover 改一行；桌面不变。只有声明了思考档位的模型才有滑块 |
-| 2026-10-02 | 安卓同时收到“桌面 App（PWA）”和“Chrome”两条相同通知，关闭 Chrome 页面后仍如此 | OPPO | 服务端 push-subscriptions.json 只有 1 个安卓订阅（09-28 创建），按设计每个事件只推送 1 次；第二条来源未证实（候选：页面内通知路径、安卓把同一推送同时归到 Chrome 与 WebAPK）。待用户提供通知栏截图与长按所属应用。方案：Service Worker `showNotification` 加按会话的 `tag` + `renotify:false` 合并重复；服务端推送发送写 `[INFO]` 计数，便于对照。与“同设备双连接”无直接因果：推送不依赖页面打开，双连接需两个活着的页面，装上 dedupe 分支后看 `open` 行 `page` 区分 |
-| 2026-10-02 | 手机端对话里的本地图片显示“图片无法读取”（桌面正常；与省流量开关无关） | OPPO | 根因：Markdown 图片经 `file:resolve-path` 解析，服务端路径授权通过（计量有调用、无拒绝），但返回的是 `proma-file://` 自定义协议 URL，手机浏览器无法加载 → `<img>` onError。方案：Web Remote 下 shim 对 `file:resolve-path` 的图片结果改为经 `file:read-binary-base64`（已在路径授权范围内）转 data URL，或新增按 token 的 HTTP 图片端点；遵循省流量模式（大图点按加载）。影响新建的 `cliproxy-image` Skill 在手机上显示生成图 |
-| 2026-10-02 | 回答已结束，手机仍显示“Agent Running 6m31s”，刷新页面后恢复 | OPPO | 正式版计量：连接 e1d195af 流式输出到 12:07:51 后以 `1006` 异常断开，所有连接都没有收到完成事件（各窗口 `scN=0`），12:11:07 页面内自动重连。代码确认 `restoreActiveSnapshots()` 只把主进程“仍在运行”的快照合并进本地状态，**不会清除本地标记为运行中、但已不在快照里的会话**，因此断线期间错过的完成永远不会被纠正。方案：恢复时把本地 running 而快照中不存在的会话标记为结束并触发一次尾部历史刷新；单测覆盖“断线期间完成→重连后不再显示运行中”。**建议下一批优先** |
+| 2026-10-01 | 手机端无法调整思考强度，只能开/关 | 手机 | 思考按钮在桌面靠鼠标悬停弹出强度滑块，点击只切换 off/high；手机无悬停，滑块不可达。已实现于 2026-10-02：Web Remote full-ui 触屏点击思考按钮时只打开既有 Popover，不触发桌面原有开关逻辑；滑块/开关按模型能力保持原样，非 Web Remote 或非触屏 click 不变。 |
+| 2026-10-02 | 安卓同时收到“桌面 App（PWA）”和“Chrome”两条相同通知，关闭 Chrome 页面后仍如此 | OPPO | 服务端 push-subscriptions.json 只有 1 个安卓订阅（09-28 创建），按设计每个事件只推送 1 次；第二条来源未证实（候选：页面内通知路径、安卓把同一推送同时归到 Chrome 与 WebAPK）。待用户提供通知栏截图与长按所属应用。部分处理于 2026-10-02：页面存在 Service Worker 推送订阅时不再创建 renderer 页面内 Notification（提示音不变），无订阅仍保留页面通知；推送发送新增 `[INFO] scope=Web Remote 推送`，仅记设备哈希、kind、状态，不含标题/正文。原来源仍待 OPPO 通知栏截图确认；若仍双显，下一步区分 Android 对同一推送的系统归类行为。与“同设备双连接”无直接因果。 |
+| 2026-10-02 | 手机端对话里的本地图片显示“图片无法读取”（桌面正常；与省流量开关无关） | OPPO | 根因：Markdown 图片经 `file:resolve-path` 解析，服务端路径授权通过（计量有调用、无拒绝），但返回的是 `proma-file://` 自定义协议 URL，手机浏览器无法加载 → `<img>` onError。已实现于 2026-10-02：Web Remote shim 对 `file:resolve-path` 返回的 PNG/JPG/JPEG/GIF/WebP/BMP 使用同一授权路径的 `file:read-binary-base64` 转 data URL，单张上限 8 MiB，同一路径在页面内缓存；超限返回 null。SVG、PDF 等非目标格式保持原结果。 |
+| 2026-10-02 | 回答已结束，手机仍显示“Agent Running 6m31s”，刷新页面后恢复 | OPPO | 正式版计量：连接 e1d195af 流式输出到 12:07:51 后以 `1006` 异常断开，所有连接都没有收到完成事件（各窗口 `scN=0`），12:11:07 页面内自动重连。代码确认 `restoreActiveSnapshots()` 只把主进程“仍在运行”的快照合并进本地状态，**不会清除本地标记为运行中、但已不在快照里的会话**，因此断线期间错过的完成永远不会被纠正。已实现于 2026-10-02：仅 Web Remote 恢复路径将 running/retrying/background-waiting 且不在活跃快照中的会话结束，并逐会话触发一次历史刷新；仍运行的快照状态保留，桌面初始化路径不变。`web-remote-recovery.test.ts` 与 `useGlobalAgentListeners.recovery.test.ts` 覆盖恢复筛选、结束态及一次刷新。 |
+| 2026-10-02 | 手机端对话内本地图片超过 8 MiB 时只显示“图片无法读取”，希望可以点击加载原图 | 手机 | 现状（fix/mobile-batch-20261002）：shim 以 8 MiB 上限调用 `file:read-binary-base64`，超限返回 null。方案：超限时显示“图片较大（xx MB），点按加载原图”占位，点按后不设该上限（或更高上限）读取并缓存；蜂窝/省流量下保持需点按。备选：Mac 端缩放为长边约 2048 的 JPEG 先显示缩略版 |
 
 ## 后续待办（按建议优先级）
 

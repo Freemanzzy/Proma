@@ -366,6 +366,10 @@ function AgentThinkingPopover({ agentThinking, onToggle, codexConfig }: AgentThi
   }, [])
 
   const handleButtonClick = (): void => {
+    if (isWebRemoteFullUi() && (navigator.maxTouchPoints > 0 || window.matchMedia?.('(pointer: coarse)').matches)) {
+      setOpen(true)
+      return
+    }
     if (codexConfig) {
       if (!supportsThinkingToggle) return
       codexConfig.onThinkingLevelChange(isEnabled ? 'off' : 'high')

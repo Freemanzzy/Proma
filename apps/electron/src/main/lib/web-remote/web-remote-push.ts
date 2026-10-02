@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync, chmodSync, existsSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import webPush from 'web-push'
 import type { WebRemoteAuth } from './web-remote-auth'
 
@@ -11,6 +11,11 @@ interface PushFile { version: 1; subscriptions: StoredPushSubscription[] }
 interface VapidFile { publicKey: string; privateKey: string }
 interface Presence { sessionId: string | null; visible: boolean; updatedAt: number }
 const dedupe = new Map<string, number>()
+
+export function serializeWebRemotePushInfo(deviceId: string, kind: PushKind, status: number | null): string {
+  const device = createHash('sha256').update(deviceId).digest('hex').slice(0, 10)
+  return JSON.stringify({ device, kind, result: status ?? 'error' })
+}
 
 export const WEB_REMOTE_PUSH_HTTP_ROUTE_POLICY = Object.freeze({
   'GET /app/sw.js': { access: 'public-static', rationale: '返回固定 Service Worker 代码，不返回用户数据，不缓存 API 或受保护页面。' },

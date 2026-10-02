@@ -203,8 +203,8 @@ if (result.sessionSync) {
 }
 if (result.realHistory) {
   const real = result.realHistory
-  checks.push(`real-history=${real.sessionCount} sessions/${real.sessionFileBytes}B/${real.firstHistoryMs}ms net=${real.network?.downloadBitsPerSecond}/${real.network?.uploadBitsPerSecond}bps@${real.network?.latencyMs}ms, list=${real.list?.responseUtf8Bytes}B appSent=${real.list?.appSentBytes}B, history=${real.history?.responseUtf8Bytes}B appSent=${real.history?.appSentBytes}B buffered=${real.history?.bufferedAmountPeak}B, exceptions=${real.exceptionsDuringRealHistory} during / ${real.exceptionsBeforeRealHistory} before`)
-  if (real.sessionCount !== 830 || real.sessionFileBytes < 30_000_000 || !real.historyVisible || real.firstHistoryMs === null || (real.newActionExceptions ?? real.exceptionsDuringRealHistory) > 0 || real.list?.calls < 1 || real.history?.calls < 1 || real.history?.wireBytes !== null) {
+  checks.push(`real-history=${real.sessionCount} sessions/${real.sessionFileBytes}B/${real.firstHistoryMs}ms net=${real.network?.downloadBitsPerSecond}/${real.network?.uploadBitsPerSecond}bps@${real.network?.latencyMs}ms, list=${real.list?.responseUtf8Bytes}B appSent=${real.list?.appSentBytes}B, history=${real.history?.responseUtf8Bytes}B appSent=${real.history?.appSentBytes}B buffered=${real.history?.bufferedAmountPeak}B budgetReads=${JSON.stringify(real.history?.requestOptions ?? [])}, exceptions=${real.exceptionsDuringRealHistory} during / ${real.exceptionsBeforeRealHistory} before`)
+  if (real.sessionCount !== 831 || real.sessionFileBytes < 30_000_000 || !real.historyVisible || real.firstHistoryMs === null || (real.newActionExceptions ?? real.exceptionsDuringRealHistory) > 0 || real.list?.calls < 1 || real.history?.calls < 1 || real.history?.wireBytes !== null) {
     console.error(`FAIL ${ua}/${suite}: 真实大会话验收字段不完整：${JSON.stringify(real)}`)
     process.exit(1)
   }

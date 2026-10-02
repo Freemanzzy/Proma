@@ -3,9 +3,19 @@ import { mkdtempSync, readFileSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WebRemoteAuth } from './web-remote-auth'
-import { WEB_REMOTE_PUSH_HTTP_ROUTE_POLICY, WebRemotePushStore, mapPushNotice, shouldDedupePush, shouldSendPush } from './web-remote-push'
+import { WEB_REMOTE_PUSH_HTTP_ROUTE_POLICY, WebRemotePushStore, mapPushNotice, serializeWebRemotePushInfo, shouldDedupePush, shouldSendPush } from './web-remote-push'
 
 describe('Web Remote Web Push', () => {
+  test('push INFO log contains only hashed device, kind, and result', () => {
+    const entry = JSON.parse(serializeWebRemotePushInfo('private-device-id', 'completed', 201))
+    expect(entry).toEqual({ device: expect.any(String), kind: 'completed', result: 201 })
+    expect(entry.device).toHaveLength(10)
+    expect(JSON.stringify(entry)).not.toContain('private-device-id')
+    expect(JSON.stringify(entry)).not.toContain('title')
+    expect(JSON.stringify(entry)).not.toContain('body')
+    const serverSource = readFileSync(join(import.meta.dir, 'web-remote-server.ts'), 'utf8')
+    expect(serverSource).toContain("recordPersonalInfo('Web Remote 推送', serializeWebRemotePushInfo(item.deviceId, kind, item.status))")
+  })
   test('所有新增 HTTP 路由均登记分级并限制为公开静态或当前设备自身范围', () => {
     expect(Object.keys(WEB_REMOTE_PUSH_HTTP_ROUTE_POLICY).sort()).toEqual(['DELETE /api/push/subscription', 'GET /api/push/key', 'GET /api/push/subscription', 'GET /app/sw.js', 'GET /apple-touch-icon.png', 'GET /icon-192.png', 'GET /icon-512-maskable.png', 'GET /icon-512.png', 'POST /api/push/presence', 'POST /api/push/subscription'].sort())
     expect(WEB_REMOTE_PUSH_HTTP_ROUTE_POLICY['GET /app/sw.js'].access).toBe('public-static')

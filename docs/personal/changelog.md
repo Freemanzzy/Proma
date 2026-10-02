@@ -1233,6 +1233,27 @@
 - 待查：18:03:06 同一设备 212 ms 内建立两条连接且都保持打开（疑与通知深链有关）；`agent:list-active-sessions` 每连接 4–7 次（约 84 KB/次）；iPhone 首次加载 `get-sdk-messages` 单连接合计约 4.2 MB，背压丢弃 2、resync 2。列入下一批。
 - 详见本机交接 `install-result-2026-10-01-4.md`。
 
+## 2026-10-01: 合并 Web Remote 会话列表只读请求
+
+- `web-electron-shim` 将 `agent:list-sessions`、`agent:list-active-sessions`、`agent:list-archived-sessions` 与 `agent:count-archived-sessions` 统一纳入相同参数并发合并及 **3 秒**成功结果复用。收到 `agent:session-metadata-changed` 后先清除此类缓存，再分发元数据事件，避免 3 秒复用旧快照。
+- 改前/改后用同一 `iphone:session-sync` harness、3 Mbps/1 Mbps/50 ms、dev **831** 条索引：`agent:list-active-sessions` 从 **13 次 / 825,491 B** 降到 **6 次 / 381,732 B**；`agent:count-archived-sessions` 从 **18 次 / 1,181 B** 降到 **14 次 / 917 B**。两次 reconnect 均通过，最终索引仍 831，harness 清理通过；归档动作窗口 full-list 调用 0。
+- 同一 harness 的 `agent:list-sessions` 全程聚合数为 **3 次 / 1,381,478 B → 4 次 / 1,841,852 B**，不属于 P 改动通道，且该 suite 含 presence/标题/测试操作等既有读取，metrics 未按单个会话切换动作切片；不把它归因于本改动，保留为既有独立调用需另行归因。
+- `ipc-request-dedupe.test.ts` **3 pass / 0 fail**，覆盖 active 五并发合一、3 秒复用、归档计数复用及 metadata 事件使后续请求失效。`docs/personal/web-remote.md` 已补充契约；`git diff --check` 通过。
+
+## 2026-10-01: IPC open 日志标记来源与页面
+
+- Full-UI shim 在 `/api/ipc` WebSocket URL 增加 `src=shim&page=<随机 page ID>`；page ID 存在当前 `window`，同页重连保持不变，新页面生成新值。服务端只接受固定来源枚举与 8–64 位安全字符 page 值，v2 `event:open` 增加 `src`/`page`，不记录会话 ID 或标题。
+- iPhone `session-sync` dev harness 通过。一个配对设备观测到 4 条 `open`：其中两个不同 page ID（分别对应 harness 初始页面和随后显式再次打开 `/app/`）；后一个页面产生 3 条连接 open，但每次下一条 open 前都有上一条 connection 的 close，属于测试执行的页面切换/断线恢复，不是同页同时双连接。Service Worker `notificationclick` 已使用 `clients.matchAll({type:'window',includeUncontrolled:true})`，优先 `navigate` + `focus` 已有窗口，仅无窗口时 `openWindow`；没有证据支持修改 SW 或 shim 连接竞争逻辑。由此可按 `device hash + page + connectionId` 区分同设备多个页面与同页多次连接。
+- 新增 URL query 后，harness 原先用 `url.endsWith('/api/ipc')` 检查压缩握手，导致查询串下找不到握手记录；改为解析 URL pathname 后检查。`node --check scripts/personal/mobile-harness.mjs`、shim connection test、full-ui security test与 Electron typecheck通过。单独运行 `web-remote-server.test.ts` 在测试 setup 阶段遇到既有 `electron` 命名导出 `app` 缺失，未进入用例；开发版真实 WebSocket 已验证 query 到服务端并记录 `src/page`。
+- harness 完成后测试配对已撤销、临时 Chrome 已退出；临时 harness 会话清理后，`~/.proma-dev` 会话索引仍为 **831**。
+
+## 2026-10-01: 将手机首屏历史预算降至 1 MiB
+
+- 先测后改：同一 `.proma-dev` 目标历史文件 41,914,743 B、会话数 831、iPhone UA、3 Mbps/1 Mbps/50 ms。改前常规调用默认预算为 **2,097,152 B**；首屏可见 **11,329 ms**，Web Remote 计量增量为 `calls=2`、`responseUtf8=2,096,331 B`、`appSent=2,170,230 B`、`bufferedPeak=2,170,069 B`。
+- 非省流量模式的常规/首屏预算改为 **1,048,576 B**，省流量仍 256 KiB；显式“加载更早”保留 2 MiB/页。目标会话首次历史可见 **7,700 ms**；计量增量 `responseUtf8=1,044,145 B`、`appSent=1,075,159 B`、`bufferedPeak=1,074,999 B`。harness 的出站 IPC 参数捕获记录到 `budgetBytes=1,048,576`、`endIndex=null`、内联图片预算 1 MiB；可见耗时约降 32%，响应 UTF-8 字节约降 50%。
+- 计数口径留有差异：两次 harness 的服务端计量增量都报 `calls=2`，出站 CDP 帧捕获仅看到目标首屏 1 条 `get-sdk-messages` 请求。当前服务端按通道聚合，无法凭该窗口将每次响应与请求 ID 对齐；报告采用直接捕获的单条 budget 参数与通道响应总字节，不把 `calls` 差异解释为重复请求已修复。完整 user/assistant/tool 回合若单回合超预算仍按既有规则保留、不拆分。
+- 当前 `.proma-dev` 基准为 831 条，`mobile-harness`/`mobile-preview.sh` 的 real-history 断言已从旧 830 校准到 831。harness 创建的临时 away 会话已删除，配对已撤销、Chrome/profile 清理；索引前后均 831；没有运行 Agent 或发送消息。`web-electron-shim.history-budget.test.ts`、`mobile-budget.test.ts`、Electron typecheck 与脚本语法检查通过。
+
 ## 2026-10-01: 新增待办 SSOT，dedupe 分支暂缓发布
 
 - 用户决定：`fix/mobile-dedupe-20261001`（P 活跃列表合并、Q 连接来源标记、R 首屏历史 1 MiB；678 pass / 0 fail）保留不发布，等下一批功能或整改时一起合入；分支已推送到 origin 保存。dev 与 8443 已停止。
@@ -1259,3 +1280,36 @@
 ## 2026-10-02: 反馈记录：断线期间完成，重连后仍显示运行中
 
 - backlog“用户反馈收集”新增：手机显示“Agent Running”而回答已结束，刷新后恢复。证据为 12:07:51 连接 1006 断开、完成事件未送达、12:11 页面内重连；根因为重连恢复只合并运行中快照，不清除过期的本地运行状态。建议下一批优先修。
+
+## 2026-10-02: Web Remote 重连清理过期运行态
+
+- `renderer/lib/web-remote-recovery.ts` 提供纯状态筛选与终态转换。Web Remote `recoverWebRemoteState` 在取得主进程活跃快照后，结束本地仍标记 running/retrying/backgroundWaiting 但快照已不存在的会话，并对每个缺失会话递增一次 `agentMessageRefreshAtom`；当前会话未在缺失集合时仍按原行为刷新一次。快照仍活跃的会话维持运行态。
+- 修改 `renderer/hooks/useGlobalAgentListeners.ts`，恢复差异处理只被 Web Remote 专属恢复入口调用；renderer 启动初始化和桌面路径保持既有处理。新增 `renderer/lib/web-remote-recovery.test.ts` 与扩展 `useGlobalAgentListeners.recovery.test.ts`，共 **5 pass / 0 fail**；Electron typecheck 通过。
+- 更新 `docs/personal/backlog.md` 反馈状态。
+
+## 2026-10-02: Web Remote 显示对话中的本地图片
+
+- 仅在 full-ui shim 的 `file:resolve-path` 成功结果为目标图片时，使用同一 `resolvedPath` 与原 `access` 参数调用已分级、服务端路径校验的 `file:read-binary-base64`；读取上限 **8 MiB**，返回 MIME 对应的 data URL。对话页面按路径缓存读取 Promise；读取超限返回 `null`。SVG、PDF 等非目标类型维持 `proma-file://` 原结果，未改主进程或授权逻辑。
+- `web-electron-shim.test.ts` 图片读取缓存、非图片原样返回和超限断言均通过；相关 shim 测试 **8 pass / 0 fail**，Electron typecheck 通过。更新 `docs/personal/web-remote.md` 与 `docs/personal/backlog.md`。
+
+## 2026-10-02: Web Remote 触屏打开思考强度面板
+
+- `renderer/components/agent/AgentView.tsx` 的 `AgentThinkingPopover` 点击处理仅增加 Web Remote + 触屏条件：打开现有面板并 return，不进入 click 开关逻辑。桌面与非触屏 Web Remote 仍执行原有 click；面板内的模型能力、滑块和“关闭”档不变。
+- 新增 `AgentView.mobile-thinking.test.ts` 检查触屏 open 分支位于原开关逻辑之前且桌面 click 路径仍保留；测试 **1 pass / 0 fail**，Electron typecheck 通过。上游文件仅 `AgentView.tsx`（增加 4 行逻辑）。更新 `docs/personal/backlog.md`。
+
+## 2026-10-02: Web Remote 有推送订阅时抑制页面重复通知
+
+- full-ui shim 暴露查询函数：检查 `navigator.serviceWorker.ready` 的 `pushManager.getSubscription()`，缓存查询结果；订阅成功登记后由 mobile patch 使缓存失效。renderer `sendDesktopNotification` 仅在该 Web Remote 函数返回“已有订阅”时跳过页面 `Notification`，提示音与无订阅回退不变。
+- 服务端推送发送日志改为 `recordPersonalInfo('Web Remote 推送', ...)`，每个结果只写 10 位 SHA-256 设备哈希、kind 与状态，不记录标题、正文或错误详情。
+- `notifications.test.ts`、`web-remote-push.test.ts`、mobile-patch 与 shim 测试共 **23 pass / 0 fail**，Electron typecheck 通过。更新 `docs/personal/web-remote.md` 与 `docs/personal/backlog.md`；双通知实际来源仍待用户截图/手机复测确认。
+
+## 2026-10-02: 手机反馈批次全量验收与开发预览
+
+- 步骤 0 合并冲突仅在 `docs/personal/changelog.md`；将 `fix/mobile-dedupe-20261001` 的 10-01 记录放在本地 10-01/10-02 反馈记录前，双方历史内容均保留。使用 `--no-ff` 合入，更新 backlog 为已合入未发布。
+- 全量 `bun test`：**685 pass / 0 fail，1,744 expect，104 files**；Electron `typecheck` 通过。`build:main`、`build:renderer`、`build:web-preload` 全部通过。renderer 构建保留既有 >500 kB chunk 提示，无构建失败。`git diff --check` 通过。
+- `mobile-preview.sh start/status` 已启动开发实例，PID 文件记录启动器 PID 61870；17889、5173 在监听，8443 Tailscale Serve 指向开发实例，按要求保持运行。没有在测试会话中运行 Agent、没有消耗对话额度；`~/.proma-dev/agent-sessions.json` 仍为 **831** 条。正式 `/Applications/Proma.app` 未触碰；本轮检查时其主进程 PID 为 10377（委派记录中的旧 PID 53199 已不存在）。真实负载测试未重测：本批不改真实负载触发条件涉及的列表数据、历史传输或前端首屏资源，仅按计划做功能回归及构建。
+- 分支 `fix/mobile-batch-20261002` 保持未推送、未合入 `personal`、未打包、未安装。
+
+## 2026-10-02: 反馈记录：手机大图点击加载原图
+
+- backlog“用户反馈收集”新增：手机端超过 8 MiB 的本地图片当前显示“图片无法读取”，用户希望改为点按加载原图；记入下一批。
