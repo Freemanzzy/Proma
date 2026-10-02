@@ -1,5 +1,5 @@
 /* Browser substitute for the small Electron surface imported by preload/index.ts. */
-import { coalesceRequest } from './ipc-request-dedupe'
+import { coalesceSessionListRead, invalidateSessionListReadCache, WEB_REMOTE_SESSION_LIST_READ_CHANNELS } from './ipc-request-dedupe'
 import { isWebRemoteDataSaverEnabled, webRemoteHistoryBudgets } from './mobile-budget'
 const TYPE_KEY = '__proma_web_remote_type'
 if (typeof window !== 'undefined') {
@@ -110,8 +110,19 @@ function normalizeHistoryWindow(value: unknown, sessionId?: string): unknown {
 }
 
 function notify(channel: string, value: unknown): void {
+  if (channel === 'agent:session-metadata-changed') invalidateSessionListReadCache(inFlightReadRequests)
   const event = { sender: window }
   for (const listener of [...(listeners.get(channel) ?? [])]) listener(event, decode(value))
+}
+
+function getWebRemotePageId(): string {
+  const remoteWindow = window as Window & { __PROMA_WEB_REMOTE_PAGE_ID__?: string }
+  if (remoteWindow.__PROMA_WEB_REMOTE_PAGE_ID__) return remoteWindow.__PROMA_WEB_REMOTE_PAGE_ID__
+  const pageId = typeof window.crypto?.randomUUID === 'function'
+    ? window.crypto.randomUUID()
+    : `page-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
+  Object.defineProperty(remoteWindow, '__PROMA_WEB_REMOTE_PAGE_ID__', { configurable: false, enumerable: false, value: pageId })
+  return pageId
 }
 
 function scheduleReconnect(): void {
@@ -131,6 +142,8 @@ function connect(): Promise<WebSocket> {
   socketPromise = new Promise<WebSocket>((resolve, reject) => {
     const url = new URL('/api/ipc', window.location.href)
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+    url.searchParams.set('src', 'shim')
+    url.searchParams.set('page', getWebRemotePageId())
     const next = new WebSocket(url)
     socket = next
     next.onopen = () => {
@@ -303,8 +316,15 @@ async function verifyAndNotifySendFailure(input: { sessionId?: unknown; userMess
 async function invokeWithToken(channel: string, args: unknown[], confirmToken?: string): Promise<unknown> {
   const ws = await liveSocket()
   const id = `${Date.now()}-${nextId++}`
-  const requestArgs = channel === 'agent:get-sdk-messages' && dataSaverEnabled()
-    ? [args[0], { ...(args[1] && typeof args[1] === 'object' ? args[1] as Record<string, unknown> : {}), budgetBytes: webRemoteHistoryBudgets(true).historyBytes, inlineImageBudgetBytes: webRemoteHistoryBudgets(true).inlineImageBytes }]
+  const paging = args[1] && typeof args[1] === 'object' ? args[1] as Record<string, unknown> : {}
+  const dataSaver = channel === 'agent:get-sdk-messages' && dataSaverEnabled()
+  const budgets = webRemoteHistoryBudgets(dataSaver)
+  const requestArgs = channel === 'agent:get-sdk-messages'
+    ? [args[0], {
+        ...paging,
+        budgetBytes: dataSaver || typeof paging.budgetBytes !== 'number' ? budgets.historyBytes : paging.budgetBytes,
+        inlineImageBudgetBytes: dataSaver || typeof paging.inlineImageBudgetBytes !== 'number' ? budgets.inlineImageBytes : paging.inlineImageBudgetBytes,
+      }]
     : args
   const payload = JSON.stringify({ type: 'invoke', id, channel, args: requestArgs.map(encode), ...(confirmToken ? { confirmToken } : {}) })
   const response = await new Promise<unknown>((resolve, reject) => {
@@ -398,7 +418,9 @@ async function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
       throw error
     }
   }
-  if (channel === 'agent:list-sessions') return coalesceRequest(inFlightReadRequests, JSON.stringify([channel, args]), () => invokeWithToken(channel, args), 3_000)
+  if (WEB_REMOTE_SESSION_LIST_READ_CHANNELS.has(channel)) {
+    return coalesceSessionListRead(inFlightReadRequests, channel, args, () => invokeWithToken(channel, args), 3_000)
+  }
   try {
     return await invokeWithToken(channel, args)
   } catch (error) {

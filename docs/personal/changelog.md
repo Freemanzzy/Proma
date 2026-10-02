@@ -1233,6 +1233,27 @@
 - 待查：18:03:06 同一设备 212 ms 内建立两条连接且都保持打开（疑与通知深链有关）；`agent:list-active-sessions` 每连接 4–7 次（约 84 KB/次）；iPhone 首次加载 `get-sdk-messages` 单连接合计约 4.2 MB，背压丢弃 2、resync 2。列入下一批。
 - 详见本机交接 `install-result-2026-10-01-4.md`。
 
+## 2026-10-01: 合并 Web Remote 会话列表只读请求
+
+- `web-electron-shim` 将 `agent:list-sessions`、`agent:list-active-sessions`、`agent:list-archived-sessions` 与 `agent:count-archived-sessions` 统一纳入相同参数并发合并及 **3 秒**成功结果复用。收到 `agent:session-metadata-changed` 后先清除此类缓存，再分发元数据事件，避免 3 秒复用旧快照。
+- 改前/改后用同一 `iphone:session-sync` harness、3 Mbps/1 Mbps/50 ms、dev **831** 条索引：`agent:list-active-sessions` 从 **13 次 / 825,491 B** 降到 **6 次 / 381,732 B**；`agent:count-archived-sessions` 从 **18 次 / 1,181 B** 降到 **14 次 / 917 B**。两次 reconnect 均通过，最终索引仍 831，harness 清理通过；归档动作窗口 full-list 调用 0。
+- 同一 harness 的 `agent:list-sessions` 全程聚合数为 **3 次 / 1,381,478 B → 4 次 / 1,841,852 B**，不属于 P 改动通道，且该 suite 含 presence/标题/测试操作等既有读取，metrics 未按单个会话切换动作切片；不把它归因于本改动，保留为既有独立调用需另行归因。
+- `ipc-request-dedupe.test.ts` **3 pass / 0 fail**，覆盖 active 五并发合一、3 秒复用、归档计数复用及 metadata 事件使后续请求失效。`docs/personal/web-remote.md` 已补充契约；`git diff --check` 通过。
+
+## 2026-10-01: IPC open 日志标记来源与页面
+
+- Full-UI shim 在 `/api/ipc` WebSocket URL 增加 `src=shim&page=<随机 page ID>`；page ID 存在当前 `window`，同页重连保持不变，新页面生成新值。服务端只接受固定来源枚举与 8–64 位安全字符 page 值，v2 `event:open` 增加 `src`/`page`，不记录会话 ID 或标题。
+- iPhone `session-sync` dev harness 通过。一个配对设备观测到 4 条 `open`：其中两个不同 page ID（分别对应 harness 初始页面和随后显式再次打开 `/app/`）；后一个页面产生 3 条连接 open，但每次下一条 open 前都有上一条 connection 的 close，属于测试执行的页面切换/断线恢复，不是同页同时双连接。Service Worker `notificationclick` 已使用 `clients.matchAll({type:'window',includeUncontrolled:true})`，优先 `navigate` + `focus` 已有窗口，仅无窗口时 `openWindow`；没有证据支持修改 SW 或 shim 连接竞争逻辑。由此可按 `device hash + page + connectionId` 区分同设备多个页面与同页多次连接。
+- 新增 URL query 后，harness 原先用 `url.endsWith('/api/ipc')` 检查压缩握手，导致查询串下找不到握手记录；改为解析 URL pathname 后检查。`node --check scripts/personal/mobile-harness.mjs`、shim connection test、full-ui security test与 Electron typecheck通过。单独运行 `web-remote-server.test.ts` 在测试 setup 阶段遇到既有 `electron` 命名导出 `app` 缺失，未进入用例；开发版真实 WebSocket 已验证 query 到服务端并记录 `src/page`。
+- harness 完成后测试配对已撤销、临时 Chrome 已退出；临时 harness 会话清理后，`~/.proma-dev` 会话索引仍为 **831**。
+
+## 2026-10-01: 将手机首屏历史预算降至 1 MiB
+
+- 先测后改：同一 `.proma-dev` 目标历史文件 41,914,743 B、会话数 831、iPhone UA、3 Mbps/1 Mbps/50 ms。改前常规调用默认预算为 **2,097,152 B**；首屏可见 **11,329 ms**，Web Remote 计量增量为 `calls=2`、`responseUtf8=2,096,331 B`、`appSent=2,170,230 B`、`bufferedPeak=2,170,069 B`。
+- 非省流量模式的常规/首屏预算改为 **1,048,576 B**，省流量仍 256 KiB；显式“加载更早”保留 2 MiB/页。目标会话首次历史可见 **7,700 ms**；计量增量 `responseUtf8=1,044,145 B`、`appSent=1,075,159 B`、`bufferedPeak=1,074,999 B`。harness 的出站 IPC 参数捕获记录到 `budgetBytes=1,048,576`、`endIndex=null`、内联图片预算 1 MiB；可见耗时约降 32%，响应 UTF-8 字节约降 50%。
+- 计数口径留有差异：两次 harness 的服务端计量增量都报 `calls=2`，出站 CDP 帧捕获仅看到目标首屏 1 条 `get-sdk-messages` 请求。当前服务端按通道聚合，无法凭该窗口将每次响应与请求 ID 对齐；报告采用直接捕获的单条 budget 参数与通道响应总字节，不把 `calls` 差异解释为重复请求已修复。完整 user/assistant/tool 回合若单回合超预算仍按既有规则保留、不拆分。
+- 当前 `.proma-dev` 基准为 831 条，`mobile-harness`/`mobile-preview.sh` 的 real-history 断言已从旧 830 校准到 831。harness 创建的临时 away 会话已删除，配对已撤销、Chrome/profile 清理；索引前后均 831；没有运行 Agent 或发送消息。`web-electron-shim.history-budget.test.ts`、`mobile-budget.test.ts`、Electron typecheck 与脚本语法检查通过。
+
 ## 2026-10-01: 新增待办 SSOT，dedupe 分支暂缓发布
 
 - 用户决定：`fix/mobile-dedupe-20261001`（P 活跃列表合并、Q 连接来源标记、R 首屏历史 1 MiB；678 pass / 0 fail）保留不发布，等下一批功能或整改时一起合入；分支已推送到 origin 保存。dev 与 8443 已停止。

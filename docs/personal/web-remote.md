@@ -73,7 +73,7 @@ Android 等触屏设备切换会话时，程序触发的输入框 autofocus 不�
 
 历史窗口内，解码后不超过 256 KB 的图片可直接在手机以 `<img>` 显示；每次返回（首屏或“加载更早”页）从最新内容向前累计，内联图片总量不超过 1 MB。其他图片以卡片显示大小并可点按加载；超 2 MB 的 tool_result 文本会先显示截断预览，点按后在原位读取并展开完整文本。单张按需图片读取上限 25 MB，原文展开上限 2 MB；超过上限或会话/消息发生变化时提示刷新或在桌面查看。
 
-顶部的“省流量模式”开关可手动启用/关闭并记入 localStorage。未手动选择时，浏览器报告 `slow-2g`/`2g` 或 downlink < 1 Mbps 会自动开启。开启后历史尾部预算为 256 KiB，内联图片预算为 0（全部点按加载）；关闭时恢复 2 MiB 历史预算与 1 MiB 图片预算。此预算由 Web Remote shim 仅附加到手机的历史 IPC 参数，不改变桌面行为。
+顶部的“省流量模式”开关可手动启用/关闭并记入 localStorage。未手动选择时，浏览器报告 `slow-2g`/`2g` 或 downlink < 1 Mbps 会自动开启。开启后历史尾部预算为 256 KiB，内联图片预算为 0（全部点按加载）；关闭时首屏/常规历史预算为 1 MiB、内联图片预算为 1 MiB。此预算由 Web Remote shim 仅附加到手机的历史 IPC 参数，不改变桌面行为；显式“加载更早”仍按 2 MiB/页。
 
 
 媒体标记仅由 Web Remote 的历史裁剪层生成，包含会话 ID、SDK 消息 UUID（缺少 UUID 时使用消息索引）及整条消息 SHA-256、块路径与内容校验摘要。按需读取通过 `web-remote:get-history-media` 只读 IPC，并按会话所属工作区授权；定位不唯一、摘要变化、越权或目标不存在均拒绝。桌面 renderer 的 SDK 历史返回不经该移动端裁剪，不包含 Web Remote 标记。
@@ -139,12 +139,13 @@ harness 默认整体超时 300 秒（可用 `--timeout-ms` 覆盖），每次页
 
 ### Web Remote 计量与开发汇总
 
-开发实例中可由已认证设备读取 `GET /api/dev/metrics` JSON；生产环境不提供该端点。IPC 快照按唯一 `connectionId` 键控，每项仍保留认证 `deviceId`，同设备并发连接不再覆盖彼此；快照只包含当前连接，断开时先写日志再移除。每条 `/api/ipc` 连接建立时立即记录一行 v2 `event:open`，包含 connectionId 与设备哈希。计量主日志按设备伪名、连接 ID、短时间窗 ID 与通道拆成多条 `[INFO] scope=Web Remote 计量` JSON 行，不含响应正文、会话标题或消息内容。字段严格区分：`responseUtf8` 是序列化响应 UTF-8 字节；`appFraming` 与 `base64` 分别是分片 JSON 帧开销和 Base64 payload；`appSent` 是两者合计（或未分片响应字节）；`estimatedDeflateRaw` 是对完整响应单独计算的压缩估算；`wireBytes: null` 明确表示 `ws` API 无法读取 permessage-deflate 后的真实线缆字节，不能把估算称作实测。另记录 calls、累计处理毫秒、分片数与窗口内 `bufferedAmount` 峰值。每 30 秒还汇总事件通道发送字节 Top 2、背压丢弃事件数、resync 次数及 `agent:stream:complete` 事件数 `scN`；摘要行以 `connectionId, bufferedAmountPeak, backpressureDroppedEvents, resyncCount` 开头，事件 Top 2 以 `[alias, bytes]` 紧凑元组放在末尾，目标总行长不超过 300 字符。没有事件内容，只保留通道短名/原名与字节/计数。已登记别名：`agent:stream:event`→`se`、`agent:stream:complete`→`sc`、`agent:session-metadata-changed`→`smc`、`agent:stream:error`→`sx`、`chat:stream:chunk`→`cc`、`chat:stream:complete`→`ccmp`、`chat:stream:error`→`cx`；其他通道保留原名。静态资源计量记录相对路径、原始文件字节、HTTP 实际 Content-Length、估算压缩字节与耗时；hash 文件使用 `Cache-Control: public, max-age=31536000, immutable` 与 ETag，非 hash 文件使用 `no-cache` 并支持 304；静态字节计量中的 304 发送字节为 0。开发端点只保存在运行时内存，不落入用户数据目录。
+开发实例中可由已认证设备读取 `GET /api/dev/metrics` JSON；生产环境不提供该端点。IPC 快照按唯一 `connectionId` 键控，每项仍保留认证 `deviceId`，同设备并发连接不再覆盖彼此；快照只包含当前连接，断开时先写日志再移除。每条 `/api/ipc` 连接建立时立即记录一行 v2 `event:open`，包含 connectionId、设备哈希、`src` 与随机 page ID（不含会话 ID/标题）。full-ui shim 的 `src=shim` 与 `page` URL 参数仅用于区分同设备不同页面/连接。计量主日志按设备伪名、连接 ID、短时间窗 ID 与通道拆成多条 `[INFO] scope=Web Remote 计量` JSON 行，不含响应正文、会话标题或消息内容。字段严格区分：`responseUtf8` 是序列化响应 UTF-8 字节；`appFraming` 与 `base64` 分别是分片 JSON 帧开销和 Base64 payload；`appSent` 是两者合计（或未分片响应字节）；`estimatedDeflateRaw` 是对完整响应单独计算的压缩估算；`wireBytes: null` 明确表示 `ws` API 无法读取 permessage-deflate 后的真实线缆字节，不能把估算称作实测。另记录 calls、累计处理毫秒、分片数与窗口内 `bufferedAmount` 峰值。每 30 秒还汇总事件通道发送字节 Top 2、背压丢弃事件数、resync 次数及 `agent:stream:complete` 事件数 `scN`；摘要行以 `connectionId, bufferedAmountPeak, backpressureDroppedEvents, resyncCount` 开头，事件 Top 2 以 `[alias, bytes]` 紧凑元组放在末尾，目标总行长不超过 300 字符。没有事件内容，只保留通道短名/原名与字节/计数。已登记别名：`agent:stream:event`→`se`、`agent:stream:complete`→`sc`、`agent:session-metadata-changed`→`smc`、`agent:stream:error`→`sx`、`chat:stream:chunk`→`cc`、`chat:stream:complete`→`ccmp`、`chat:stream:error`→`cx`；其他通道保留原名。静态资源计量记录相对路径、原始文件字节、HTTP 实际 Content-Length、估算压缩字节与耗时；hash 文件使用 `Cache-Control: public, max-age=31536000, immutable` 与 ETag，非 hash 文件使用 `no-cache` 并支持 304；静态字节计量中的 304 发送字节为 0。开发端点只保存在运行时内存，不落入用户数据目录。
 
 #### 会话列表同步与按需字段
 
 - 完整 UI 目前必须保留全量列表，以支持全部工作区/归档视图、搜索与当前会话定位；不能只下发最近 30 条或截断列表。Web Remote 对 `agent:list-sessions`、`agent:list-active-sessions`、`agent:list-archived-sessions` 均应用移动端 metadata 瘦身，桌面 IPC 不变。
 - 手机列表不再下发 `delegationGoal`、`piSessionFile` 或可能很大的 `piEntryBindings`。`piEntryBindings` 只在用户从一条回复启动“回复探索”时，通过 `web-remote:get-session-entry-bindings` 按目标 session 查询键→true 的最小映射；该接口为 `read/session`，请求须通过既有 session→workspace 授权校验。正式设备行为与跨工作区拒绝仍须按变更记录完成开发实例验收。
+- 手机 renderer 对相同参数的 `agent:list-sessions`、`agent:list-active-sessions`、`agent:list-archived-sessions` 和 `agent:count-archived-sessions` 并发请求合并，并在 **3 秒**内复用成功结果；收到 `agent:session-metadata-changed` 后先失效这些列表缓存，再分发事件，避免复用过期快照。
 - Push presence 每 5 秒仍需续报。会话 ID 优先使用当前历史窗口 `sessionId`、路由 ID 或活跃 Agent 行 ID；deep-link 需要标题时按 ID 查询 active 列表，其他缺 ID 情形按标题回退 active 列表，不调用全量 `agent:list-sessions`。解析结果按当前 session ID + 标题缓存，标题/ID 改变才重新解析；普通 heartbeat 只 POST presence。
 - Web Remote 运行期间收到本地未知的 Agent stream/title session ID 时，只拉 `agent:list-active-sessions` 并以 `includeArchived=false` 合并；同 ID 60 秒内最多拉取一次，若 active 结果仍不含该 ID，则标为当前 renderer 生命周期内不可见、不再重复查询。桌面 renderer 继续保留全量快照路径。
 - 以上瘦身不改变完整 session 搜索/加载范围。按需 Pi 节点接口的数据体积取决于单个会话分叉数，尚未给它设置分页上限；若单 session 数据异常大，需用真实使用数据另行评估。
@@ -155,7 +156,7 @@ harness 默认整体超时 300 秒（可用 `--timeout-ms` 覆盖），每次页
 
 ### 大会话历史（2026-09-29）
 
-- 手机通过完整 UI IPC 读取 SDK 历史时，服务端先将 tool_result 文本裁剪至约 16 KB（追加原长度提示），把 base64 图片块替换为含 MIME/尺寸估算的占位；原文提示“完整内容请在桌面查看”。随后按约 2 MiB 序列化字节预算从尾部取完整轮次；未裁剪历史会以 `hasEarlier/startIndex/omittedCount` 元数据标记。tool_use 与其 tool_result 被识别为同一轮，单个超预算轮次不拆分。
+- 手机通过完整 UI IPC 读取 SDK 历史时，服务端先将 tool_result 文本裁剪至约 16 KB（追加原长度提示），把 base64 图片块替换为含 MIME/尺寸估算的占位；原文提示“完整内容请在桌面查看”。首屏/常规读取默认按 1 MiB 序列化字节预算从尾部取完整轮次；省流量模式为 256 KiB；未裁剪历史会以 `hasEarlier/startIndex/omittedCount` 元数据标记。tool_use 与其 tool_result 被识别为同一轮，单个超预算轮次不拆分。
 - 手机通过固定的“加载更早（已省略 N 条）”按钮以 2 MiB 页预算回取并前置到当前列表。此实现复用现有 `agent:get-sdk-messages` session-scope IPC，无新增通道或额外分级；桌面 IPC 返回值不变。React 侧只增加一行事件钩子，手机 DOM 入口由个人版 mobile-patch 添加。
 - 大于 256 KB 的 IPC WebSocket 响应使用约 180 KiB UTF-8 分片并 base64 编码，携带请求 ID、序号和总数；客户端按序重组，任何进度分片都重置 35 秒无进展计时。小响应、ping/pong、断线恢复和 `agent:send-message` 失败提示沿用原路径。
 - 全量大结果单条展开未实现：当前 SDK 历史 IPC 仅提供整段会话读取，不暴露有稳定消息 ID 的单条 tool_result 读取入口；故占位明确要求桌面查看，不在客户端保留或再次传输大原文。

@@ -20,9 +20,9 @@ class FakeWebSocket extends EventEmitter {
   send(payload: string): void { this.sent.push(payload) }
 }
 
-function client(bridge: InstanceType<typeof WebRemoteIpcBridge>): FakeWebSocket {
+function client(bridge: InstanceType<typeof WebRemoteIpcBridge>, source: { src: 'shim' | 'other'; page?: string } = { src: 'other' }): FakeWebSocket {
   const ws = new FakeWebSocket()
-  ws.connectionId = bridge.attachWebSocket(ws as never, 'device-1')
+  ws.connectionId = bridge.attachWebSocket(ws as never, 'device-1', source)
   ws.sent = []
   return ws
 }
@@ -399,12 +399,12 @@ describe('Web Remote full-ui security policy', () => {
   test('每条 IPC 连接建立时记录 v2 open 事件与设备哈希', () => {
     const info = spyOn(console, 'info').mockImplementation(() => {})
     const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
-    const ws = client(bridge)
+    const ws = client(bridge, { src: 'shim', page: 'page-test-123456' })
     try {
       const openLine = info.mock.calls.map(([line]) => String(line)).find((line) => line.includes('"event":"open"'))
       expect(openLine).toBeDefined()
       const record = JSON.parse(openLine!.slice(openLine!.indexOf('{')))
-      expect(record).toMatchObject({ v: 2, connectionId: ws.connectionId, event: 'open' })
+      expect(record).toMatchObject({ v: 2, connectionId: ws.connectionId, src: 'shim', page: 'page-test-123456', event: 'open' })
       expect(record.d).toMatch(/^[0-9a-f]{10}$/)
       expect(openLine).not.toContain('device-1')
     } finally {
