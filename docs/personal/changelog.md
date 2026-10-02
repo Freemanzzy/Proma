@@ -1302,3 +1302,10 @@
 - full-ui shim 暴露查询函数：检查 `navigator.serviceWorker.ready` 的 `pushManager.getSubscription()`，缓存查询结果；订阅成功登记后由 mobile patch 使缓存失效。renderer `sendDesktopNotification` 仅在该 Web Remote 函数返回“已有订阅”时跳过页面 `Notification`，提示音与无订阅回退不变。
 - 服务端推送发送日志改为 `recordPersonalInfo('Web Remote 推送', ...)`，每个结果只写 10 位 SHA-256 设备哈希、kind 与状态，不记录标题、正文或错误详情。
 - `notifications.test.ts`、`web-remote-push.test.ts`、mobile-patch 与 shim 测试共 **23 pass / 0 fail**，Electron typecheck 通过。更新 `docs/personal/web-remote.md` 与 `docs/personal/backlog.md`；双通知实际来源仍待用户截图/手机复测确认。
+
+## 2026-10-02: 手机反馈批次全量验收与开发预览
+
+- 步骤 0 合并冲突仅在 `docs/personal/changelog.md`；将 `fix/mobile-dedupe-20261001` 的 10-01 记录放在本地 10-01/10-02 反馈记录前，双方历史内容均保留。使用 `--no-ff` 合入，更新 backlog 为已合入未发布。
+- 全量 `bun test`：**685 pass / 0 fail，1,744 expect，104 files**；Electron `typecheck` 通过。`build:main`、`build:renderer`、`build:web-preload` 全部通过。renderer 构建保留既有 >500 kB chunk 提示，无构建失败。`git diff --check` 通过。
+- `mobile-preview.sh start/status` 已启动开发实例，PID 文件记录启动器 PID 61870；17889、5173 在监听，8443 Tailscale Serve 指向开发实例，按要求保持运行。没有在测试会话中运行 Agent、没有消耗对话额度；`~/.proma-dev/agent-sessions.json` 仍为 **831** 条。正式 `/Applications/Proma.app` 未触碰；本轮检查时其主进程 PID 为 10377（委派记录中的旧 PID 53199 已不存在）。真实负载测试未重测：本批不改真实负载触发条件涉及的列表数据、历史传输或前端首屏资源，仅按计划做功能回归及构建。
+- 分支 `fix/mobile-batch-20261002` 保持未推送、未合入 `personal`、未打包、未安装。
