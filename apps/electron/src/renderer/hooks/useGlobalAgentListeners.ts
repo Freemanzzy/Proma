@@ -69,6 +69,7 @@ import { appModeAtom } from '@/atoms/app-mode'
 import { tabsAtom, activeTabIdAtom, activeSessionIdAtom, openTab, updateTabTitle } from '@/atoms/tab-atoms'
 import type { AgentStreamState } from '@/atoms/agent-atoms'
 import { agentDiffUnseenChangesAtom, agentDiffUnseenFilesAtom } from '@/atoms/agent-atoms'
+import { findMissingActiveAgentSessionIds, settleMissingAgentStreamState } from '@/lib/web-remote-recovery'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import {
   getPreviewContentRefreshKey,
@@ -1178,13 +1179,15 @@ export function useGlobalAgentListeners(): void {
       }
     }
 
-    const restoreActiveSnapshots = async (): Promise<void> => {
+    const restoreActiveSnapshots = async (): Promise<Set<string>> => {
       const snapshots = await window.electronAPI.listActiveAgentSessionSnapshots()
+      const activeSessionIds = new Set(snapshots.map(({ sessionId }) => sessionId))
       unstable_batchedUpdates(() => {
         for (const snapshot of snapshots) {
           store.set(agentSessionStreamingStateAtomFamily(snapshot.sessionId), (existing) => mergeActiveAgentSessionSnapshot(existing, snapshot, latestTerminalRun.get(snapshot.sessionId)))
         }
       })
+      return activeSessionIds
     }
 
     const restoreStoppedSessions = async (): Promise<void> => {
@@ -1222,19 +1225,30 @@ export function useGlobalAgentListeners(): void {
       // Keep this recovery limited to runtime state so it neither duplicates a list request nor
       // replaces an archive view with an active-only snapshot. Stopped-session state is restored
       // on renderer initialization above and remains in memory across a WebSocket reconnect.
-      await Promise.all([
+      const [activeSnapshotSessionIds] = await Promise.all([
         restoreActiveSnapshots(),
         restoreQueuedMessages(),
         restorePendingRequests(),
       ])
+      const missingSessionIds = findMissingActiveAgentSessionIds(
+        store.get(agentStreamingStatesAtom),
+        activeSnapshotSessionIds,
+      )
       const activeSessionId = store.get(activeSessionIdAtom)
-      if (activeSessionId) {
-        store.set(agentMessageRefreshAtom, (prev) => {
-          const next = new Map(prev)
-          next.set(activeSessionId, (prev.get(activeSessionId) ?? 0) + 1)
-          return next
-        })
-      }
+      if (activeSessionId && !missingSessionIds.includes(activeSessionId)) missingSessionIds.push(activeSessionId)
+      if (missingSessionIds.length === 0) return
+      unstable_batchedUpdates(() => {
+        for (const sessionId of missingSessionIds) {
+          if (!activeSnapshotSessionIds.has(sessionId)) {
+            store.set(agentSessionStreamingStateAtomFamily(sessionId), settleMissingAgentStreamState)
+          }
+          store.set(agentMessageRefreshAtom, (prev) => {
+            const next = new Map(prev)
+            next.set(sessionId, (prev.get(sessionId) ?? 0) + 1)
+            return next
+          })
+        }
+      })
     }
 
     void Promise.all([restoreQueuedMessages(), restorePendingRequests(), restoreActiveSnapshots(), restoreStoppedSessions()]).catch(console.error)

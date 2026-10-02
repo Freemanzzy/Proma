@@ -1280,3 +1280,9 @@
 ## 2026-10-02: 反馈记录：断线期间完成，重连后仍显示运行中
 
 - backlog“用户反馈收集”新增：手机显示“Agent Running”而回答已结束，刷新后恢复。证据为 12:07:51 连接 1006 断开、完成事件未送达、12:11 页面内重连；根因为重连恢复只合并运行中快照，不清除过期的本地运行状态。建议下一批优先修。
+
+## 2026-10-02: Web Remote 重连清理过期运行态
+
+- `renderer/lib/web-remote-recovery.ts` 提供纯状态筛选与终态转换。Web Remote `recoverWebRemoteState` 在取得主进程活跃快照后，结束本地仍标记 running/retrying/backgroundWaiting 但快照已不存在的会话，并对每个缺失会话递增一次 `agentMessageRefreshAtom`；当前会话未在缺失集合时仍按原行为刷新一次。快照仍活跃的会话维持运行态。
+- 修改 `renderer/hooks/useGlobalAgentListeners.ts`，恢复差异处理只被 Web Remote 专属恢复入口调用；renderer 启动初始化和桌面路径保持既有处理。新增 `renderer/lib/web-remote-recovery.test.ts` 与扩展 `useGlobalAgentListeners.recovery.test.ts`，共 **5 pass / 0 fail**；Electron typecheck 通过。
+- 更新 `docs/personal/backlog.md` 反馈状态。
