@@ -1309,3 +1309,7 @@
 - 全量 `bun test`：**685 pass / 0 fail，1,744 expect，104 files**；Electron `typecheck` 通过。`build:main`、`build:renderer`、`build:web-preload` 全部通过。renderer 构建保留既有 >500 kB chunk 提示，无构建失败。`git diff --check` 通过。
 - `mobile-preview.sh start/status` 已启动开发实例，PID 文件记录启动器 PID 61870；17889、5173 在监听，8443 Tailscale Serve 指向开发实例，按要求保持运行。没有在测试会话中运行 Agent、没有消耗对话额度；`~/.proma-dev/agent-sessions.json` 仍为 **831** 条。正式 `/Applications/Proma.app` 未触碰；本轮检查时其主进程 PID 为 10377（委派记录中的旧 PID 53199 已不存在）。真实负载测试未重测：本批不改真实负载触发条件涉及的列表数据、历史传输或前端首屏资源，仅按计划做功能回归及构建。
 - 分支 `fix/mobile-batch-20261002` 保持未推送、未合入 `personal`、未打包、未安装。
+
+## 2026-10-02: 反馈记录：手机大图点击加载原图
+
+- backlog“用户反馈收集”新增：手机端超过 8 MiB 的本地图片当前显示“图片无法读取”，用户希望改为点按加载原图；记入下一批。
