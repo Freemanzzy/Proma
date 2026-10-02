@@ -1291,3 +1291,8 @@
 
 - 仅在 full-ui shim 的 `file:resolve-path` 成功结果为目标图片时，使用同一 `resolvedPath` 与原 `access` 参数调用已分级、服务端路径校验的 `file:read-binary-base64`；读取上限 **8 MiB**，返回 MIME 对应的 data URL。对话页面按路径缓存读取 Promise；读取超限返回 `null`。SVG、PDF 等非目标类型维持 `proma-file://` 原结果，未改主进程或授权逻辑。
 - `web-electron-shim.test.ts` 图片读取缓存、非图片原样返回和超限断言均通过；相关 shim 测试 **8 pass / 0 fail**，Electron typecheck 通过。更新 `docs/personal/web-remote.md` 与 `docs/personal/backlog.md`。
+
+## 2026-10-02: Web Remote 触屏打开思考强度面板
+
+- `renderer/components/agent/AgentView.tsx` 的 `AgentThinkingPopover` 点击处理仅增加 Web Remote + 触屏条件：打开现有面板并 return，不进入 click 开关逻辑。桌面与非触屏 Web Remote 仍执行原有 click；面板内的模型能力、滑块和“关闭”档不变。
+- 新增 `AgentView.mobile-thinking.test.ts` 检查触屏 open 分支位于原开关逻辑之前且桌面 click 路径仍保留；测试 **1 pass / 0 fail**，Electron typecheck 通过。上游文件仅 `AgentView.tsx`（增加 4 行逻辑）。更新 `docs/personal/backlog.md`。
