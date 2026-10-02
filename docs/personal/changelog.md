@@ -1313,3 +1313,12 @@
 ## 2026-10-02: 反馈记录：手机大图点击加载原图
 
 - backlog“用户反馈收集”新增：手机端超过 8 MiB 的本地图片当前显示“图片无法读取”，用户希望改为点按加载原图；记入下一批。
+
+## 2026-10-02: 安装 4a2b6dac（手机反馈批次）
+
+- Claude Code 13:05 用 `install-update.sh` 安装 `4a2b6dac`（0.19.58），EXIT=0，备份校验通过，前后快照一致；钥匙串弹窗 1 次。previous 轮换为 `76cad12c`。
+- 健康检查：17888 监听、Serve 仅 443 → 17888、main.log 无 `[FATAL]`/`[ERROR]`、17 个启用任务无过期、会话 950 / 渠道 7 与安装前一致。
+- 手机通过：对话内生成图片可显示；锁屏期间完成、回来后不再显示运行中（13:28 完成时两台手机均已断开，13:33 重连后恢复正确）；安卓完成通知只收到 1 条（服务端每设备 1 次推送，均 201）；未再出现同一秒两条连接，`open` 行 `page` 可区分重连与新页面。
+- **缺陷**：iPhone 与安卓点思考按钮都没有出现强度面板。根因（父会话核对 Radix 源码）：`PopoverTrigger` 的 onClick 为 `composeEventHandlers(props.onClick, onOpenToggle)`，我方 `setOpen(true)` 后 Radix 又执行 `prev => !prev`，面板立即关闭；原单测只做源码字符串断言，未覆盖运行行为。修复见下一条记录。
+- 观察：13:28:45 `[WARN] 消息截断后仍超限 (1471K chars)`，为上游 `serializeSDKMessageForStorage` 对超大消息截断后仍超出上限的提示，消息照常落盘；记入 backlog 观察。
+- 详见本机交接 `install-result-2026-10-02.md`。

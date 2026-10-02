@@ -21,6 +21,7 @@
 | 2026-10-02 | 手机端对话里的本地图片显示“图片无法读取”（桌面正常；与省流量开关无关） | OPPO | 根因：Markdown 图片经 `file:resolve-path` 解析，服务端路径授权通过（计量有调用、无拒绝），但返回的是 `proma-file://` 自定义协议 URL，手机浏览器无法加载 → `<img>` onError。已实现于 2026-10-02：Web Remote shim 对 `file:resolve-path` 返回的 PNG/JPG/JPEG/GIF/WebP/BMP 使用同一授权路径的 `file:read-binary-base64` 转 data URL，单张上限 8 MiB，同一路径在页面内缓存；超限返回 null。SVG、PDF 等非目标格式保持原结果。 |
 | 2026-10-02 | 回答已结束，手机仍显示“Agent Running 6m31s”，刷新页面后恢复 | OPPO | 正式版计量：连接 e1d195af 流式输出到 12:07:51 后以 `1006` 异常断开，所有连接都没有收到完成事件（各窗口 `scN=0`），12:11:07 页面内自动重连。代码确认 `restoreActiveSnapshots()` 只把主进程“仍在运行”的快照合并进本地状态，**不会清除本地标记为运行中、但已不在快照里的会话**，因此断线期间错过的完成永远不会被纠正。已实现于 2026-10-02：仅 Web Remote 恢复路径将 running/retrying/background-waiting 且不在活跃快照中的会话结束，并逐会话触发一次历史刷新；仍运行的快照状态保留，桌面初始化路径不变。`web-remote-recovery.test.ts` 与 `useGlobalAgentListeners.recovery.test.ts` 覆盖恢复筛选、结束态及一次刷新。 |
 | 2026-10-02 | 手机端对话内本地图片超过 8 MiB 时只显示“图片无法读取”，希望可以点击加载原图 | 手机 | 现状（fix/mobile-batch-20261002）：shim 以 8 MiB 上限调用 `file:read-binary-base64`，超限返回 null。方案：超限时显示“图片较大（xx MB），点按加载原图”占位，点按后不设该上限（或更高上限）读取并缓存；蜂窝/省流量下保持需点按。备选：Mac 端缩放为长边约 2048 的 JPEG 先显示缩略版 |
+| 2026-10-02 | 观察：正式版 13:28:45 `[WARN] 消息截断后仍超限 (1471K / 3046K chars)` | Mac | 上游 `agent-session-manager.ts` `serializeSDKMessageForStorage` 对超大 SDK 消息截断后仍 >上限，消息照常写入。可能来自 Read 图片/大工具输出的 base64。手机历史已有瘦身与按需加载，暂不处理；若相关会话在手机打开变慢再查 |
 
 ## 后续待办（按建议优先级）
 
