@@ -1343,3 +1343,9 @@
 - 根因：`agent:get-pi-reasoning-capability` 只接受 `channelId` 与 `modelId`，但原 `workspace` scope 要求从 IPC 参数解析 workspaceId/slug/sessionId；该请求因此在 Web Remote 被拒，renderer 回退后无法识别多数模型的思考档位。
 - 经核对，`ipc.ts` handler 仅读取 channel provider，并返回 `resolvePiReasoningCapability()` 的 `ReasoningCapability` 档位元数据；不会返回 channel 配置、API key、base URL 或工作区数据。将 `channel-policy.ts` 定级为 `read/none`，不改变通用 `settings:update` 的 denied 策略。
 - `full-ui-security.test.ts` 新增无 workspace 参数调用允许、返回 capability 且无 `apiKey`/`baseUrl` 的断言：**31 pass / 0 fail**。
+
+## 2026-10-03: 记录无档位思考模式设置写入受限的观察
+
+- dev CDP 真实触摸确认：临时 unsupported model id 的 Switch 事件到达 document bubble，受控 UI 状态在 50/300/1000 ms 均由 checked 变为 unchecked；`settings:update` request 被 Web Remote policy 拒绝，`settings:get` 仍返回 `agentThinking=adaptive`。拒绝未在 1 秒内回滚局部 Switch 状态，所以暂不能断言它造成正式版“点击无效”的即时表现。
+- 当前 dev 启用的 Codex GPT-5.5 与 clipproxyapi Claude Opus 5.5 都能取得 reasoning capability，显示思考深度滑块，不走无档位开关分支。临时 unsupported model id 仅用于本轮新建 dev 测试会话、未运行 Agent，测试会话已删除；此证据不等同于用户正式版实际模型。
+- 未开放通用 `settings:update`、未加窄写通道；将待确认项记入 `docs/personal/backlog.md`，等待父会话决定是否按持久化问题继续设计。
