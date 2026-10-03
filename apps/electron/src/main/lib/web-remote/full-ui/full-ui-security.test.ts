@@ -286,6 +286,24 @@ describe('Web Remote full-ui security policy', () => {
     }
   })
 
+  test('Pi reasoning capability 只读元数据不需要 workspace 参数且不暴露秘密', async () => {
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
+    const capability = { levels: ['off', 'low', 'medium', 'high'], defaultLevel: 'medium' }
+    bridge.registerInvoke('agent:get-pi-reasoning-capability', async (_event, channelId, modelId) => {
+      expect(channelId).toBe('channel-1')
+      expect(modelId).toBe('model-1')
+      return capability
+    })
+    const ws = client(bridge)
+    const result = await invoke(ws, 'agent:get-pi-reasoning-capability', ['channel-1', 'model-1'])
+
+    expect(result.error).toBeUndefined()
+    expect(result.value).toEqual(capability)
+    expect(result.value).not.toHaveProperty('apiKey')
+    expect(result.value).not.toHaveProperty('baseUrl')
+    expect(getWebRemoteChannelPolicy('agent:get-pi-reasoning-capability')).toMatchObject({ level: 'read', scope: 'none' })
+  })
+
   test('按需 Pi 节点查询受 session 工作区授权保护', async () => {
     const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
     bridge.registerInvoke('web-remote:get-session-entry-bindings', async (_event, input) => {
