@@ -85,7 +85,7 @@ export const WEB_REMOTE_CHANNEL_POLICY: Readonly<Record<string, WebRemoteChannel
   "agent:get-mcp-config": { level: "read", scope: "workspace", rationale: "只读结果或状态事件；列表和设置结果在返回前按允许范围/敏感字段过滤。" },
   "agent:get-other-workspace-skills": { level: "read", scope: "workspace", rationale: "只读结果或状态事件；列表和设置结果在返回前按允许范围/敏感字段过滤。" },
   "agent:get-pending-requests": { level: "read", scope: "none", rationale: "只读恢复快照；返回值按远程允许工作区过滤。" },
-  "agent:get-pi-reasoning-capability": { level: "workspace", scope: "workspace", rationale: "参数必须能解析出 sessionId 或 workspaceId/slug，并校验其在远程允许范围内。" },
+  "agent:get-pi-reasoning-capability": { level: "read", scope: "none", rationale: "只返回请求 channel/model 对应的思考档位元数据，不读取工作区数据、凭据或 API 密钥。" },
   "agent:get-queued-messages": { level: "read", scope: "session", rationale: "只读结果或状态事件；列表和设置结果在返回前按允许范围/敏感字段过滤。" },
   "agent:get-sdk-messages": { level: "read", scope: "session", rationale: "只读结果或状态事件；列表和设置结果在返回前按允许范围/敏感字段过滤。" },
   "agent:get-session-path": { level: "session", scope: "session", rationale: "参数必须能解析出 sessionId 或 workspaceId/slug，并校验其在远程允许范围内。" },

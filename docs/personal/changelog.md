@@ -1337,3 +1337,9 @@
 - **缺陷未解决**：正式版 iPhone 与安卓点思考按钮仍不出现强度面板。Claude Code 核查确认修复代码（preventDefault + 触屏跳过 mouseleave）已在包内且 OPPO 加载的是新 renderer。dev 8443 上 10-02 14:32 用户真机与模拟器均通过，与正式版结果不一致，原因待查。
 - 父会话审查：此前“dev 真机通过 → 打包”的验收没有覆盖与正式版一致的条件（数据、模型、PWA/浏览器、输入框聚焦状态），是这次漏判的原因；下次修复必须在与正式使用一致的条件下复现并验证。
 - 详见本机交接 `install-result-2026-10-02-2.md`。
+
+## 2026-10-03: 允许 Web Remote 读取 Pi 思考档位能力
+
+- 根因：`agent:get-pi-reasoning-capability` 只接受 `channelId` 与 `modelId`，但原 `workspace` scope 要求从 IPC 参数解析 workspaceId/slug/sessionId；该请求因此在 Web Remote 被拒，renderer 回退后无法识别多数模型的思考档位。
+- 经核对，`ipc.ts` handler 仅读取 channel provider，并返回 `resolvePiReasoningCapability()` 的 `ReasoningCapability` 档位元数据；不会返回 channel 配置、API key、base URL 或工作区数据。将 `channel-policy.ts` 定级为 `read/none`，不改变通用 `settings:update` 的 denied 策略。
+- `full-ui-security.test.ts` 新增无 workspace 参数调用允许、返回 capability 且无 `apiKey`/`baseUrl` 的断言：**31 pass / 0 fail**。
