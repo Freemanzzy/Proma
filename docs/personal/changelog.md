@@ -1349,3 +1349,11 @@
 - dev CDP 真实触摸确认：临时 unsupported model id 的 Switch 事件到达 document bubble，受控 UI 状态在 50/300/1000 ms 均由 checked 变为 unchecked；`settings:update` request 被 Web Remote policy 拒绝，`settings:get` 仍返回 `agentThinking=adaptive`。拒绝未在 1 秒内回滚局部 Switch 状态，所以暂不能断言它造成正式版“点击无效”的即时表现。
 - 当前 dev 启用的 Codex GPT-5.5 与 clipproxyapi Claude Opus 5.5 都能取得 reasoning capability，显示思考深度滑块，不走无档位开关分支。临时 unsupported model id 仅用于本轮新建 dev 测试会话、未运行 Agent，测试会话已删除；此证据不等同于用户正式版实际模型。
 - 未开放通用 `settings:update`、未加窄写通道；将待确认项记入 `docs/personal/backlog.md`，等待父会话决定是否按持久化问题继续设计。
+
+## 2026-10-06: 安装 03901c8a（思考深度能力查询）——缺陷关闭
+
+- Claude Code 10-06 13:39 用 `install-update.sh` 安装 `03901c8a`（0.19.58），EXIT=0，备份校验通过（24,282 条目），前后快照一致；钥匙串弹窗 1 次。previous 轮换为 `6daa0412`。外置硬盘未挂载，旧备份 `20261003-121238-34796` 按设计保留本机，下次安装时归档。
+- 健康检查：17888 监听、Serve 仅 443 → 17888、main.log 无 `[FATAL]`/`[ERROR]`、17 个启用任务无过期、会话 1001 / 渠道 7 与安装前一致。
+- **思考深度缺陷关闭**：用户确认正式版 iPhone 与安卓的 Codex、Claude 会话均出现滑块且档位保存；计量显示两台手机均调用 `agent:get-pi-reasoning-capability` 与 `agent:update-session-reasoning-level`，无拒绝。
+- 权限复核（Claude Code）：`agent:get-pi-reasoning-capability` 改为 `read/none` 可接受——handler 只用渠道 `provider` 解析档位元数据，不返回密钥、base URL 或工作区数据；远程最多能探测某 channelId 是否存在。
+- 详见本机交接 `install-result-2026-10-03.md`。
