@@ -107,6 +107,28 @@ export const MOBILE_JS = String.raw`(function(){
       setIfChanged(saver,'dataSaverState',weak?'on':'off',function(){saver.textContent=weak?'省流量 开':'省流量 关';saver.setAttribute('aria-pressed',String(weak));saver.setAttribute('aria-label','切换省流量模式，当前'+(weak?'开启':'关闭'))});
     }
     syncDataSaver();
+    function syncLargeInlineImages(){
+      document.querySelectorAll('img[src*="#proma-web-remote-large-image="]').forEach(function(image){
+        if(image.tagName!=='IMG')return;
+        var marker=(image.getAttribute('src')||'').match(/#proma-web-remote-large-image=([0-9]+)$/);
+        if(!marker||image.dataset.webRemoteLargeImage===marker[1])return;
+        setIfChanged(image,'webRemoteLargeImage',marker[1],function(){
+          image.hidden=true;
+          var button=document.createElement('button');button.type='button';button.dataset.webRemoteLargeImageButton=marker[1];button.textContent='图片较大（>8 MB），点按加载原图';button.setAttribute('aria-label','图片较大（>8 MB），点按加载原图');
+          button.style.cssText='display:inline-block;padding:10px 14px;border:1px solid rgba(127,127,127,.35);border-radius:10px;background:var(--background,#fff);color:var(--foreground,#222);font-size:14px;line-height:1.4;max-width:100%;white-space:normal;text-align:left';
+          button.addEventListener('click',async function(){
+            if(button.disabled)return;
+            button.disabled=true;button.textContent='正在加载…';
+            try{
+              var load=window.__PROMA_WEB_REMOTE_LOAD_LARGE_IMAGE;if(typeof load!=='function')throw new Error('连接尚未就绪，请重试');
+              var src=await load(marker[1]);if(typeof src!=='string'||!src.startsWith('data:image/'))throw new Error('图片数据无效');
+              image.src=src;image.hidden=false;image.dataset.webRemoteLargeImageState='loaded';button.remove();
+            }catch(error){image.dataset.webRemoteLargeImageState='failed';button.disabled=false;button.textContent='图片无法读取，点按重试';button.setAttribute('aria-label',button.textContent+'（'+String(error?.message||error)+'）')}
+          });
+          image.parentNode?.insertBefore(button,image.nextSibling);
+        });
+      });
+    }
     function syncHistoryMedia(){
       var walker=document.createTreeWalker(document.body,4);
       var nodes=[];var current;
@@ -216,6 +238,7 @@ export const MOBILE_JS = String.raw`(function(){
     }
     syncEarlierHistory();
     syncHistoryMedia();
+    syncLargeInlineImages();
     syncRightPanel();
     var topbar=document.querySelector('[data-web-remote-mobile-topbar]');
     if (topbar && !topbar.querySelector('[data-web-remote-notification-entry]')) {

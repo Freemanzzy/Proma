@@ -1369,3 +1369,11 @@
 - `web-electron-shim.ts` 的文件输入不再设置 `capture="environment"`，保留 `multiple` 与原有 `accept`，让 iOS 可使用系统文件/相册选择器。
 - 新增 `configureBrowserFileInput` 行为单测，断言输入属性完整且不含 `capture`。
 - 验证：`bun test apps/electron/src/main/lib/web-remote/full-ui/web-electron-shim.test.ts`。
+
+## 2026-10-07: 手机大图按需加载原图
+
+- Web Remote shim 对超过 8 MiB 的授权本地图片返回可识别占位图，并在页面注册路径与访问上下文；mobile-patch 将其转换为可点按按钮，显示加载中、成功后替换原图，失败时显示无法读取并允许重试。
+- 点按读取上限 50 MiB，成功结果按路径缓存在当前页面；超过限制或文件不可用时明确提示。历史图片既有按需通道未改。
+- 单测覆盖 8 MiB 内图片直显（既有测试）、超限占位不直接读取原图、点按仅读取一次并显示原图、失败状态、失败可重试，以及 mobile-patch DOM 行为。
+- 文档更新：`docs/personal/web-remote.md`、`docs/personal/backlog.md`。
+- 验证：Web Remote shim 与 mobile-patch 定向测试通过；真实 iPhone 模拟器点按/截图在本批 dev 验收阶段完成。

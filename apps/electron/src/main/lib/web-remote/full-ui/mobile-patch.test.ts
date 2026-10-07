@@ -152,6 +152,48 @@ describe('renderWebRemoteMobilePatch DOM write convergence', () => {
     expect(document.querySelectorAll('[data-web-remote-history-media]')).toHaveLength(2)
   })
 
+  test('大图占位可点按加载，显示加载状态后替换为缓存原图', async () => {
+    const { window, document, observers } = createMobilePatchHarness()
+    const image = document.createElement('img')
+    image.setAttribute('src', 'data:image/svg+xml;charset=utf-8,%3Csvg%3E%3C%2Fsvg%3E#proma-web-remote-large-image=781')
+    document.body.appendChild(image)
+    let reads = 0
+    ;(window as any).__PROMA_WEB_REMOTE_LOAD_LARGE_IMAGE = async (id: string) => {
+      expect(id).toBe('781')
+      reads += 1
+      return 'data:image/png;base64,aW1hZ2U='
+    }
+    observers[0]!.trigger()
+    const button = document.querySelector<HTMLButtonElement>('[data-web-remote-large-image-button="781"]')!
+    expect(button.textContent).toBe('图片较大（>8 MB），点按加载原图')
+    expect(image.hidden).toBe(true)
+    const loading = button.dispatchEvent(new window.Event('click', { bubbles: true }))
+    expect(button.textContent).toBe('正在加载…')
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(image.getAttribute('src')).toBe('data:image/png;base64,aW1hZ2U=')
+    expect(image.hidden).toBe(false)
+    expect(document.querySelector('[data-web-remote-large-image-button="781"]')).toBeNull()
+    expect(reads).toBe(1)
+    void loading
+  })
+
+  test('大图读取失败时显示无法读取并允许重试', async () => {
+    const { window, document, observers } = createMobilePatchHarness()
+    const image = document.createElement('img')
+    image.setAttribute('src', 'data:image/svg+xml;charset=utf-8,%3Csvg%3E%3C%2Fsvg%3E#proma-web-remote-large-image=782')
+    document.body.appendChild(image)
+    ;(window as any).__PROMA_WEB_REMOTE_LOAD_LARGE_IMAGE = async () => { throw new Error('offline') }
+    observers[0]!.trigger()
+    const button = document.querySelector<HTMLButtonElement>('[data-web-remote-large-image-button="782"]')!
+    button.dispatchEvent(new window.Event('click', { bubbles: true }))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(button.textContent).toBe('图片无法读取，点按重试')
+    expect(button.disabled).toBe(false)
+    expect(image.hidden).toBe(true)
+  })
+
   test('侧栏内只有活跃会话/模式状态变化才关闭抽屉', () => {
     const { window, document, flushTimeouts, pendingTimeoutCount } = createMobilePatchHarness()
     const sidebar = document.querySelector<HTMLElement>('[data-web-remote-sidebar="left"]')!
