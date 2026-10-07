@@ -194,6 +194,47 @@ describe('renderWebRemoteMobilePatch DOM write convergence', () => {
     expect(image.hidden).toBe(true)
   })
 
+  test('点击侧栏子任务后打开右侧抽屉并可关闭', () => {
+    const { window, document, observers } = createMobilePatchHarness()
+    const sidebar = document.querySelector<HTMLElement>('[data-web-remote-sidebar="left"]')!
+    const child = document.createElement('div')
+    child.dataset.webRemoteDelegationChild = 'true'
+    child.dataset.sessionSwitchId = 'child-session'
+    child.dataset.sessionSwitchType = 'agent'
+    child.setAttribute('role', 'button')
+    child.textContent = '子任务内容入口'
+    sidebar.appendChild(child)
+    const tabList = document.querySelector('[data-web-remote-panel="right"] [role="tablist"]')!
+    tabList.querySelectorAll('[role="tab"]').forEach((tab) => tab.setAttribute('aria-selected', 'false'))
+    const tasks = document.createElement('button')
+    tasks.setAttribute('role', 'tab')
+    tasks.dataset.webRemoteDelegationTab = 'true'
+    tasks.setAttribute('aria-selected', 'false')
+    tasks.textContent = 'Proma 个人版 Fork：阶段一+二（Luna 执行）'
+    const files = document.createElement('button')
+    files.setAttribute('role', 'tab')
+    files.setAttribute('aria-selected', 'true')
+    files.textContent = '文件'
+    tabList.append(tasks, files)
+    const panelContent = document.createElement('div')
+    panelContent.dataset.webRemoteDelegationContent = 'true'
+    panelContent.textContent = '协作子任务输出'
+    document.querySelector('[data-web-remote-panel="right"]')!.appendChild(panelContent)
+
+    child.dispatchEvent(new window.Event('click', { bubbles: true }))
+    expect(document.body.dataset.webRemoteRightOpen).toBeUndefined()
+    expect(document.body.dataset.webRemotePendingDelegationOpen).toBe('true')
+    tasks.setAttribute('aria-selected', 'true')
+    files.setAttribute('aria-selected', 'false')
+    expect(document.querySelector('[data-web-remote-panel="right"] [role="tab"][data-web-remote-delegation-tab="true"][aria-selected="true"]')?.textContent).toBe('Proma 个人版 Fork：阶段一+二（Luna 执行）')
+    observers[0]!.trigger()
+    expect(document.body.dataset.webRemoteRightOpen).toBe('true')
+    expect(panelContent.textContent).toContain('协作子任务输出')
+    const toggle = document.querySelector<HTMLButtonElement>('[data-web-remote-panel-toggle]')!
+    toggle.dispatchEvent(new window.Event('click', { bubbles: true }))
+    expect(document.body.dataset.webRemoteRightOpen).toBeUndefined()
+  })
+
   test('侧栏内只有活跃会话/模式状态变化才关闭抽屉', () => {
     const { window, document, flushTimeouts, pendingTimeoutCount } = createMobilePatchHarness()
     const sidebar = document.querySelector<HTMLElement>('[data-web-remote-sidebar="left"]')!

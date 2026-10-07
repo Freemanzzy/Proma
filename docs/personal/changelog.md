@@ -1392,3 +1392,11 @@
 - 新增单测覆盖 Web Remote listener 缺失、调度器 stale、逾期任务只读、30 分钟 repair 限频和 10 分钟心跳节流。
 - 文档更新：`docs/personal/web-remote.md` 新增日志查阅说明及样例，`docs/personal/backlog.md` 更新状态。
 - 验证：`personal-health-check.test.ts` 5 pass / 0 fail；关联 personal main-log 测试 7 pass / 0 fail；Electron `typecheck` 与 `build:main` 通过。心跳和自愈限频采用纯函数单测，避免触发真实 Web Remote 重启或调度任务。
+
+## 2026-10-07: 手机侧栏子任务自动打开右侧抽屉
+
+- LeftSidebar 的 Agent 会话入口仅增加 `data-web-remote-delegation-child` 标记；mobile-patch 在标记会话被点击后等待“子任务”Tab 成为选中项，再打开 Web Remote 右侧抽屉。标签选中状态由属性变化触发重新检查；待选中的动作有超时清理，普通会话点击与手动抽屉关闭行为不变。
+- mobile-patch 测试夹具现在先清除右侧 Tab 列表原有的选中状态，再创建子任务 Tab，避免原“文件”Tab 在 DOM 顺序上先于新建 Tab 导致选中元素误判。单测覆盖抽屉自动打开、内容可见及点击关闭。
+- 定向验证：`mobile-patch.test.ts` **12 pass / 0 fail**。真实 iPhone 17 Pro Simulator Safari 点击验收初次未通过：移动端 Tab 菜单只显示“文件”（选中）与“改动”（未选中），未出现 delegation Tab。AXe 可访问到侧栏协作行，但未能读取 WebView 原始 DOM 属性；之后父会话确认点击对象及实际 delegation 路径，并指出 Tab label 是协作子任务标题而非“子任务”。
+- 后续修正：`DiffPanelTabBar.tsx` 仅为 `delegation` Tab 加 `data-web-remote-delegation-tab="true"`；mobile-patch 改为通过该稳定标记识别选中 Tab，不再比对本地化文本。测试夹具改用真实协作子任务标题，并验证 role 标记与选中属性。`mobile-patch.test.ts` **12 pass / 0 fail**。
+- 真实 Safari 未运行 Agent；headless Chrome CDP 只读取 DOM、触摸点击现有未归档协作子任务、读取抽屉状态及截图，将在本次跟进中验证。
