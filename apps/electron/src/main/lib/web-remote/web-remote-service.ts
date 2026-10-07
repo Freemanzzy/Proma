@@ -8,6 +8,7 @@ import { readWebRemoteConfig, getWebRemoteConfigPath, getWebRemoteDataDir, WebRe
 import { WebRemoteServer } from './web-remote-server'
 import { setWebRemoteEventHub, notifyWebRemoteInteractionResolved } from './web-remote-events'
 import { getWebRemoteIpcBridge } from './full-ui/web-remote-ipc'
+import { recordPersonalInfo } from '../personal-log-writer'
 export { prepareWebRemoteFullUi } from './full-ui/prepare'
 
 let server: WebRemoteServer | null = null
@@ -44,7 +45,13 @@ export async function startWebRemoteIfEnabled(): Promise<void> {
   if (!isWebRemoteRuntimeAllowed()) return
   const config = readWebRemoteConfig()
   if (!isWebRemoteEnabled(config)) return
-  if (server) return
+  if (server?.isListening()) return
+  if (server) {
+    const staleServer = server
+    server = null
+    setWebRemoteEventHub(null)
+    await staleServer.stop().catch((error) => console.warn('[服务诊断] event=web-remote-stale-server-stop-failed', error))
+  }
   const ipcBridge = config.fullUi === true ? getWebRemoteIpcBridge() ?? undefined : undefined
   const configuredPushProxy = getConfigDirName() === '.proma-dev' ? await getEffectiveProxyUrl().catch(() => undefined) : undefined
   const iconDir = resolveWebRemoteIconDir({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, moduleDir: __dirname })
@@ -59,8 +66,11 @@ export async function startWebRemoteIfEnabled(): Promise<void> {
     await candidate.start(Number.isInteger(config.port) ? config.port! : 17888, '127.0.0.1')
     server = candidate
     setWebRemoteEventHub(candidate.getEventHub())
+    const port = Number.isInteger(config.port) ? config.port! : 17888
+    recordPersonalInfo('服务诊断', `event=web-remote-start port=${port} reason=enabled-config`)
     console.log(`[Web Remote] 已启动: 127.0.0.1:${Number.isInteger(config.port) ? config.port : 17888}`)
   } catch (error) {
+    console.warn(`[服务诊断] event=web-remote-start-failed port=${Number.isInteger(config.port) ? config.port : 17888}`)
     console.error('[Web Remote] 启动失败（已忽略，不影响主程序）:', error instanceof Error ? error.message : String(error))
     candidate.getEventHub().dispose()
     await candidate.stop().catch(() => {})
@@ -72,9 +82,18 @@ export async function stopWebRemote(): Promise<void> {
   server = null
   setWebRemoteEventHub(null)
   if (!current) return
+  const address = current.httpServer.address()
+  const port = address && typeof address === 'object' ? address.port : readWebRemoteConfig().port ?? 17888
+  recordPersonalInfo('服务诊断', `event=web-remote-stop port=${port} reason=application-shutdown`)
   current.getEventHub().dispose()
   await current.stop().catch((error) => console.error('[Web Remote] 停止失败:', error))
   console.log('[Web Remote] 已停止')
+}
+
+export function getWebRemoteHealthState(): { enabled: boolean; listening: boolean; port: number } {
+  const config = readWebRemoteConfig()
+  const port = Number.isInteger(config.port) ? config.port! : 17888
+  return { enabled: isWebRemoteEnabled(config), listening: server?.isListening() ?? false, port }
 }
 
 export function getWebRemoteServer(): WebRemoteServer | null {

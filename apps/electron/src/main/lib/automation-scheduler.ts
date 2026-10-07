@@ -35,6 +35,8 @@ import { createAgentSession, updateAgentSessionMeta, getAgentSessionMeta } from 
 import { getSessionContextUsageRatio } from './agent-session-usage'
 import { runAgentHeadless, isAgentSessionActive } from './agent-service'
 import { notifyAutomationRunFinished } from './automation-notification-service'
+import { recordPersonalInfo } from './personal-log-writer'
+import { shouldWriteSchedulerHeartbeat } from './personal-health-check-core'
 
 /** tick 周期：每 30s 检查一次到期任务（短轮询，抗休眠漂移） */
 const TICK_INTERVAL_MS = 30_000
@@ -95,8 +97,23 @@ function formatScheduleLabel(a: Automation): string {
 }
 
 let tickTimer: NodeJS.Timeout | undefined
+let lastSchedulerTickAt = 0
+let lastSchedulerHeartbeatAt = 0
+const SCHEDULER_HEARTBEAT_INTERVAL_MS = 10 * 60_000
 /** 正在执行中的 automation id 集合，防止同一任务重入 */
 const runningAutomations = new Set<string>()
+
+export function getSchedulerLastTickAt(): number {
+  return lastSchedulerTickAt
+}
+
+function writeSchedulerHeartbeatIfDue(now: number): void {
+  if (!shouldWriteSchedulerHeartbeat(lastSchedulerHeartbeatAt, now, SCHEDULER_HEARTBEAT_INTERVAL_MS)) return
+  const active = listAutomations().filter((automation) => automation.active)
+  const nextRunAt = active.length ? Math.min(...active.map((automation) => automation.nextRunAt)) : null
+  recordPersonalInfo('服务诊断', `event=scheduler-heartbeat lastTickAt=${new Date(now).toISOString()} enabledTasks=${active.length} nextRunAt=${nextRunAt === null ? 'none' : new Date(nextRunAt).toISOString()}`)
+  lastSchedulerHeartbeatAt = now
+}
 
 /** 向所有渲染窗口广播任务列表变更，触发前端刷新 */
 export function broadcastChanged(): void {
@@ -267,6 +284,8 @@ export async function runAutomationNow(id: string): Promise<void> {
 /** 一个 tick：扫描所有 active 且到期的任务并触发 */
 function tick(): void {
   const now = Date.now()
+  lastSchedulerTickAt = now
+  writeSchedulerHeartbeatIfDue(now)
   for (const automation of listAutomations()) {
     if (!automation.active) continue
     // 完整度兜底：老用户可能存在「active=true 但缺工作区 / 渠道」的历史数据，跳过避免运行时崩溃
@@ -296,8 +315,16 @@ export function startScheduler(): void {
       setNextRunAt(automation.id, computeNextRunAt(automation, now))
     }
   }
-  tickTimer = setInterval(tick, TICK_INTERVAL_MS)
+  lastSchedulerHeartbeatAt = now
+  restartSchedulerTickTimer()
+  recordPersonalInfo('服务诊断', `event=scheduler-start tickIntervalSeconds=${TICK_INTERVAL_MS / 1000} enabledTasks=${listAutomations().filter((automation) => automation.active).length}`)
   console.log(`[定时任务] 调度器已启动，tick 周期 ${TICK_INTERVAL_MS / 1000}s`)
+}
+
+/** 仅重置轮询定时器，不立即执行 tick，避免健康自检补跑业务任务。 */
+export function restartSchedulerTickTimer(): void {
+  if (tickTimer) clearInterval(tickTimer)
+  tickTimer = setInterval(tick, TICK_INTERVAL_MS)
 }
 
 /** 停止调度器（before-quit 调用） */

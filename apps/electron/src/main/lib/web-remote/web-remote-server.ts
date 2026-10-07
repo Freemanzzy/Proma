@@ -151,6 +151,10 @@ export class WebRemoteServer {
     return new Set([...this.connections.keys()].map((ws) => (ws as WebSocket & { webRemoteDeviceId?: string }).webRemoteDeviceId).filter((id): id is string => !!id)).size
   }
 
+  isListening(): boolean {
+    return this.listening && this.httpServer.listening
+  }
+
   getAuth(): WebRemoteAuth {
     return this.auth
   }

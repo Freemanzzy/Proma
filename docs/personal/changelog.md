@@ -1384,3 +1384,11 @@
 - `mobile-preview.sh start` 用 Perl `POSIX::setsid()` 分离 session，并在 PID 文件记录进程 PID 与 `ps -o lstart` 启动时间。`status`/`stop` 核验进程启动时间；身份不符拒绝操作。记录进程仍运行而 17889 未监听时报告不健康、关闭 8443、保留进程。正常 `stop` 只结束记录进程及其当前子进程并清理 8443。
 - 文档更新：`docs/personal/web-remote.md`、`docs/personal/backlog.md`。
 - 验证：`bash -n` 通过；只读 `dev-kill.ts` 报告未发现疑似进程；相关启动链 grep 无按名进程终止命令。真实 start 日志显示 Web Remote `17889` 启动且 IPC 分级覆盖率 100%；启动命令返回后开发启动 PID 的 PPID 为 1，17889 与 Vite 5173 均监听，`status` 报告运行正常。执行 `stop` 后 17889/5173 释放、PID 文件删除，Tailscale 仅保留原有安装版 443 → 17888；正式版 PID 与启动时间前后相同。以正式版 PID 配合伪造启动时间执行 `stop`，退出码 1，明确报告不匹配，PID 文件保留且正式版进程未受影响。dev 会话索引仍为 831。
+
+## 2026-10-07: 增加后台服务诊断与安全自检
+
+- 新增 `personal-health-check.ts`：启动 2 分钟后每 5 分钟检测 Web Remote listener、调度器 tick 与逾期 Automation；Web Remote 故障 30 分钟限频自愈，调度器 stale 时只重置 tick 定时器，Automation 只告警、不补跑且不改 `nextRunAt`。
+- `automation-scheduler.ts` 记录启动 INFO、tick 状态并以 10 分钟节流写入最近 tick、启用任务数和最近 `nextRunAt` 心跳。`web-remote-service.ts` 记录启停端口/原因；`index.ts` 记录 renderer/child process gone 与退出阶段耗时；`web-remote-server.ts` 提供 listener 状态。
+- 新增单测覆盖 Web Remote listener 缺失、调度器 stale、逾期任务只读、30 分钟 repair 限频和 10 分钟心跳节流。
+- 文档更新：`docs/personal/web-remote.md` 新增日志查阅说明及样例，`docs/personal/backlog.md` 更新状态。
+- 验证：`personal-health-check.test.ts` 5 pass / 0 fail；关联 personal main-log 测试 7 pass / 0 fail；Electron `typecheck` 与 `build:main` 通过。心跳和自愈限频采用纯函数单测，避免触发真实 Web Remote 重启或调度任务。

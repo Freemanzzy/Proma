@@ -110,6 +110,21 @@ Android 等触屏设备切换会话时，程序触发的输入框 autofocus 不�
 - `bash scripts/personal/mobile-preview.sh test [suites...]`：默认运行既有 iPhone/Android 回归套件并追加 `iphone:heavy-session` 大会话套件；真实会话历史、空闲同步与实时同步 suite 默认使用下行 **3 Mbps**、上行 **1 Mbps**、延迟 **50 ms**。可在调用前设置 `PROMA_WEB_REMOTE_DOWNLOAD_MBPS`、`PROMA_WEB_REMOTE_UPLOAD_MBPS`、`PROMA_WEB_REMOTE_LATENCY_MS` 覆盖，或直接运行 harness 并传 `--download-mbps`、`--upload-mbps`、`--latency-ms`。0.5 Mbps 仍可显式用于压力测试（例如 `PROMA_WEB_REMOTE_DOWNLOAD_MBPS=0.5`），不是当前默认；显式 `iphone:cellular` 也遵循选定 profile。静态资源在开启节流前已加载，因此不代表更新后资源冷启动。每套单独去掉代理变量并受 420 秒外层 watchdog 保护，终端只汇总结果，完整 harness 输出分别保存在 `/tmp/proma-mobile-preview-<ua>-<suite>.log`；结束核查无残留 `proma-mobile-chrome`。
 - `bash scripts/personal/mobile-preview.sh status` 查看服务、模拟器与 harness 进程；`stop` 只按记录 PID 停止开发实例进程树，关闭 8443 并确认 Serve 路由状态。用户需要继续体验时，最后运行 `start` 与 `sim`，保持服务运行，不要执行 `stop`。
 
+### 主进程后台服务诊断
+
+个人版主进程在 `main.log` 中以 `[INFO] scope=服务诊断` 记录 Web Remote 启停端口与原因、调度器启动和每 10 分钟一次心跳、Renderer/child process 退出原因与退出码，以及 `before-quit`/`will-quit` 阶段耗时。心跳字段包含最近 tick 时间、启用任务数和最近的 `nextRunAt`，不会记录任务提示词或会话内容。
+
+主进程启动 2 分钟后开始每 5 分钟自检：Web Remote 配置启用但监听器未启动时记录 `[WARN]` 并尝试自愈，同一故障每 30 分钟最多尝试一次；最近 tick 超过 2 分钟时记录 `[WARN]` 并重置 tick 定时器；启用任务 `nextRunAt` 逾期超过 10 分钟时记录任务 ID 与逾期分钟数。自检不补跑自动化任务，也不改写 `nextRunAt`。
+
+诊断示例（时间与数值为示意）：
+
+```text
+2026-10-07T09:00:00.000Z [INFO] main-process info name=Info scope=服务诊断 message=event=scheduler-heartbeat lastTickAt=2026-10-07T09:00:00.000Z enabledTasks=17 nextRunAt=2026-10-07T09:10:00.000Z
+2026-10-07T09:05:00.000Z [WARN] main-process warning name=Warning scope=服务诊断 message=[服务诊断] event=automation-overdue id=auto-example overdueMinutes=11 action=observe-only
+```
+
+排查时在 `~/Library/Logs/@proma/electron/main.log` 搜索 `scope=服务诊断` 或 `event=automation-overdue`、`event=scheduler-tick-stale`；同一行的 `event` 标识具体阶段。
+
 ### 首屏资源拆分评估（2026-09-28）
 
 使用 `build:renderer` 生成的当前产物按 chunk 大小排序（gzip 为构建日志数据）：
