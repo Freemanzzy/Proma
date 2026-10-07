@@ -28,6 +28,7 @@
 | 2026-10-07 | 桌面新建 Agent 会话后，左侧栏同一工作区出现重复“新 Agent 会话”条目；发首条消息后其一自动命名，旧条目仍在 | Mac 桌面 | 2026-10-08 dev full-ui 复现：API 会话索引每个测试 ID 仅一条，但同一 `data-session-switch-id` 在侧栏 DOM 中可出现 5 次；新建第二会话并自动命名后，旧未命名条目仍显示。所有 LeftSidebar Agent 列表 memo 均过滤 `isDraft`/`draftSessionIds`，归档分组也过滤 `isDraft`；测试时 `settings.tabState` 只引用原会话，非来源。定位为侧栏可见项目会话投影未保证 root ID 唯一，加上创建 IPC 响应直接 prepend 可能与主进程 metadata upsert 重复。修复：投影输出按会话 ID 去重；所有 Agent 会话创建响应使用 `upsertAgentSession`。新增事件先于 IPC 响应的竞态单测与可见行 ID 去重单测；定向测试 12 pass，typecheck 和 renderer build 通过。dev full-ui 回归：修复后新建会话 ID 在侧栏 DOM 中恰好 1 行；截图存于当次会话工作台。测试会话已通过应用 API 删除，索引回到 831。
 | 2026-10-08 | **子 Agent 跨渠道委派**：clipproxyapi 链路不稳时，子 Agent 改走其他已启用渠道 | Mac | 已实现：`delegate_agent(s)` 增加可选 `channelId`（省略时保留父渠道行为）；`list_available_agent_models` 返回分组渠道列表并排除 `provider=proma`；显式目标渠道/模型校验，省略模型时取目标渠道首个启用模型；子会话记录及 continue/恢复使用子会话的渠道。单测 6 pass，Electron typecheck 通过。真实 dev 已触发跨渠道委派及同一子会话 continue，确认子会话 channelId/modelId 为指定 Codex/gpt-5.5；两轮回复均因 ChatGPT 登录凭据无法刷新而失败，故内容级真实验收待凭据恢复后重跑。
 | 2026-10-08 | harness `iphone:interactions` 的 AskUser 确认定位不稳定；计划审批与权限确认覆盖需确认 | 测试 | 已在 `AskUserBanner.tsx` 给确认按钮添加 `data-web-remote-ask-confirm="true"`，harness 优先使用该标记，回退到横幅最后一个可见按钮；计划审批仍按可见按钮名称“批准并完全自动执行”定位（按钮含同名可见文本），权限请求确认不在当前 interactions suite 中。两次 dev `iphone:interactions` 均在选择 A 后报未找到确认按钮（标记与末尾按钮均未命中），未进入计划审批步骤；需先查明选择后 AskUser DOM/按钮状态再继续，不能标为通过。两次 harness 均完成设备/Chrome/profile 清理，索引复核 831。
+| 2026-10-08 | harness `iphone:interactions` 点选 A 后 AskUser 横幅立即消失（0/300/1000 ms 均无 `.ask-user-banner`），Agent 回合结束且无回复文本；用户真机提问交互验证通过 | 测试 | 证据：子会话 31b1a46f 工作台 `B1-after-A-*.png`。待查：触摸选项是否触发了提交/关闭，或 AskUser 工具本身返回；需保留测试会话 JSONL 再分析。计划审批、权限请求确认仍无自动化覆盖 |
 
 ## 后续待办（按建议优先级）
 
@@ -47,6 +48,7 @@
 - **真实负载测试触发条件**（父会话在派单前判断，并在交接/安装申请写明做了或没做及原因）：改动涉及手机列表数据内容（字段、投影、瘦身）、历史加载（分页、加载更早、按需媒体）、传输层（WebSocket、压缩、分块、超时、重连同步）、首次加载前端资源明显变大、同步官方版本且上游改了会话存储或 Web Remote、用户反馈手机变慢。其余改动用功能回归 + 打包冒烟即可。
 - **个人自建 Skill 预装**：`~/.proma/default-skills/` 是新建工作区复制 Skill 的模板。Proma 启动时只同步安装包内置的 slug（缺失才复制、版本更高才覆盖），并只删除 `RETIRED_DEFAULT_SKILL_SLUGS` 列出的 slug，因此放入其中的个人 Skill（目前 `cliproxy-image` 1.0.1）不会被更新覆盖。副作用：Skills 页面会把它归入“内置”分组。修改个人 Skill 时需同步 `default-skills` 与各工作区副本。若以后上游内置同名 slug，会被上游版本覆盖，届时改名。
 - **dev 数据**：`~/.proma-dev` 含按 `scripts/personal/import-session-workspace.py` 选择性导入的真实会话（单工作区 allowlist），以及用户 2026-10-01 授权复制的正式渠道 `channels.json`（权限 600，原文件改名保留）。只在本机，不提交仓库；密钥不解密、不打印。dev 中让 Agent 运行只用新建会话，不在导入的旧会话中运行（其附加目录可能指向真实仓库）；dev 对话消耗真实 API 额度。8443 只在测试期间开启。
+- **dev 中禁用 OAuth 渠道**（2026-10-08）：dev 的 `channels.json` 是正式渠道副本，ChatGPT 订阅 (Codex) 等 OAuth 渠道的 access token 过期后，dev 会用正式版已轮换的旧 refresh token 刷新并失败，还可能触发服务端重放检测、影响正式版登录。dev 验收只用 API Key 渠道（clipproxyapi、智谱、DeepSeek）；需要验证 OAuth 渠道时在正式版做。
 
 
 - 用户 2026-10-07 决定：不把 Proma 加入登录项，继续由用户手动启动。
