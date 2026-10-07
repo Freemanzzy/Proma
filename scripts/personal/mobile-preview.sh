@@ -30,6 +30,8 @@ descendants() {
 }
 
 serve_status() { "$TAILSCALE" serve status 2>&1 || true; }
+process_start_time() { ps -o lstart= -p "$1" 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/[[:space:]][[:space:]]*/ /g'; }
+close_dev_serve() { "$TAILSCALE" serve --https=8443 off >/dev/null 2>&1 || true; }
 
 start_preview() {
   require lsof
@@ -43,9 +45,12 @@ start_preview() {
 
   "$TAILSCALE" serve --bg --https=8443 http://127.0.0.1:17889
   cd "$ROOT"
-  ( PROMA_WEB_REMOTE=1 PROMA_WEB_REMOTE_HEAVY_SESSION_BASELINE="${PROMA_WEB_REMOTE_HEAVY_SESSION_BASELINE:-}" bash scripts/personal/dev.sh ) >"$LOG_FILE" 2>&1 &
-  local dev_pid=$! start_time=$SECONDS
-  printf 'DEV_PID=%q\nLOG_FILE=%q\nSTARTED_AT=%q\n' "$dev_pid" "$LOG_FILE" "$(date -u +%FT%TZ)" > "$PID_FILE"
+  ( cd "$ROOT" && perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' env PROMA_WEB_REMOTE=1 PROMA_WEB_REMOTE_HEAVY_SESSION_BASELINE="${PROMA_WEB_REMOTE_HEAVY_SESSION_BASELINE:-}" bash scripts/personal/dev.sh ) >"$LOG_FILE" 2>&1 < /dev/null &
+  local dev_pid=$! start_time=$SECONDS pid_started_at
+  sleep 1
+  pid_started_at="$(process_start_time "$dev_pid")"
+  [[ -n "$pid_started_at" ]] || fail "无法读取开发进程启动时间（PID=$dev_pid）"
+  printf 'DEV_PID=%q\nLOG_FILE=%q\nPID_STARTED_AT=%q\n' "$dev_pid" "$LOG_FILE" "$pid_started_at" > "$PID_FILE"
   chmod 600 "$PID_FILE"
 
   while (( SECONDS - start_time < 180 )); do
@@ -246,13 +251,23 @@ NODE
 }
 
 stop_preview() {
-  local DEV_PID="" LOG_FILE="" STARTED_AT="" pid child
+  local DEV_PID="" LOG_FILE="" PID_STARTED_AT="" pid current_start
   [[ -f "$PID_FILE" ]] || fail "找不到 PID 记录 $PID_FILE；为避免误杀，不猜测进程"
   read_pids
-  [[ "${DEV_PID:-}" =~ ^[0-9]+$ ]] || fail "PID 记录无效"
-  # Gather only descendants of the recorded dev launcher and stop that process tree.
+  [[ "${DEV_PID:-}" =~ ^[0-9]+$ && -n "${PID_STARTED_AT:-}" ]] || fail "PID 记录无效或缺少进程启动时间"
+  current_start="$(process_start_time "$DEV_PID")"
+  if [[ -n "$current_start" && "$current_start" != "$PID_STARTED_AT" ]]; then
+    fail "PID $DEV_PID 启动时间不匹配；拒绝结束进程或修改 Serve 路由"
+  fi
+  if [[ -n "$current_start" ]] && [[ -z "$(port_pid 17889)" ]]; then
+    echo "不健康：开发进程仍运行，但 17889 未监听；不结束进程，仅关闭 8443。"
+    close_dev_serve
+    serve_status
+    return 0
+  fi
+  # PID identity matches the recorded launcher; only its current descendants are in scope.
   local tree=()
-  if kill -0 "$DEV_PID" 2>/dev/null; then
+  if [[ -n "$current_start" ]]; then
     while IFS= read -r pid; do [[ -n "$pid" ]] && tree+=("$pid"); done < <(descendants "$DEV_PID")
     tree+=("$DEV_PID")
     for pid in "${tree[@]}"; do kill -TERM "$pid" 2>/dev/null || true; done
@@ -269,9 +284,24 @@ stop_preview() {
 }
 
 show_status() {
+  local process_state="未记录" current_start="" expected_start=""
   echo "PID 文件：$([[ -f "$PID_FILE" ]] && echo 存在 || echo 不存在)"
-  if [[ -f "$PID_FILE" ]]; then read_pids; echo "开发启动 PID：${DEV_PID:-未知}"; kill -0 "${DEV_PID:-0}" 2>/dev/null && echo "进程：运行" || echo "进程：未运行"; fi
+  if [[ -f "$PID_FILE" ]]; then
+    local DEV_PID="" LOG_FILE="" PID_STARTED_AT=""
+    read_pids
+    expected_start="$PID_STARTED_AT"
+    echo "开发启动 PID：${DEV_PID:-未知}"
+    current_start="$(process_start_time "${DEV_PID:-0}")"
+    if [[ -n "$current_start" && "$current_start" != "$expected_start" ]]; then process_state="身份不匹配（拒绝操作）"
+    elif [[ -n "$current_start" ]]; then process_state="运行"
+    else process_state="未运行"; fi
+  fi
+  echo "进程：$process_state"
   for port in 17889 5173; do local p; p="$(port_pid "$port")"; echo "端口 ${port}：${p:-未监听}"; done
+  if [[ "$process_state" == "运行" && -z "$(port_pid 17889)" ]]; then
+    echo "不健康：记录进程仍运行但 17889 未监听；不结束进程，仅关闭 8443。"
+    close_dev_serve
+  fi
   echo "Tailscale Serve："; serve_status
   echo "已启动 iOS 模拟器："; xcrun simctl list devices | grep -E '\(Booted\)' || true
   local chrome; chrome="$(ps -axo pid=,command= | awk '/proma-mobile-chrome-/ && /--user-data-dir=/ && !/awk/ {print $1}')"

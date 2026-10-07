@@ -355,6 +355,7 @@ export function DiffPanelTabBar({
                   type="button"
                   role="tab"
                   data-web-remote-simulator-tab={tab.id === 'simulator' ? 'true' : undefined}
+                  data-web-remote-delegation-tab={tab.id === 'delegation' ? 'true' : undefined}
                   aria-selected={selected}
                   aria-description={visiblePane ? `显示在${visiblePane === 'left' ? '左侧' : '右侧'} Pane` : undefined}
                   onClick={() => selectTab(tab.id)}

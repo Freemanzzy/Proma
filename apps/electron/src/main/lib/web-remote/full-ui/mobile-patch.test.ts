@@ -152,6 +152,89 @@ describe('renderWebRemoteMobilePatch DOM write convergence', () => {
     expect(document.querySelectorAll('[data-web-remote-history-media]')).toHaveLength(2)
   })
 
+  test('大图占位可点按加载，显示加载状态后替换为缓存原图', async () => {
+    const { window, document, observers } = createMobilePatchHarness()
+    const image = document.createElement('img')
+    image.setAttribute('src', 'data:image/svg+xml;charset=utf-8,%3Csvg%3E%3C%2Fsvg%3E#proma-web-remote-large-image=781')
+    document.body.appendChild(image)
+    let reads = 0
+    ;(window as any).__PROMA_WEB_REMOTE_LOAD_LARGE_IMAGE = async (id: string) => {
+      expect(id).toBe('781')
+      reads += 1
+      return 'data:image/png;base64,aW1hZ2U='
+    }
+    observers[0]!.trigger()
+    const button = document.querySelector<HTMLButtonElement>('[data-web-remote-large-image-button="781"]')!
+    expect(button.textContent).toBe('图片较大（>8 MB），点按加载原图')
+    expect(image.hidden).toBe(true)
+    const loading = button.dispatchEvent(new window.Event('click', { bubbles: true }))
+    expect(button.textContent).toBe('正在加载…')
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(image.getAttribute('src')).toBe('data:image/png;base64,aW1hZ2U=')
+    expect(image.hidden).toBe(false)
+    expect(document.querySelector('[data-web-remote-large-image-button="781"]')).toBeNull()
+    expect(reads).toBe(1)
+    void loading
+  })
+
+  test('大图读取失败时显示无法读取并允许重试', async () => {
+    const { window, document, observers } = createMobilePatchHarness()
+    const image = document.createElement('img')
+    image.setAttribute('src', 'data:image/svg+xml;charset=utf-8,%3Csvg%3E%3C%2Fsvg%3E#proma-web-remote-large-image=782')
+    document.body.appendChild(image)
+    ;(window as any).__PROMA_WEB_REMOTE_LOAD_LARGE_IMAGE = async () => { throw new Error('offline') }
+    observers[0]!.trigger()
+    const button = document.querySelector<HTMLButtonElement>('[data-web-remote-large-image-button="782"]')!
+    button.dispatchEvent(new window.Event('click', { bubbles: true }))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(button.textContent).toBe('图片无法读取，点按重试')
+    expect(button.disabled).toBe(false)
+    expect(image.hidden).toBe(true)
+  })
+
+  test('点击侧栏子任务后打开右侧抽屉并可关闭', () => {
+    const { window, document, observers } = createMobilePatchHarness()
+    const sidebar = document.querySelector<HTMLElement>('[data-web-remote-sidebar="left"]')!
+    const child = document.createElement('div')
+    child.dataset.webRemoteDelegationChild = 'true'
+    child.dataset.sessionSwitchId = 'child-session'
+    child.dataset.sessionSwitchType = 'agent'
+    child.setAttribute('role', 'button')
+    child.textContent = '子任务内容入口'
+    sidebar.appendChild(child)
+    const tabList = document.querySelector('[data-web-remote-panel="right"] [role="tablist"]')!
+    tabList.querySelectorAll('[role="tab"]').forEach((tab) => tab.setAttribute('aria-selected', 'false'))
+    const tasks = document.createElement('button')
+    tasks.setAttribute('role', 'tab')
+    tasks.dataset.webRemoteDelegationTab = 'true'
+    tasks.setAttribute('aria-selected', 'false')
+    tasks.textContent = 'Proma 个人版 Fork：阶段一+二（Luna 执行）'
+    const files = document.createElement('button')
+    files.setAttribute('role', 'tab')
+    files.setAttribute('aria-selected', 'true')
+    files.textContent = '文件'
+    tabList.append(tasks, files)
+    const panelContent = document.createElement('div')
+    panelContent.dataset.webRemoteDelegationContent = 'true'
+    panelContent.textContent = '协作子任务输出'
+    document.querySelector('[data-web-remote-panel="right"]')!.appendChild(panelContent)
+
+    child.dispatchEvent(new window.Event('click', { bubbles: true }))
+    expect(document.body.dataset.webRemoteRightOpen).toBeUndefined()
+    expect(document.body.dataset.webRemotePendingDelegationOpen).toBe('true')
+    tasks.setAttribute('aria-selected', 'true')
+    files.setAttribute('aria-selected', 'false')
+    expect(document.querySelector('[data-web-remote-panel="right"] [role="tab"][data-web-remote-delegation-tab="true"][aria-selected="true"]')?.textContent).toBe('Proma 个人版 Fork：阶段一+二（Luna 执行）')
+    observers[0]!.trigger()
+    expect(document.body.dataset.webRemoteRightOpen).toBe('true')
+    expect(panelContent.textContent).toContain('协作子任务输出')
+    const toggle = document.querySelector<HTMLButtonElement>('[data-web-remote-panel-toggle]')!
+    toggle.dispatchEvent(new window.Event('click', { bubbles: true }))
+    expect(document.body.dataset.webRemoteRightOpen).toBeUndefined()
+  })
+
   test('侧栏内只有活跃会话/模式状态变化才关闭抽屉', () => {
     const { window, document, flushTimeouts, pendingTimeoutCount } = createMobilePatchHarness()
     const sidebar = document.querySelector<HTMLElement>('[data-web-remote-sidebar="left"]')!

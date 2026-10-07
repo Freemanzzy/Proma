@@ -4417,6 +4417,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
           data-session-switch-id={session.id}
           data-session-switch-title={session.title}
           data-session-switch-type="agent"
+          data-web-remote-delegation-child={session.sourceDelegationId && session.parentSessionId ? 'true' : undefined}
           draggable={!editing}
           onDragStart={(event) => {
             const target = event.target as HTMLElement

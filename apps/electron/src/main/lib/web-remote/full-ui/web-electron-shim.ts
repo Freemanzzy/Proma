@@ -340,7 +340,11 @@ async function invokeWithToken(channel: string, args: unknown[], confirmToken?: 
 }
 
 const WEB_REMOTE_INLINE_IMAGE_MAX_BYTES = 8 * 1024 * 1024
+const WEB_REMOTE_LARGE_IMAGE_MAX_BYTES = 50 * 1024 * 1024
 const webRemoteImageReadCache = new Map<string, Promise<string | null>>()
+const webRemoteLargeImageReadCache = new Map<string, Promise<string | null>>()
+const webRemoteLargeImagePaths = new Map<string, { path: string; access: unknown }>()
+let nextLargeImageId = 0
 const WEB_REMOTE_IMAGE_MIME_TYPES: Readonly<Record<string, string>> = Object.freeze({
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
 })
@@ -366,8 +370,35 @@ export async function resolveWebRemoteImageResult<T extends { url: string; resol
     webRemoteImageReadCache.set(result.resolvedPath, read)
   }
   const base64 = await read
-  if (base64 === null) return null
-  return { ...result, url: `data:${mime};base64,${base64}` }
+  if (base64 !== null) return { ...result, url: `data:${mime};base64,${base64}` }
+  const id = String(++nextLargeImageId)
+  webRemoteLargeImagePaths.set(id, { path: result.resolvedPath, access })
+  const placeholder = `<svg xmlns="http://www.w3.org/2000/svg" width="360" height="92" viewBox="0 0 360 92"><rect width="360" height="92" rx="12" fill="#f3f4f6"/><path d="M25 60l22-25 17 18 11-12 21 19H25z" fill="#9ca3af"/><circle cx="48" cy="30" r="7" fill="#9ca3af"/><text x="112" y="42" font-family="sans-serif" font-size="15" fill="#374151">图片较大，点按加载原图</text><text x="112" y="64" font-family="sans-serif" font-size="13" fill="#6b7280">&gt;8 MB</text></svg>`
+  return { ...result, url: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(placeholder)}#proma-web-remote-large-image=${id}` }
+}
+
+export async function loadWebRemoteLargeImage(
+  id: string,
+  readBinary: (path: string, access: unknown, maxSize: number) => Promise<unknown>,
+): Promise<string> {
+  const target = webRemoteLargeImagePaths.get(id)
+  if (!target) throw new Error('图片引用已失效，请刷新后重试')
+  let read = webRemoteLargeImageReadCache.get(target.path)
+  if (!read) {
+    read = readBinary(target.path, target.access, WEB_REMOTE_LARGE_IMAGE_MAX_BYTES)
+      .then((value) => typeof value === 'string' ? value : null)
+      .catch((error) => {
+        webRemoteLargeImageReadCache.delete(target.path)
+        throw error
+      })
+    webRemoteLargeImageReadCache.set(target.path, read)
+  }
+  const base64 = await read
+  if (base64 === null) {
+    webRemoteLargeImageReadCache.delete(target.path)
+    throw new Error('图片无法读取（原图超过 50 MB 或文件已不可用）')
+  }
+  return `data:${WEB_REMOTE_IMAGE_MIME_TYPES[/\.([a-z0-9]+)$/i.exec(target.path)?.[1]?.toLowerCase() ?? ''] ?? 'application/octet-stream'};base64,${base64}`
 }
 
 let webRemotePushSubscriptionCache: Promise<boolean> | null = null
@@ -405,13 +436,16 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary)
 }
 
+export function configureBrowserFileInput(input: HTMLInputElement): void {
+  input.type = 'file'
+  input.multiple = true
+  input.accept = 'image/*,video/*,audio/*,.pdf,.txt,.md,.json,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip'
+}
+
 function openBrowserFileDialog(): Promise<unknown> {
   return new Promise((resolve) => {
     const input = document.createElement('input')
-    input.type = 'file'
-    input.multiple = true
-    input.accept = 'image/*,video/*,audio/*,.pdf,.txt,.md,.json,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip'
-    input.setAttribute('capture', 'environment')
+    configureBrowserFileInput(input)
     input.style.position = 'fixed'
     input.style.left = '-10000px'
     document.body.appendChild(input)
@@ -500,6 +534,7 @@ async function invokeStrict(channel: string, ...args: unknown[]): Promise<unknow
 if (typeof window !== 'undefined') {
   Object.defineProperty(window, '__PROMA_WEB_REMOTE_INVOKE', { configurable: false, enumerable: false, value: invokeStrict })
   Object.defineProperty(window, '__PROMA_WEB_REMOTE_LOAD_EARLIER', { configurable: false, enumerable: false, value: loadEarlierHistory })
+  Object.defineProperty(window, '__PROMA_WEB_REMOTE_LOAD_LARGE_IMAGE', { configurable: false, enumerable: false, value: (id: string) => loadWebRemoteLargeImage(id, (path, access, maxSize) => invokeWithToken('file:read-binary-base64', [path, access, maxSize])) })
   Object.defineProperty(window, '__PROMA_WEB_REMOTE_HAS_PUSH_SUBSCRIPTION', { configurable: false, enumerable: false, value: hasWebRemotePushSubscription })
   Object.defineProperty(window, '__PROMA_WEB_REMOTE_RESET_PUSH_SUBSCRIPTION_CACHE', { configurable: false, enumerable: false, value: () => { webRemotePushSubscriptionCache = null } })
 }

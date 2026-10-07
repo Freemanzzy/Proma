@@ -1357,3 +1357,60 @@
 - **思考深度缺陷关闭**：用户确认正式版 iPhone 与安卓的 Codex、Claude 会话均出现滑块且档位保存；计量显示两台手机均调用 `agent:get-pi-reasoning-capability` 与 `agent:update-session-reasoning-level`，无拒绝。
 - 权限复核（Claude Code）：`agent:get-pi-reasoning-capability` 改为 `read/none` 可接受——handler 只用渠道 `provider` 解析档位元数据，不返回密钥、base URL 或工作区数据；远程最多能探测某 channelId 是否存在。
 - 详见本机交接 `install-result-2026-10-03.md`。
+
+## 2026-10-07: 关闭已解决反馈并记录启动偏好
+
+- 将思考强度、本地图片显示、断线后运行状态及安卓重复通知四项反馈标记为已解决，保留原记录；双连接观察项标记确认，4.2 MB 首屏构成继续观察。
+- 记录用户决定：不把 Proma 加入登录项，由用户手动启动。
+- 验证：核对已安装版本与 backlog 中的既有验证证据；dev 会话索引为 831 条。此步骤仅更新 backlog 与 changelog。
+
+## 2026-10-07: 移除 Web Remote 附件选择器的相机强制属性
+
+- `web-electron-shim.ts` 的文件输入不再设置 `capture="environment"`，保留 `multiple` 与原有 `accept`，让 iOS 可使用系统文件/相册选择器。
+- 新增 `configureBrowserFileInput` 行为单测，断言输入属性完整且不含 `capture`。
+- 验证：`bun test apps/electron/src/main/lib/web-remote/full-ui/web-electron-shim.test.ts`。
+
+## 2026-10-07: 手机大图按需加载原图
+
+- Web Remote shim 对超过 8 MiB 的授权本地图片返回可识别占位图，并在页面注册路径与访问上下文；mobile-patch 将其转换为可点按按钮，显示加载中、成功后替换原图，失败时显示无法读取并允许重试。
+- 点按读取上限 50 MiB，成功结果按路径缓存在当前页面；超过限制或文件不可用时明确提示。历史图片既有按需通道未改。
+- 单测覆盖 8 MiB 内图片直显（既有测试）、超限占位不直接读取原图、点按仅读取一次并显示原图、失败状态、失败可重试，以及 mobile-patch DOM 行为。
+- 文档更新：`docs/personal/web-remote.md`、`docs/personal/backlog.md`。
+- 验证：Web Remote shim 与 mobile-patch 定向测试通过；真实 iPhone 模拟器点按/截图在本批 dev 验收阶段完成。
+
+## 2026-10-07: 加固开发实例启停身份核验
+
+- 将 `apps/electron/scripts/dev-kill.ts` 改为只读疑似 Electron dev 进程 PID 报告，保留 `dev:kill` 手动入口；不向任何进程发信号。
+- `mobile-preview.sh start` 用 Perl `POSIX::setsid()` 分离 session，并在 PID 文件记录进程 PID 与 `ps -o lstart` 启动时间。`status`/`stop` 核验进程启动时间；身份不符拒绝操作。记录进程仍运行而 17889 未监听时报告不健康、关闭 8443、保留进程。正常 `stop` 只结束记录进程及其当前子进程并清理 8443。
+- 文档更新：`docs/personal/web-remote.md`、`docs/personal/backlog.md`。
+- 验证：`bash -n` 通过；只读 `dev-kill.ts` 报告未发现疑似进程；相关启动链 grep 无按名进程终止命令。真实 start 日志显示 Web Remote `17889` 启动且 IPC 分级覆盖率 100%；启动命令返回后开发启动 PID 的 PPID 为 1，17889 与 Vite 5173 均监听，`status` 报告运行正常。执行 `stop` 后 17889/5173 释放、PID 文件删除，Tailscale 仅保留原有安装版 443 → 17888；正式版 PID 与启动时间前后相同。以正式版 PID 配合伪造启动时间执行 `stop`，退出码 1，明确报告不匹配，PID 文件保留且正式版进程未受影响。dev 会话索引仍为 831。
+
+## 2026-10-07: 增加后台服务诊断与安全自检
+
+- 新增 `personal-health-check.ts`：启动 2 分钟后每 5 分钟检测 Web Remote listener、调度器 tick 与逾期 Automation；Web Remote 故障 30 分钟限频自愈，调度器 stale 时只重置 tick 定时器，Automation 只告警、不补跑且不改 `nextRunAt`。
+- `automation-scheduler.ts` 记录启动 INFO、tick 状态并以 10 分钟节流写入最近 tick、启用任务数和最近 `nextRunAt` 心跳。`web-remote-service.ts` 记录启停端口/原因；`index.ts` 记录 renderer/child process gone 与退出阶段耗时；`web-remote-server.ts` 提供 listener 状态。
+- 新增单测覆盖 Web Remote listener 缺失、调度器 stale、逾期任务只读、30 分钟 repair 限频和 10 分钟心跳节流。
+- 文档更新：`docs/personal/web-remote.md` 新增日志查阅说明及样例，`docs/personal/backlog.md` 更新状态。
+- 验证：`personal-health-check.test.ts` 5 pass / 0 fail；关联 personal main-log 测试 7 pass / 0 fail；Electron `typecheck` 与 `build:main` 通过。心跳和自愈限频采用纯函数单测，避免触发真实 Web Remote 重启或调度任务。
+
+## 2026-10-07: 手机侧栏子任务自动打开右侧抽屉
+
+- LeftSidebar 的 Agent 会话入口仅增加 `data-web-remote-delegation-child` 标记；mobile-patch 在标记会话被点击后等待“子任务”Tab 成为选中项，再打开 Web Remote 右侧抽屉。标签选中状态由属性变化触发重新检查；待选中的动作有超时清理，普通会话点击与手动抽屉关闭行为不变。
+- mobile-patch 测试夹具现在先清除右侧 Tab 列表原有的选中状态，再创建子任务 Tab，避免原“文件”Tab 在 DOM 顺序上先于新建 Tab 导致选中元素误判。单测覆盖抽屉自动打开、内容可见及点击关闭。
+- 定向验证：`mobile-patch.test.ts` **12 pass / 0 fail**。真实 iPhone 17 Pro Simulator Safari 点击验收初次未通过：移动端 Tab 菜单只显示“文件”（选中）与“改动”（未选中），未出现 delegation Tab。AXe 可访问到侧栏协作行，但未能读取 WebView 原始 DOM 属性；之后父会话确认点击对象及实际 delegation 路径，并指出 Tab label 是协作子任务标题而非“子任务”。
+- 后续修正：`DiffPanelTabBar.tsx` 仅为 `delegation` Tab 加 `data-web-remote-delegation-tab="true"`；mobile-patch 改为通过该稳定标记识别选中 Tab，不再比对本地化文本。测试夹具改用真实协作子任务标题，并验证 role 标记与选中属性。`mobile-patch.test.ts` **12 pass / 0 fail**。
+- 真实 Safari 未运行 Agent；headless Chrome CDP 只读取 DOM、触摸点击现有未归档协作子任务、读取抽屉状态及截图，将在本次跟进中验证。
+
+## 2026-10-08: iPhone interactions 回归结果
+
+- 运行 `bash scripts/personal/mobile-preview.sh test iphone:interactions`。Harness 因找不到可访问名称或可见文本“确认”而失败，异常位置为 `mobile-harness.mjs` 的 `findElement` / `runInteractions` 调用；按要求仅记录、不修。
+- Harness 报告测试设备已撤销、Chrome 已退出、临时 profile 已移除；开发会话索引复核为 831 条。
+- 日志：`/tmp/proma-mobile-preview-iphone-interactions.log`；结果 JSON：`/var/folders/54/29nmhjj52xq7hlyk_zqkk7pm0000gq/T/proma-mobile-harness/mobile-harness-1791390704973.json`。
+
+## 2026-10-08: 限频重复的逾期 Automation 告警
+
+- `personal-health-check.ts` 现按 Automation ID 在内存 Map 中记录最近告警时间；同一 ID 60 分钟内只写一条 `[WARN]`，其他 ID 独立限频，冷却期后可再次记录。只抑制重复日志，不改变健康判断、`nextRunAt` 或任务执行。
+- `personal-health-check.test.ts` 新增单测验证同 ID 五分钟内抑制、不同 ID 不互相影响、60 分钟后再次允许告警。
+- 定向测试：**6 pass / 0 fail**。
+- 批次收尾复核（2026-10-08）：全量 `bun test` **698 pass / 0 fail，1,800 expect，105 files**；Electron `typecheck`、`build:main`、`build:renderer`、`build:web-preload` 均通过。dev 与 8443 保持开启，开发会话索引为 831；正式版进程未触碰。
+- Git 历史说明：步骤 5 的 `6c352543` 是将原 `940bc8ce` amend 后的最终提交；截至本记录，`fix/batch-20261007` 未推送。

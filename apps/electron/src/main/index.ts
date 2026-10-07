@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, screen, shell } from 'electron'
 import { initializePersonalMainLog, recordPersonalMainFatal } from './lib/personal-main-log'
+import { recordPersonalInfo } from './lib/personal-log-writer'
 import { join } from 'path'
 
 // Personal packaged builds keep a bounded, secret-free main-process health log under app.getPath('logs').
@@ -108,6 +109,7 @@ import {
   stopBridgeSelfHealing,
 } from './lib/bridge-registry'
 import { startScheduler, stopScheduler } from './lib/automation-scheduler'
+import { startPersonalHealthCheck, stopPersonalHealthCheck } from './lib/personal-health-check'
 import { startPlanningReminderScheduler, stopPlanningReminderScheduler } from './lib/planning-reminder-scheduler'
 import { startPlanningNativeSyncCoordinator, stopPlanningNativeSyncCoordinator } from './lib/planning-native-sync-coordinator'
 import { feishuBridgeManager } from './lib/feishu-bridge-manager'
@@ -533,6 +535,7 @@ function createWindow(): void {
     if (!hasShownRendererFailure) rendererRecoveryAttempts = []
   })
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    recordPersonalInfo('服务诊断', `event=render-process-gone reason=${details.reason} exitCode=${details.exitCode}`)
     // clean-exit 和应用退出不属于 Renderer 故障；避免退出过程中重新加载主窗口。
     if (getIsQuitting() || details.reason === 'clean-exit') return
 
@@ -874,6 +877,7 @@ async function bootstrap(): Promise<void> {
 
   // 启动定时任务调度器（恢复持久化的 active 任务）
   safeRun('startScheduler', startScheduler)
+  safeRun('startPersonalHealthCheck', startPersonalHealthCheck)
   safeRun('startPlanningReminderScheduler', startPlanningReminderScheduler)
   safeRun('startPlanningNativeSyncCoordinator', startPlanningNativeSyncCoordinator)
 
@@ -952,12 +956,21 @@ app.on('window-all-closed', () => {
   }
 })
 
+app.on('child-process-gone', (_event, details) => {
+  recordPersonalInfo('服务诊断', `event=child-process-gone type=${details.type} reason=${details.reason} exitCode=${details.exitCode}`)
+})
+
 let simulatorCleanupFinished = false
 app.on('before-quit', (event) => {
+  const startedAt = Date.now()
+  recordPersonalInfo('服务诊断', 'event=before-quit stage=start')
   if (!simulatorCleanupFinished) {
     event.preventDefault()
     simulatorCleanupFinished = true
-    void cleanupSimulatorPreview().finally(() => app.quit())
+    void cleanupSimulatorPreview().finally(() => {
+      recordPersonalInfo('服务诊断', `event=before-quit stage=simulator-cleanup-complete durationMs=${Date.now() - startedAt}`)
+      app.quit()
+    })
     return
   }
   // 标记正在退出，让 close 事件不再阻止关闭
@@ -978,6 +991,7 @@ app.on('before-quit', (event) => {
   stopAllBridges()
   // 停止定时任务调度器
   stopScheduler()
+  stopPersonalHealthCheck()
   stopPlanningReminderScheduler()
   stopPlanningNativeSyncCoordinator()
   // 释放飞书同步防休眠
@@ -997,4 +1011,11 @@ app.on('before-quit', (event) => {
   void stopWebRemote()
   // Clean up system tray before quitting
   destroyTray()
+  recordPersonalInfo('服务诊断', `event=before-quit stage=cleanup-complete durationMs=${Date.now() - startedAt}`)
+})
+
+app.on('will-quit', () => {
+  const startedAt = Date.now()
+  recordPersonalInfo('服务诊断', 'event=will-quit stage=start')
+  recordPersonalInfo('服务诊断', `event=will-quit stage=complete durationMs=${Date.now() - startedAt}`)
 })

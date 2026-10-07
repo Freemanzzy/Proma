@@ -1,7 +1,47 @@
 import { describe, expect, test } from 'bun:test'
-import { reassembleTextChunks, resolveWebRemoteImageResult, verifySentAgentMessage } from './web-electron-shim'
+import { configureBrowserFileInput, loadWebRemoteLargeImage, reassembleTextChunks, resolveWebRemoteImageResult, verifySentAgentMessage } from './web-electron-shim'
+
+describe('Web Remote attachment picker', () => {
+  test('keeps multiple and accept while omitting capture', () => {
+    const attributes = new Map<string, string>()
+    const input = {
+      setAttribute: (name: string, value: string) => attributes.set(name, value),
+    } as unknown as HTMLInputElement
+    configureBrowserFileInput(input)
+    expect(input.type).toBe('file')
+    expect(input.multiple).toBe(true)
+    expect(input.accept).toBe('image/*,video/*,audio/*,.pdf,.txt,.md,.json,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip')
+    expect(attributes.has('capture')).toBe(false)
+  })
+})
 
 describe('Web Remote local image resolution', () => {
+  test('returns a large-image placeholder then reads and caches the original with a 50 MiB limit', async () => {
+    let initialReads = 0
+    let originalReads = 0
+    const access = { sessionId: 'large-authorized-session' }
+    const result = { url: 'proma-file://large', resolvedPath: '/authorized/large-original.png' }
+    const placeholder = await resolveWebRemoteImageResult(result, access, async (_path, _access, maxSize) => {
+      initialReads += 1
+      expect(maxSize).toBe(8 * 1024 * 1024)
+      return null
+    })
+    expect(initialReads).toBe(1)
+    expect(placeholder?.url).toContain('#proma-web-remote-large-image=')
+    expect(decodeURIComponent(placeholder!.url.split(',')[1]!.split('#')[0]!)).toContain('图片较大，点按加载原图')
+    const id = /proma-web-remote-large-image=(\d+)$/.exec(placeholder!.url)![1]!
+    const readOriginal = async (path: string, passedAccess: unknown, maxSize: number) => {
+      originalReads += 1
+      expect(path).toBe(result.resolvedPath)
+      expect(passedAccess).toBe(access)
+      expect(maxSize).toBe(50 * 1024 * 1024)
+      return 'aW1hZ2U='
+    }
+    expect(await loadWebRemoteLargeImage(id, readOriginal)).toBe('data:image/png;base64,aW1hZ2U=')
+    expect(await loadWebRemoteLargeImage(id, readOriginal)).toBe('data:image/png;base64,aW1hZ2U=')
+    expect(originalReads).toBe(1)
+  })
+
   test('returns a data URL and reads each image path once', async () => {
     let reads = 0
     const access = { sessionId: 'authorized-session' }
@@ -31,7 +71,7 @@ describe('Web Remote local image resolution', () => {
     expect(await resolveWebRemoteImageResult(tooLarge, undefined, async (_path, _access, maxSize) => {
       expect(maxSize).toBe(8 * 1024 * 1024)
       return null
-    })).toBeNull()
+    })).toMatchObject({ resolvedPath: '/authorized/large.webp' })
   })
 })
 

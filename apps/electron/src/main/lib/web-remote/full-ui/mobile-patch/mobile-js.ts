@@ -59,6 +59,13 @@ export const MOBILE_JS = String.raw`(function(){
       if(!rightPanelTimer)rightPanelTimer=window.setTimeout(function(){rightPanelTimer=0;if(body.dataset.webRemoteRightOpen!=='true'){delete panel.dataset.webRemotePanelRendered;if(panel.style.display!=='none')panel.style.display='none';if(panel.style.visibility!=='hidden')panel.style.visibility='hidden'}},210);
     }
   }
+  function syncPendingDelegationDrawer(){
+    if(body.dataset.webRemotePendingDelegationOpen!=='true')return;
+    var selectedTab=document.querySelector('[data-web-remote-panel="right"] [role="tab"][data-web-remote-delegation-tab="true"][aria-selected="true"]');
+    if(!selectedTab)return;
+    delete body.dataset.webRemotePendingDelegationOpen;
+    setIfChanged(body,'webRemoteRightOpen','true',function(){});
+  }
   function syncKeyboardViewport(){
     if(!viewport)return;
     var focused=document.activeElement;
@@ -75,6 +82,7 @@ export const MOBILE_JS = String.raw`(function(){
   if(viewport){viewport.addEventListener('resize',syncKeyboardViewport);viewport.addEventListener('scroll',syncKeyboardViewport)}
   function ensure(){
     syncKeyboardViewport();
+    syncPendingDelegationDrawer();
     if (!document.querySelector('[data-web-remote-mobile-menu]')) {
       var menu=document.createElement('button'); menu.type='button'; menu.innerHTML=ICONS.menu; menu.setAttribute('aria-label','打开侧栏'); menu.dataset.webRemoteMobileMenu='true';
       menu.addEventListener('click',function(){if(body.dataset.webRemoteSidebarOpen==='true')delete body.dataset.webRemoteSidebarOpen;else body.dataset.webRemoteSidebarOpen='true'}); document.body.appendChild(menu);
@@ -107,6 +115,28 @@ export const MOBILE_JS = String.raw`(function(){
       setIfChanged(saver,'dataSaverState',weak?'on':'off',function(){saver.textContent=weak?'省流量 开':'省流量 关';saver.setAttribute('aria-pressed',String(weak));saver.setAttribute('aria-label','切换省流量模式，当前'+(weak?'开启':'关闭'))});
     }
     syncDataSaver();
+    function syncLargeInlineImages(){
+      document.querySelectorAll('img[src*="#proma-web-remote-large-image="]').forEach(function(image){
+        if(image.tagName!=='IMG')return;
+        var marker=(image.getAttribute('src')||'').match(/#proma-web-remote-large-image=([0-9]+)$/);
+        if(!marker||image.dataset.webRemoteLargeImage===marker[1])return;
+        setIfChanged(image,'webRemoteLargeImage',marker[1],function(){
+          image.hidden=true;
+          var button=document.createElement('button');button.type='button';button.dataset.webRemoteLargeImageButton=marker[1];button.textContent='图片较大（>8 MB），点按加载原图';button.setAttribute('aria-label','图片较大（>8 MB），点按加载原图');
+          button.style.cssText='display:inline-block;padding:10px 14px;border:1px solid rgba(127,127,127,.35);border-radius:10px;background:var(--background,#fff);color:var(--foreground,#222);font-size:14px;line-height:1.4;max-width:100%;white-space:normal;text-align:left';
+          button.addEventListener('click',async function(){
+            if(button.disabled)return;
+            button.disabled=true;button.textContent='正在加载…';
+            try{
+              var load=window.__PROMA_WEB_REMOTE_LOAD_LARGE_IMAGE;if(typeof load!=='function')throw new Error('连接尚未就绪，请重试');
+              var src=await load(marker[1]);if(typeof src!=='string'||!src.startsWith('data:image/'))throw new Error('图片数据无效');
+              image.src=src;image.hidden=false;image.dataset.webRemoteLargeImageState='loaded';button.remove();
+            }catch(error){image.dataset.webRemoteLargeImageState='failed';button.disabled=false;button.textContent='图片无法读取，点按重试';button.setAttribute('aria-label',button.textContent+'（'+String(error?.message||error)+'）')}
+          });
+          image.parentNode?.insertBefore(button,image.nextSibling);
+        });
+      });
+    }
     function syncHistoryMedia(){
       var walker=document.createTreeWalker(document.body,4);
       var nodes=[];var current;
@@ -216,6 +246,7 @@ export const MOBILE_JS = String.raw`(function(){
     }
     syncEarlierHistory();
     syncHistoryMedia();
+    syncLargeInlineImages();
     syncRightPanel();
     var topbar=document.querySelector('[data-web-remote-mobile-topbar]');
     if (topbar && !topbar.querySelector('[data-web-remote-notification-entry]')) {
@@ -336,6 +367,12 @@ export const MOBILE_JS = String.raw`(function(){
         if(sessionChanged||modeChanged)delete body.dataset.webRemoteSidebarOpen;
       },120);
     }
+    var delegationChild=target.closest('[data-web-remote-delegation-child="true"]');
+    if(delegationChild){
+      body.dataset.webRemotePendingDelegationOpen='true';
+      window.setTimeout(function(){delete body.dataset.webRemotePendingDelegationOpen},3000);
+      window.setTimeout(syncPendingDelegationDrawer,250);
+    }
     var rightPanelTrigger=target.closest('button[aria-label="Todo"],button[aria-label="定时任务"],button[aria-label="MCP/Skills"],button[aria-label="项目记忆"],button[aria-label="日程"]');
     if (rightPanelTrigger) { window.setTimeout(function(){body.dataset.webRemoteRightOpen='true'}, 0); }
     if (target.closest('button[aria-label="打开设置"]')) { window.setTimeout(function(){delete body.dataset.webRemoteRightOpen}, 0); }
@@ -362,7 +399,7 @@ export const MOBILE_JS = String.raw`(function(){
     }
     forwardMobileControl(target);
   }, true);
-  try { ensure(); new MutationObserver(ensure).observe(document.documentElement,{childList:true,subtree:true}); new MutationObserver(syncRightPanel).observe(body,{attributes:true,attributeFilter:['data-web-remote-right-open']}); new MutationObserver(syncMenuButton).observe(body,{attributes:true,attributeFilter:['data-web-remote-sidebar-open']}); syncMenuButton(); } catch(error) { window.__PROMA_WEB_REMOTE_PATCH_ERROR=String(error); console.error('[Web Remote mobile patch] 初始化失败',error); }
+  try { ensure(); new MutationObserver(ensure).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['aria-selected']}); new MutationObserver(syncRightPanel).observe(body,{attributes:true,attributeFilter:['data-web-remote-right-open']}); new MutationObserver(syncMenuButton).observe(body,{attributes:true,attributeFilter:['data-web-remote-sidebar-open']}); syncMenuButton(); } catch(error) { window.__PROMA_WEB_REMOTE_PATCH_ERROR=String(error); console.error('[Web Remote mobile patch] 初始化失败',error); }
   var hiddenAt=0; var lifecycleReady=false; var recovering=false;
   window.setTimeout(function(){lifecycleReady=true},3000);
   function recover(){

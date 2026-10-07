@@ -24,7 +24,7 @@
 PROMA_WEB_REMOTE=1 bash scripts/personal/dev.sh
 ```
 
-**当前分支临时启动措施（2026-09-30）**：在 `apps/electron/package.json` 的 `dev` 与 `dev:electron` 中移除了两处 `dev-kill` 调用；`scripts/dev-kill.ts`、`scripts/personal/dev.sh` 的进程实例预检和独立进程安全工作树均未修改。静态检查确认 `mobile-preview.sh start → dev.sh → bun run dev` 不再调用 `dev-kill`、`pkill`、`killall` 或 `taskkill`。用户已确认本批可依此临时措施启动；完整 PID/进程归属方案推迟到下个版本。测试期间不得退出或结束正式版。
+开发启动器通过 Perl `POSIX::setsid()` 创建独立 session，再启动 `dev.sh`；PID 文件记录启动 PID 与 `ps -o lstart` 时间。`status`/`stop` 会对照启动时间，身份不匹配时拒绝处理；进程仍在但 17889 未监听时报告“不健康”、只关闭开发用 8443 Serve，不结束进程。健康的 `stop` 只结束 PID 文件对应进程及其当前子进程，再关闭 8443。`apps/electron/scripts/dev-kill.ts` 仅报告疑似 Electron dev 进程 PID，从不发送信号。开发预览测试不得退出或结束正式版。
 
 暴露给 tailnet（安装版，只需一次，可随时撤销）：
 
@@ -75,7 +75,7 @@ Android 等触屏设备切换会话时，程序触发的输入框 autofocus 不�
 
 顶部的“省流量模式”开关可手动启用/关闭并记入 localStorage。未手动选择时，浏览器报告 `slow-2g`/`2g` 或 downlink < 1 Mbps 会自动开启。开启后历史尾部预算为 256 KiB，内联图片预算为 0（全部点按加载）；关闭时首屏/常规历史预算为 1 MiB、内联图片预算为 1 MiB。此预算由 Web Remote shim 仅附加到手机的历史 IPC 参数，不改变桌面行为；显式“加载更早”仍按 2 MiB/页。
 
-对话 Markdown 中经 `file:resolve-path` 解析的本地 PNG/JPG/JPEG/GIF/WebP/BMP 图片，Web Remote 使用同一路径授权的 `file:read-binary-base64` 返回 data URL，单张读取上限 8 MiB，并按路径在当前页面缓存；超限返回空结果。SVG、PDF 等其他文件仍使用原有解析结果。桌面行为不变。
+对话 Markdown 中经 `file:resolve-path` 解析的本地 PNG/JPG/JPEG/GIF/WebP/BMP 图片，Web Remote 使用同一路径授权的 `file:read-binary-base64` 返回 data URL，单张直接读取上限 8 MiB，并按路径在当前页面缓存。更大的图片显示“图片较大（>8 MB），点按加载原图”；用户点按后以 50 MiB 上限读取、按路径缓存并替换为原图，读取中显示“正在加载…”，失败显示“图片无法读取，点按重试”。SVG、PDF 等其他文件仍使用原有解析结果。桌面行为不变。
 
 
 媒体标记仅由 Web Remote 的历史裁剪层生成，包含会话 ID、SDK 消息 UUID（缺少 UUID 时使用消息索引）及整条消息 SHA-256、块路径与内容校验摘要。按需读取通过 `web-remote:get-history-media` 只读 IPC，并按会话所属工作区授权；定位不唯一、摘要变化、越权或目标不存在均拒绝。桌面 renderer 的 SDK 历史返回不经该移动端裁剪，不包含 Web Remote 标记。
@@ -105,10 +105,25 @@ Android 等触屏设备切换会话时，程序触发的输入框 autofocus 不�
 
 手机预览与回归统一使用仓库脚本 `scripts/personal/mobile-preview.sh`（仅对开发实例运行，不对安装版运行）：
 
-- `bash scripts/personal/mobile-preview.sh start`：检查 17889/5173 空闲、开启临时 8443 Tailscale Serve、后台启动开发实例并等待启动与分级覆盖率 100% 日志；PID/日志分别记于 `/tmp/proma-mobile-preview.pids` 与 `/tmp/proma-mobile-preview.log`。当前测试分支已按用户批准的临时措施去掉启动链中的按名清理调用；完整进程归属方案推迟到下个版本。测试期间不得退出或结束正式版。
+- `bash scripts/personal/mobile-preview.sh start`：检查 17889/5173 空闲、开启临时 8443 Tailscale Serve、以独立 session 启动开发实例并等待启动与分级覆盖率 100% 日志；PID 文件记录 `DEV_PID`、`PID_STARTED_AT`、日志路径，日志位于 `/tmp/proma-mobile-preview.log`。
 - `bash scripts/personal/mobile-preview.sh sim [--device <name|udid>]`：默认启动 iPhone 17 Pro 模拟器、打开 Simulator、生成配对码并通过 AXe 的辅助功能树定位配对控件，配对后打开 `/app/` 并以 `simctl` 截图确认界面。
 - `bash scripts/personal/mobile-preview.sh test [suites...]`：默认运行既有 iPhone/Android 回归套件并追加 `iphone:heavy-session` 大会话套件；真实会话历史、空闲同步与实时同步 suite 默认使用下行 **3 Mbps**、上行 **1 Mbps**、延迟 **50 ms**。可在调用前设置 `PROMA_WEB_REMOTE_DOWNLOAD_MBPS`、`PROMA_WEB_REMOTE_UPLOAD_MBPS`、`PROMA_WEB_REMOTE_LATENCY_MS` 覆盖，或直接运行 harness 并传 `--download-mbps`、`--upload-mbps`、`--latency-ms`。0.5 Mbps 仍可显式用于压力测试（例如 `PROMA_WEB_REMOTE_DOWNLOAD_MBPS=0.5`），不是当前默认；显式 `iphone:cellular` 也遵循选定 profile。静态资源在开启节流前已加载，因此不代表更新后资源冷启动。每套单独去掉代理变量并受 420 秒外层 watchdog 保护，终端只汇总结果，完整 harness 输出分别保存在 `/tmp/proma-mobile-preview-<ua>-<suite>.log`；结束核查无残留 `proma-mobile-chrome`。
 - `bash scripts/personal/mobile-preview.sh status` 查看服务、模拟器与 harness 进程；`stop` 只按记录 PID 停止开发实例进程树，关闭 8443 并确认 Serve 路由状态。用户需要继续体验时，最后运行 `start` 与 `sim`，保持服务运行，不要执行 `stop`。
+
+### 主进程后台服务诊断
+
+个人版主进程在 `main.log` 中以 `[INFO] scope=服务诊断` 记录 Web Remote 启停端口与原因、调度器启动和每 10 分钟一次心跳、Renderer/child process 退出原因与退出码，以及 `before-quit`/`will-quit` 阶段耗时。心跳字段包含最近 tick 时间、启用任务数和最近的 `nextRunAt`，不会记录任务提示词或会话内容。
+
+主进程启动 2 分钟后开始每 5 分钟自检：Web Remote 配置启用但监听器未启动时记录 `[WARN]` 并尝试自愈，同一故障每 30 分钟最多尝试一次；最近 tick 超过 2 分钟时记录 `[WARN]` 并重置 tick 定时器；启用任务 `nextRunAt` 逾期超过 10 分钟时记录任务 ID 与逾期分钟数。自检不补跑自动化任务，也不改写 `nextRunAt`。
+
+诊断示例（时间与数值为示意）：
+
+```text
+2026-10-07T09:00:00.000Z [INFO] main-process info name=Info scope=服务诊断 message=event=scheduler-heartbeat lastTickAt=2026-10-07T09:00:00.000Z enabledTasks=17 nextRunAt=2026-10-07T09:10:00.000Z
+2026-10-07T09:05:00.000Z [WARN] main-process warning name=Warning scope=服务诊断 message=[服务诊断] event=automation-overdue id=auto-example overdueMinutes=11 action=observe-only
+```
+
+排查时在 `~/Library/Logs/@proma/electron/main.log` 搜索 `scope=服务诊断` 或 `event=automation-overdue`、`event=scheduler-tick-stale`；同一行的 `event` 标识具体阶段。
 
 ### 首屏资源拆分评估（2026-09-28）
 
