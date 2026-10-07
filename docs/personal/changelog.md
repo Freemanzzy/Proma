@@ -1436,3 +1436,10 @@
 - 单测新增：metadata 事件先到、创建 IPC 响应后到仍保持一行；项目可见树同根 ID 去重。定向 `agent-session-list.test.ts` **12 pass / 0 fail，41 expect**；Electron typecheck 通过；`build:renderer` 通过。
 - 修复后 dev full-ui 回归：renderer build 后重新加载并创建一条新会话，左侧侧栏中其 ID 仅出现 **1 行**。复现前、故障态与修复后截图分别为 `A2-before.png`、`A2-after-send.png`、`A2-after-fix.png`（保存在当次会话工作台）。本轮 dev 新建的 5 条会话均经应用 `deleteAgentSession` API 删除，索引回到 **831**；临时测试配对设备已撤销，配对码已清除。正式版进程未触碰。
 - 验收边界：复现与修复后 UI 核对使用 Web Remote full-ui，而非 Proma Personal 原生桌面窗口；该 UI 共用同一 LeftSidebar/renderer 实现。原生桌面窗口的复核仍待用户现场体验。
+
+## 2026-10-08: interactions AskUser 确认按钮定位（未完成）
+
+- `AskUserBanner.tsx` 的最后确认按钮新增 `data-web-remote-ask-confirm="true"`；`mobile-harness.mjs` 优先以该标记取按钮中心坐标，并回退到 AskUser 横幅内最后一个可见按钮。`resolveVisiblePlanApproval` 已按可见按钮名称“批准并完全自动执行”定位；当前 interactions suite 不包含 PermissionBanner 的权限请求确认步骤，仅切换权限模式，因此本批未声称通过权限请求确认。
+- 定向检查：`node --check scripts/personal/mobile-harness.mjs` 通过；Electron `build:renderer` 通过。
+- 按要求执行 `bash scripts/personal/mobile-preview.sh test iphone:interactions` 两次。两次均在选择 A 后、点击确认前失败：stable marker 与横幅最后可见按钮都未命中。首次结果 JSON `mobile-harness-1791403733692.json`，第二次 `mobile-harness-1791404499173.json`；第二次截图 `ask-question-card.png` 显示提问卡片及确认按钮，但当时页面 DOM 定位结果为空。没有进入计划审批步骤，因此不标记为通过，也未继续修改同一测试第三次。
+- 两次运行均报告测试设备已撤销、Chrome/profile 已清理；第二次准确 HTTP 429 状态响应 **0**、新增页面异常 **0**。会话索引经核对回到 **831**，dev 与 8443 保持开启，正式版进程未触碰。
