@@ -1400,3 +1400,9 @@
 - 定向验证：`mobile-patch.test.ts` **12 pass / 0 fail**。真实 iPhone 17 Pro Simulator Safari 点击验收初次未通过：移动端 Tab 菜单只显示“文件”（选中）与“改动”（未选中），未出现 delegation Tab。AXe 可访问到侧栏协作行，但未能读取 WebView 原始 DOM 属性；之后父会话确认点击对象及实际 delegation 路径，并指出 Tab label 是协作子任务标题而非“子任务”。
 - 后续修正：`DiffPanelTabBar.tsx` 仅为 `delegation` Tab 加 `data-web-remote-delegation-tab="true"`；mobile-patch 改为通过该稳定标记识别选中 Tab，不再比对本地化文本。测试夹具改用真实协作子任务标题，并验证 role 标记与选中属性。`mobile-patch.test.ts` **12 pass / 0 fail**。
 - 真实 Safari 未运行 Agent；headless Chrome CDP 只读取 DOM、触摸点击现有未归档协作子任务、读取抽屉状态及截图，将在本次跟进中验证。
+
+## 2026-10-08: iPhone interactions 回归结果
+
+- 运行 `bash scripts/personal/mobile-preview.sh test iphone:interactions`。Harness 因找不到可访问名称或可见文本“确认”而失败，异常位置为 `mobile-harness.mjs` 的 `findElement` / `runInteractions` 调用；按要求仅记录、不修。
+- Harness 报告测试设备已撤销、Chrome 已退出、临时 profile 已移除；开发会话索引复核为 831 条。
+- 日志：`/tmp/proma-mobile-preview-iphone-interactions.log`；结果 JSON：`/var/folders/54/29nmhjj52xq7hlyk_zqkk7pm0000gq/T/proma-mobile-harness/mobile-harness-1791390704973.json`。
