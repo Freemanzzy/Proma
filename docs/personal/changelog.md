@@ -1377,3 +1377,10 @@
 - 单测覆盖 8 MiB 内图片直显（既有测试）、超限占位不直接读取原图、点按仅读取一次并显示原图、失败状态、失败可重试，以及 mobile-patch DOM 行为。
 - 文档更新：`docs/personal/web-remote.md`、`docs/personal/backlog.md`。
 - 验证：Web Remote shim 与 mobile-patch 定向测试通过；真实 iPhone 模拟器点按/截图在本批 dev 验收阶段完成。
+
+## 2026-10-07: 加固开发实例启停身份核验
+
+- 将 `apps/electron/scripts/dev-kill.ts` 改为只读疑似 Electron dev 进程 PID 报告，保留 `dev:kill` 手动入口；不向任何进程发信号。
+- `mobile-preview.sh start` 用 Perl `POSIX::setsid()` 分离 session，并在 PID 文件记录进程 PID 与 `ps -o lstart` 启动时间。`status`/`stop` 核验进程启动时间；身份不符拒绝操作。记录进程仍运行而 17889 未监听时报告不健康、关闭 8443、保留进程。正常 `stop` 只结束记录进程及其当前子进程并清理 8443。
+- 文档更新：`docs/personal/web-remote.md`、`docs/personal/backlog.md`。
+- 验证：`bash -n` 通过；只读 `dev-kill.ts` 报告未发现疑似进程；相关启动链 grep 无按名进程终止命令。真实 start 日志显示 Web Remote `17889` 启动且 IPC 分级覆盖率 100%；启动命令返回后开发启动 PID 的 PPID 为 1，17889 与 Vite 5173 均监听，`status` 报告运行正常。执行 `stop` 后 17889/5173 释放、PID 文件删除，Tailscale 仅保留原有安装版 443 → 17888；正式版 PID 与启动时间前后相同。以正式版 PID 配合伪造启动时间执行 `stop`，退出码 1，明确报告不匹配，PID 文件保留且正式版进程未受影响。dev 会话索引仍为 831。
