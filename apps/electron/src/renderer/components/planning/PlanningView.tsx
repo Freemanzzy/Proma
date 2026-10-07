@@ -18,6 +18,7 @@ import { planningCalendarCreateRequestAtom, planningSelectedTodoIdAtom, planning
 import { useOpenSession } from '@/hooks/useOpenSession'
 import { useShortcut } from '@/hooks/useShortcut'
 import { buildTodoAgentPrompt } from '@/lib/todo-agent-prompt'
+import { upsertAgentSession } from '@/lib/agent-session-list'
 import { getVisibleTodoNotesSaveState, type TodoNotesSaveState } from '@/lib/todo-notes-save-state'
 import { upsertTodo } from '@/lib/todo-state'
 import { selectVisibleTodos, type TodoListView } from '@/lib/todo-view'
@@ -636,7 +637,7 @@ function TodoWorkspace(): React.ReactElement {
         modelId: agentModelId ?? undefined,
       })
       setTodos((items) => upsertTodo(items, updatedTodo))
-      setAgentSessions((items) => [session, ...items])
+      setAgentSessions((items) => upsertAgentSession(items, session))
       setCurrentWorkspaceId(workspaceId)
       void window.electronAPI.updateSettings({ agentWorkspaceId: workspaceId }).catch(console.error)
       openSession('agent', session.id, session.title)

@@ -19,6 +19,7 @@ import { activeViewAtom } from '@/atoms/active-view'
 import { promptConfigAtom, selectedPromptIdAtom } from '@/atoms/system-prompt-atoms'
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
 import { useOpenSession } from './useOpenSession'
+import { upsertAgentSession } from '@/lib/agent-session-list'
 
 interface CreateSessionOptions {
   /** 标记为草稿会话（不在侧边栏显示，发送首条消息后自动取消） */
@@ -87,7 +88,7 @@ export function useCreateSession(): CreateSessionActions {
         options?.modelId ?? agentModelId ?? undefined,
         options?.draft,
       )
-      setAgentSessions((prev) => [meta, ...prev])
+      setAgentSessions((prev) => upsertAgentSession(prev, meta))
       if (options?.open !== false) openSession('agent', meta.id, meta.title)
       if (options?.open !== false) setActiveView('conversations')
       if (options?.draft) {

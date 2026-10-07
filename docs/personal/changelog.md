@@ -1428,3 +1428,11 @@
 - 新增 `agent-delegation-channel-selection.ts` 及单测：默认父渠道、指定 Codex 渠道/模型、只传渠道默认模型、模型不匹配拒绝、禁用与 Proma 官方渠道拒绝、分组及 current 标记，共 **6 pass / 0 fail**。Electron typecheck 通过。
 - dev 真实验收：通过 clipproxyapi 父测试会话调用 `list_available_agent_models`、`delegate_agent` 指定 Codex channelId 与 `gpt-5.5`，创建子会话 `d12f6153-d8ad-4f06-8e59-f7994c059399`，随后在同一子会话调用 `continue_delegation`。索引验证子会话 `channelId`/`modelId` 正确，delegationId 为 `fb8dddbd-ac8f-4fed-9fde-cdf66da0c601`。两次模型回复均因 ChatGPT 登录凭据无法刷新而失败，故真实内容回复验收未通过，未尝试切换渠道或重登。
 - 清理：经 Web Remote 应用 `deleteAgentSession` API 删除本轮新建父/子会话并复核开发会话索引回到 **831**；撤销临时测试配对设备。正式版进程未触碰，开发实例与 8443 保持运行。
+
+## 2026-10-08: Agent 侧栏重复会话条目
+
+- A2 只读取证在 dev 的 Web Remote full-ui（共享 renderer，桌面宽视口）按“新建会话 → 切走 → 再新建 → 发送首条消息”复现。主进程 `listAgentSessions()` 中每个测试 ID 只有一条记录；对应侧栏 DOM 却为同一 `data-session-switch-id` 渲染多行，最多观测到 5 行。第二会话首条消息成功返回 `ok` 并自动命名为“A2回归测试”，未命名条目仍可见。正式版旧草稿的 `isDraft=true` 记录与本次复现不同：当前 LeftSidebar 活跃/置顶/自动任务/项目/归档列表均排除 `isDraft`，归档分组 helper 也排除；dev `settings.tabState` 当时只含原 Muse 会话，未引用测试会话。
+- 修复：`getVisibleAgentProjectSessions` 的可见行结果经 `dedupeAgentSessionTrees` 按根 session ID 去重，避免同一 ID 生成重复侧栏行。`useCreateSession`、`useProjectActions`、LeftSidebar 项目/会话创建、AgentView“新会话继续”、PlanningView 等创建响应改用 `upsertAgentSession`，使主进程先送达 metadata upsert、IPC Promise 后返回的竞态也不会重复插入。
+- 单测新增：metadata 事件先到、创建 IPC 响应后到仍保持一行；项目可见树同根 ID 去重。定向 `agent-session-list.test.ts` **12 pass / 0 fail，41 expect**；Electron typecheck 通过；`build:renderer` 通过。
+- 修复后 dev full-ui 回归：renderer build 后重新加载并创建一条新会话，左侧侧栏中其 ID 仅出现 **1 行**。复现前、故障态与修复后截图分别为 `A2-before.png`、`A2-after-send.png`、`A2-after-fix.png`（保存在当次会话工作台）。本轮 dev 新建的 5 条会话均经应用 `deleteAgentSession` API 删除，索引回到 **831**；临时测试配对设备已撤销，配对码已清除。正式版进程未触碰。
+- 验收边界：复现与修复后 UI 核对使用 Web Remote full-ui，而非 Proma Personal 原生桌面窗口；该 UI 共用同一 LeftSidebar/renderer 实现。原生桌面窗口的复核仍待用户现场体验。

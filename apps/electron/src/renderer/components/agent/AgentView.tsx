@@ -123,6 +123,7 @@ import { channelsAtom, modelSelectorOpenAtom } from '@/atoms/chat-atoms'
 import { todoPlanningGroupsAtom } from '@/atoms/planning-atoms'
 import { useOpenSession } from '@/hooks/useOpenSession'
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
+import { upsertAgentSession } from '@/lib/agent-session-list'
 import { sendWithCmdEnterAtom } from '@/atoms/shortcut-atoms'
 import { useOpenPreview } from '@/components/diff/preview-opener'
 import type { AgentDeferredQueueMessageInput, AgentSendInput, AgentPendingFile, AgentThinkingLevel, FileDialogLargeFile, FileDialogResult, ModelOption, ReasoningCapability, SDKMessage, SDKUserMessage } from '@proma/shared'
@@ -2561,7 +2562,7 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
       const meta = await window.electronAPI.createAgentSession(
         undefined, agentChannelId, currentWorkspaceId || undefined, agentModelId || undefined,
       )
-      setAgentSessions((prev) => [meta, ...prev])
+      setAgentSessions((prev) => upsertAgentSession(prev, meta))
 
       // 切换到新会话 tab
       openSession('agent', meta.id, meta.title)

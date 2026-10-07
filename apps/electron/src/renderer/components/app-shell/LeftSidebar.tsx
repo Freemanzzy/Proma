@@ -137,12 +137,14 @@ import {
   mergeAgentSessionSnapshotWithChanges,
   collectAgentSessionTreeIds,
   countSettledDelegatedChildren,
+  dedupeAgentSessionTrees,
   getAgentSessionTreeIndicatorStatus,
   getDelegatedChildSessionStatus,
   getDelegationStatusIconClass,
   groupArchivedAgentSessionsByProject,
   isAgentSessionVisibleInTrees,
   isDelegationObservationVisible,
+  upsertAgentSession,
   removeDelegatedSessionSelection,
   replaceAgentSessionInFreshnessOrder,
   selectDelegatedSession,
@@ -1355,7 +1357,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       if (targetWorkspaceId) {
         setCollapsedWorkspaceIds((prev) => deleteSetEntry(prev, targetWorkspaceId))
       }
-      setAgentSessions((prev) => [meta, ...prev])
+      setAgentSessions((prev) => upsertAgentSession(prev, meta))
       // 从全局默认值初始化 per-session 渠道/模型配置
       if (agentChannelId) {
         setSessionChannelMap((prev) => {
@@ -1733,7 +1735,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
         agentModelId || undefined,
       )
       setWorkspaces((prev) => [workspace, ...prev])
-      setAgentSessions((prev) => [session, ...prev])
+      setAgentSessions((prev) => upsertAgentSession(prev, session))
       setCurrentWorkspaceId(workspace.id)
       openSession('agent', session.id, session.title)
       window.electronAPI.updateSettings({ agentWorkspaceId: workspace.id }).catch(console.error)
@@ -1770,7 +1772,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
         agentModelId || undefined,
       )
       setWorkspaces((prev) => [workspace, ...prev])
-      setAgentSessions((prev) => [session, ...prev])
+      setAgentSessions((prev) => upsertAgentSession(prev, session))
       setCurrentWorkspaceId(workspace.id)
       openSession('agent', session.id, session.title)
       window.electronAPI.updateSettings({ agentWorkspaceId: workspace.id }).catch(console.error)
@@ -4716,9 +4718,9 @@ function getVisibleAgentProjectSessions({
   const currentSession = activeSessionId && !isAgentSessionVisibleInTrees(sessionsWithoutPinned, activeSessionId)
     ? treeItems.find((item) => treeContainsSessionId(item, activeSessionId)) ?? null
     : null
-  const sessions = currentSession
+  const sessions = dedupeAgentSessionTrees(currentSession
     ? [...activeSessions, currentSession, ...fillSessions, ...extraSessions]
-    : sessionsWithoutPinned
+    : sessionsWithoutPinned)
 
   return {
     treeItems,
