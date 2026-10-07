@@ -405,13 +405,16 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary)
 }
 
+export function configureBrowserFileInput(input: HTMLInputElement): void {
+  input.type = 'file'
+  input.multiple = true
+  input.accept = 'image/*,video/*,audio/*,.pdf,.txt,.md,.json,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip'
+}
+
 function openBrowserFileDialog(): Promise<unknown> {
   return new Promise((resolve) => {
     const input = document.createElement('input')
-    input.type = 'file'
-    input.multiple = true
-    input.accept = 'image/*,video/*,audio/*,.pdf,.txt,.md,.json,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip'
-    input.setAttribute('capture', 'environment')
+    configureBrowserFileInput(input)
     input.style.position = 'fixed'
     input.style.left = '-10000px'
     document.body.appendChild(input)

@@ -1,5 +1,19 @@
 import { describe, expect, test } from 'bun:test'
-import { reassembleTextChunks, resolveWebRemoteImageResult, verifySentAgentMessage } from './web-electron-shim'
+import { configureBrowserFileInput, reassembleTextChunks, resolveWebRemoteImageResult, verifySentAgentMessage } from './web-electron-shim'
+
+describe('Web Remote attachment picker', () => {
+  test('keeps multiple and accept while omitting capture', () => {
+    const attributes = new Map<string, string>()
+    const input = {
+      setAttribute: (name: string, value: string) => attributes.set(name, value),
+    } as unknown as HTMLInputElement
+    configureBrowserFileInput(input)
+    expect(input.type).toBe('file')
+    expect(input.multiple).toBe(true)
+    expect(input.accept).toBe('image/*,video/*,audio/*,.pdf,.txt,.md,.json,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip')
+    expect(attributes.has('capture')).toBe(false)
+  })
+})
 
 describe('Web Remote local image resolution', () => {
   test('returns a data URL and reads each image path once', async () => {

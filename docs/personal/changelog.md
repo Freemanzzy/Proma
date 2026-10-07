@@ -1363,3 +1363,9 @@
 - 将思考强度、本地图片显示、断线后运行状态及安卓重复通知四项反馈标记为已解决，保留原记录；双连接观察项标记确认，4.2 MB 首屏构成继续观察。
 - 记录用户决定：不把 Proma 加入登录项，由用户手动启动。
 - 验证：核对已安装版本与 backlog 中的既有验证证据；dev 会话索引为 831 条。此步骤仅更新 backlog 与 changelog。
+
+## 2026-10-07: 移除 Web Remote 附件选择器的相机强制属性
+
+- `web-electron-shim.ts` 的文件输入不再设置 `capture="environment"`，保留 `multiple` 与原有 `accept`，让 iOS 可使用系统文件/相册选择器。
+- 新增 `configureBrowserFileInput` 行为单测，断言输入属性完整且不含 `capture`。
+- 验证：`bun test apps/electron/src/main/lib/web-remote/full-ui/web-electron-shim.test.ts`。
