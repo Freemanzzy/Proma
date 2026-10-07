@@ -2,6 +2,7 @@ const SCHEDULER_HEARTBEAT_INTERVAL_MS = 10 * 60_000
 const SCHEDULER_STALE_MS = 2 * 60_000
 const AUTOMATION_OVERDUE_MS = 10 * 60_000
 const WEB_REMOTE_REPAIR_COOLDOWN_MS = 30 * 60_000
+const AUTOMATION_OVERDUE_ALERT_COOLDOWN_MS = 60 * 60_000
 
 export interface PersonalHealthSnapshot {
   webRemoteEnabled: boolean
@@ -38,4 +39,15 @@ export function shouldAttemptWebRemoteRepair(lastAttemptAt: number, now: number)
 
 export function shouldWriteSchedulerHeartbeat(lastHeartbeatAt: number, now: number, intervalMs = SCHEDULER_HEARTBEAT_INTERVAL_MS): boolean {
   return now - lastHeartbeatAt >= intervalMs
+}
+
+export function shouldLogAutomationOverdue(
+  lastAlertAtById: Map<string, number>,
+  automationId: string,
+  now: number,
+): boolean {
+  const lastAlertAt = lastAlertAtById.get(automationId)
+  if (lastAlertAt !== undefined && now - lastAlertAt < AUTOMATION_OVERDUE_ALERT_COOLDOWN_MS) return false
+  lastAlertAtById.set(automationId, now)
+  return true
 }

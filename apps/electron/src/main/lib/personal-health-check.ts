@@ -2,7 +2,7 @@ import { listAutomations } from './automation-manager'
 import { getSchedulerLastTickAt, restartSchedulerTickTimer } from './automation-scheduler'
 import { recordPersonalInfo } from './personal-log-writer'
 import { getWebRemoteHealthState, startWebRemoteIfEnabled } from './web-remote/web-remote-service'
-import { evaluatePersonalHealth, shouldAttemptWebRemoteRepair, type PersonalHealthFinding } from './personal-health-check-core'
+import { evaluatePersonalHealth, shouldAttemptWebRemoteRepair, shouldLogAutomationOverdue, type PersonalHealthFinding } from './personal-health-check-core'
 
 const INITIAL_DELAY_MS = 2 * 60_000
 const CHECK_INTERVAL_MS = 5 * 60_000
@@ -12,6 +12,7 @@ export type { PersonalHealthFinding, PersonalHealthSnapshot } from './personal-h
 let startupTimer: NodeJS.Timeout | undefined
 let checkTimer: NodeJS.Timeout | undefined
 let lastWebRemoteRepairAt = Number.NEGATIVE_INFINITY
+const lastAutomationOverdueAlertAt = new Map<string, number>()
 
 export function runPersonalHealthCheck(now = Date.now()): PersonalHealthFinding[] {
   const remote = getWebRemoteHealthState()
@@ -34,7 +35,7 @@ export function runPersonalHealthCheck(now = Date.now()): PersonalHealthFinding[
     } else if (finding.type === 'scheduler-tick-stale') {
       console.warn(`[服务诊断] event=scheduler-tick-stale ageMs=${Number.isFinite(finding.ageMs) ? finding.ageMs : 'never'} action=restart-timer`)
       restartSchedulerTickTimer()
-    } else {
+    } else if (shouldLogAutomationOverdue(lastAutomationOverdueAlertAt, finding.id, now)) {
       console.warn(`[服务诊断] event=automation-overdue id=${finding.id} overdueMinutes=${finding.overdueMinutes} action=observe-only`)
     }
   }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { evaluatePersonalHealth, shouldAttemptWebRemoteRepair, shouldWriteSchedulerHeartbeat } from './personal-health-check-core'
+import { evaluatePersonalHealth, shouldAttemptWebRemoteRepair, shouldLogAutomationOverdue, shouldWriteSchedulerHeartbeat } from './personal-health-check-core'
 
 describe('personal background health checks', () => {
   const now = 1_800_000_000_000
@@ -34,6 +34,14 @@ describe('personal background health checks', () => {
   test('limits Web Remote repair to one attempt per thirty minutes', () => {
     expect(shouldAttemptWebRemoteRepair(now, now + 29 * 60_000)).toBe(false)
     expect(shouldAttemptWebRemoteRepair(now, now + 30 * 60_000)).toBe(true)
+  })
+
+  test('suppresses repeat overdue warnings for the same task until sixty minutes pass', () => {
+    const lastAlertAtById = new Map<string, number>()
+    expect(shouldLogAutomationOverdue(lastAlertAtById, 'auto-1', now)).toBe(true)
+    expect(shouldLogAutomationOverdue(lastAlertAtById, 'auto-1', now + 5 * 60_000)).toBe(false)
+    expect(shouldLogAutomationOverdue(lastAlertAtById, 'auto-2', now + 5 * 60_000)).toBe(true)
+    expect(shouldLogAutomationOverdue(lastAlertAtById, 'auto-1', now + 60 * 60_000)).toBe(true)
   })
 
   test('scheduler heartbeat is suppressed until ten minutes have elapsed', () => {

@@ -1406,3 +1406,11 @@
 - 运行 `bash scripts/personal/mobile-preview.sh test iphone:interactions`。Harness 因找不到可访问名称或可见文本“确认”而失败，异常位置为 `mobile-harness.mjs` 的 `findElement` / `runInteractions` 调用；按要求仅记录、不修。
 - Harness 报告测试设备已撤销、Chrome 已退出、临时 profile 已移除；开发会话索引复核为 831 条。
 - 日志：`/tmp/proma-mobile-preview-iphone-interactions.log`；结果 JSON：`/var/folders/54/29nmhjj52xq7hlyk_zqkk7pm0000gq/T/proma-mobile-harness/mobile-harness-1791390704973.json`。
+
+## 2026-10-08: 限频重复的逾期 Automation 告警
+
+- `personal-health-check.ts` 现按 Automation ID 在内存 Map 中记录最近告警时间；同一 ID 60 分钟内只写一条 `[WARN]`，其他 ID 独立限频，冷却期后可再次记录。只抑制重复日志，不改变健康判断、`nextRunAt` 或任务执行。
+- `personal-health-check.test.ts` 新增单测验证同 ID 五分钟内抑制、不同 ID 不互相影响、60 分钟后再次允许告警。
+- 定向测试：**6 pass / 0 fail**。
+- 批次收尾复核（2026-10-08）：全量 `bun test` **698 pass / 0 fail，1,800 expect，105 files**；Electron `typecheck`、`build:main`、`build:renderer`、`build:web-preload` 均通过。dev 与 8443 保持开启，开发会话索引为 831；正式版进程未触碰。
+- Git 历史说明：步骤 5 的 `6c352543` 是将原 `940bc8ce` amend 后的最终提交；截至本记录，`fix/batch-20261007` 未推送。
