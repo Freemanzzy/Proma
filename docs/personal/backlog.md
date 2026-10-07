@@ -16,11 +16,11 @@
 
 | 日期 | 反馈 | 设备 | 初步判断 / 方案 |
 |---|---|---|---|
-| 2026-10-01 | 手机端无法调整思考强度，只能开/关 | 手机 | 思考按钮在桌面靠鼠标悬停弹出强度滑块，点击只切换 off/high；手机无悬停，滑块不可达。2026-10-02 首次修复未阻止 Radix PopoverTrigger 后续 toggle，安装后手机面板仍关闭；2026-10-02 再修复为 Web Remote 触屏 click 先 `preventDefault()` 再显式打开，并忽略合成 mouseleave 关闭。全量测试通过，iOS Safari 模拟器实点确认“思考深度”面板保持打开；桌面和非触屏 click 仍走原逻辑。 |
+| 2026-10-01 | 手机端无法调整思考强度，只能开/关 | 手机 | 思考按钮在桌面靠鼠标悬停弹出强度滑块，点击只切换 off/high；手机无悬停，滑块不可达。2026-10-02 首次修复未阻止 Radix PopoverTrigger 后续 toggle，安装后手机面板仍关闭；2026-10-02 再修复为 Web Remote 触屏 click 先 `preventDefault()` 再显式打开，并忽略合成 mouseleave 关闭。全量测试通过，iOS Safari 模拟器实点确认“思考深度”面板保持打开；桌面和非触屏 click 仍走原逻辑。✅ 已解决（03901c8a / 2026-10-06） |
 | 2026-10-03 | 无档位模型的思考模式开关无法持久化（观察项） | 手机 | dev CDP 只读复现：临时 unsupported 模型下真实触摸使 Switch `aria-checked` 从 true 变 false，但 `settings:update` 被 Web Remote 拒绝，主进程 `agentThinking` 设置仍为 adaptive。当前 dev 实际启用的 Codex GPT-5.5 与 clipproxyapi Claude Opus 5.5 都返回 reasoning capability，未复现正式版所述的开关无效；无档位分支仅用本轮测试会话里的临时 unsupported model id 验证。暂不新增设置写通道，待使用实际无档位模型进一步确认。 |
-| 2026-10-02 | 安卓同时收到“桌面 App（PWA）”和“Chrome”两条相同通知，关闭 Chrome 页面后仍如此 | OPPO | 服务端 push-subscriptions.json 只有 1 个安卓订阅（09-28 创建），按设计每个事件只推送 1 次；第二条来源未证实（候选：页面内通知路径、安卓把同一推送同时归到 Chrome 与 WebAPK）。待用户提供通知栏截图与长按所属应用。部分处理于 2026-10-02：页面存在 Service Worker 推送订阅时不再创建 renderer 页面内 Notification（提示音不变），无订阅仍保留页面通知；推送发送新增 `[INFO] scope=Web Remote 推送`，仅记设备哈希、kind、状态，不含标题/正文。原来源仍待 OPPO 通知栏截图确认；若仍双显，下一步区分 Android 对同一推送的系统归类行为。与“同设备双连接”无直接因果。 |
-| 2026-10-02 | 手机端对话里的本地图片显示“图片无法读取”（桌面正常；与省流量开关无关） | OPPO | 根因：Markdown 图片经 `file:resolve-path` 解析，服务端路径授权通过（计量有调用、无拒绝），但返回的是 `proma-file://` 自定义协议 URL，手机浏览器无法加载 → `<img>` onError。已实现于 2026-10-02：Web Remote shim 对 `file:resolve-path` 返回的 PNG/JPG/JPEG/GIF/WebP/BMP 使用同一授权路径的 `file:read-binary-base64` 转 data URL，单张上限 8 MiB，同一路径在页面内缓存；超限返回 null。SVG、PDF 等非目标格式保持原结果。 |
-| 2026-10-02 | 回答已结束，手机仍显示“Agent Running 6m31s”，刷新页面后恢复 | OPPO | 正式版计量：连接 e1d195af 流式输出到 12:07:51 后以 `1006` 异常断开，所有连接都没有收到完成事件（各窗口 `scN=0`），12:11:07 页面内自动重连。代码确认 `restoreActiveSnapshots()` 只把主进程“仍在运行”的快照合并进本地状态，**不会清除本地标记为运行中、但已不在快照里的会话**，因此断线期间错过的完成永远不会被纠正。已实现于 2026-10-02：仅 Web Remote 恢复路径将 running/retrying/background-waiting 且不在活跃快照中的会话结束，并逐会话触发一次历史刷新；仍运行的快照状态保留，桌面初始化路径不变。`web-remote-recovery.test.ts` 与 `useGlobalAgentListeners.recovery.test.ts` 覆盖恢复筛选、结束态及一次刷新。 |
+| 2026-10-02 | 安卓同时收到“桌面 App（PWA）”和“Chrome”两条相同通知，关闭 Chrome 页面后仍如此 | OPPO | 服务端 push-subscriptions.json 只有 1 个安卓订阅（09-28 创建），按设计每个事件只推送 1 次；第二条来源未证实（候选：页面内通知路径、安卓把同一推送同时归到 Chrome 与 WebAPK）。待用户提供通知栏截图与长按所属应用。部分处理于 2026-10-02：页面存在 Service Worker 推送订阅时不再创建 renderer 页面内 Notification（提示音不变），无订阅仍保留页面通知；推送发送新增 `[INFO] scope=Web Remote 推送`，仅记设备哈希、kind、状态，不含标题/正文。原来源仍待 OPPO 通知栏截图确认；若仍双显，下一步区分 Android 对同一推送的系统归类行为。与“同设备双连接”无直接因果。✅ 已解决（4a2b6dac 后每设备 1 条推送，用户确认 / 2026-10-02） |
+| 2026-10-02 | 手机端对话里的本地图片显示“图片无法读取”（桌面正常；与省流量开关无关） | OPPO | 根因：Markdown 图片经 `file:resolve-path` 解析，服务端路径授权通过（计量有调用、无拒绝），但返回的是 `proma-file://` 自定义协议 URL，手机浏览器无法加载 → `<img>` onError。已实现于 2026-10-02：Web Remote shim 对 `file:resolve-path` 返回的 PNG/JPG/JPEG/GIF/WebP/BMP 使用同一授权路径的 `file:read-binary-base64` 转 data URL，单张上限 8 MiB，同一路径在页面内缓存；超限返回 null。SVG、PDF 等非目标格式保持原结果。✅ 已解决（4a2b6dac / 2026-10-02） |
+| 2026-10-02 | 回答已结束，手机仍显示“Agent Running 6m31s”，刷新页面后恢复 | OPPO | 正式版计量：连接 e1d195af 流式输出到 12:07:51 后以 `1006` 异常断开，所有连接都没有收到完成事件（各窗口 `scN=0`），12:11:07 页面内自动重连。代码确认 `restoreActiveSnapshots()` 只把主进程“仍在运行”的快照合并进本地状态，**不会清除本地标记为运行中、但已不在快照里的会话**，因此断线期间错过的完成永远不会被纠正。已实现于 2026-10-02：仅 Web Remote 恢复路径将 running/retrying/background-waiting 且不在活跃快照中的会话结束，并逐会话触发一次历史刷新；仍运行的快照状态保留，桌面初始化路径不变。`web-remote-recovery.test.ts` 与 `useGlobalAgentListeners.recovery.test.ts` 覆盖恢复筛选、结束态及一次刷新。✅ 已解决（4a2b6dac / 2026-10-02） |
 | 2026-10-02 | 手机端对话内本地图片超过 8 MiB 时只显示“图片无法读取”，希望可以点击加载原图 | 手机 | 现状（fix/mobile-batch-20261002）：shim 以 8 MiB 上限调用 `file:read-binary-base64`，超限返回 null。方案：超限时显示“图片较大（xx MB），点按加载原图”占位，点按后不设该上限（或更高上限）读取并缓存；蜂窝/省流量下保持需点按。备选：Mac 端缩放为长边约 2048 的 JPEG 先显示缩略版 |
 | 2026-10-02 | 观察：正式版 13:28:45 `[WARN] 消息截断后仍超限 (1471K / 3046K chars)` | Mac | 上游 `agent-session-manager.ts` `serializeSDKMessageForStorage` 对超大 SDK 消息截断后仍 >上限，消息照常写入。可能来自 Read 图片/大工具输出的 base64。手机历史已有瘦身与按需加载，暂不处理；若相关会话在手机打开变慢再查 |
 | 2026-10-05 | 手机点附件按钮，iPhone 直接打开相机，无法选文件/相册；安卓会弹出选择（相机/文件/相册） | iPhone | `web-electron-shim.ts` `openBrowserFileDialog()` 给 `<input type=file>` 设了 `capture="environment"`，iOS Safari 遵守该属性直接调起后置相机，Android Chrome 仍给选择器。方案：去掉 `capture`（两端都出现系统选择菜单，含“拍照”）；如需一键拍照另加入口。1 行 + 单测 |
@@ -28,7 +28,7 @@
 
 ## 后续待办（按建议优先级）
 
-1. **观察项（装上 dedupe 分支后用计量确认）**：同设备是否仍出现两条同一秒建立的连接（看 `open` 行的 `page`）；iPhone 首次加载约 4.2 MB `get-sdk-messages` 是单次还是多次。
+1. **观察项（部分确认）**：双连接自 2026-10-02 dedupe 分支后未再出现，标记已确认；iPhone 首次加载约 4.2 MB `get-sdk-messages` 单次/多次构成仍保留观察。
 2. **开发启动小修复（约 100 行以内）**：删除或改造 `apps/electron/scripts/dev-kill.ts` 中的 `pkill` / Windows 按名 `taskkill`（`dev:kill` 手动命令仍可触发）；dev 启动脱离父进程（避免随正式版退出）；`mobile-preview.sh status/stop` 结束前核对 PID 启动时间，进程在但端口未监听时判为不健康并关闭 8443。用一次真实 start → stop 验收。
 3. **正式版后台服务诊断**：为 Web Remote 启停、调度器 tick、渲染进程重建、退出阶段写 `[INFO]`；定期自检“Web Remote 已启用但端口未监听”“启用任务 nextRunAt 过期 >10 分钟”并告警。对应 2026-09-30 凌晨停摆（根因未证实）。
 4. **两层测试**：小测试集功能回归（约 20 条会话，含父子任务、自动化、归档、两个工作区和一条合成大历史，脚本生成、每次重置）；真实负载测试按下方“真实负载测试触发条件”执行，只测量不作功能判定。
@@ -44,3 +44,6 @@
 - **真实负载测试触发条件**（父会话在派单前判断，并在交接/安装申请写明做了或没做及原因）：改动涉及手机列表数据内容（字段、投影、瘦身）、历史加载（分页、加载更早、按需媒体）、传输层（WebSocket、压缩、分块、超时、重连同步）、首次加载前端资源明显变大、同步官方版本且上游改了会话存储或 Web Remote、用户反馈手机变慢。其余改动用功能回归 + 打包冒烟即可。
 - **个人自建 Skill 预装**：`~/.proma/default-skills/` 是新建工作区复制 Skill 的模板。Proma 启动时只同步安装包内置的 slug（缺失才复制、版本更高才覆盖），并只删除 `RETIRED_DEFAULT_SKILL_SLUGS` 列出的 slug，因此放入其中的个人 Skill（目前 `cliproxy-image` 1.0.1）不会被更新覆盖。副作用：Skills 页面会把它归入“内置”分组。修改个人 Skill 时需同步 `default-skills` 与各工作区副本。若以后上游内置同名 slug，会被上游版本覆盖，届时改名。
 - **dev 数据**：`~/.proma-dev` 含按 `scripts/personal/import-session-workspace.py` 选择性导入的真实会话（单工作区 allowlist），以及用户 2026-10-01 授权复制的正式渠道 `channels.json`（权限 600，原文件改名保留）。只在本机，不提交仓库；密钥不解密、不打印。dev 中让 Agent 运行只用新建会话，不在导入的旧会话中运行（其附加目录可能指向真实仓库）；dev 对话消耗真实 API 额度。8443 只在测试期间开启。
+
+
+- 用户 2026-10-07 决定：不把 Proma 加入登录项，继续由用户手动启动。

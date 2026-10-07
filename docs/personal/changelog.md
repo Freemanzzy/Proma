@@ -1357,3 +1357,9 @@
 - **思考深度缺陷关闭**：用户确认正式版 iPhone 与安卓的 Codex、Claude 会话均出现滑块且档位保存；计量显示两台手机均调用 `agent:get-pi-reasoning-capability` 与 `agent:update-session-reasoning-level`，无拒绝。
 - 权限复核（Claude Code）：`agent:get-pi-reasoning-capability` 改为 `read/none` 可接受——handler 只用渠道 `provider` 解析档位元数据，不返回密钥、base URL 或工作区数据；远程最多能探测某 channelId 是否存在。
 - 详见本机交接 `install-result-2026-10-03.md`。
+
+## 2026-10-07: 关闭已解决反馈并记录启动偏好
+
+- 将思考强度、本地图片显示、断线后运行状态及安卓重复通知四项反馈标记为已解决，保留原记录；双连接观察项标记确认，4.2 MB 首屏构成继续观察。
+- 记录用户决定：不把 Proma 加入登录项，由用户手动启动。
+- 验证：核对已安装版本与 backlog 中的既有验证证据；dev 会话索引为 831 条。此步骤仅更新 backlog 与 changelog。
