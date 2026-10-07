@@ -1414,3 +1414,8 @@
 - 定向测试：**6 pass / 0 fail**。
 - 批次收尾复核（2026-10-08）：全量 `bun test` **698 pass / 0 fail，1,800 expect，105 files**；Electron `typecheck`、`build:main`、`build:renderer`、`build:web-preload` 均通过。dev 与 8443 保持开启，开发会话索引为 831；正式版进程未触碰。
 - Git 历史说明：步骤 5 的 `6c352543` 是将原 `940bc8ce` amend 后的最终提交；截至本记录，`fix/batch-20261007` 未推送。
+
+## 2026-10-08: 合入 2026-10-07 批次（暂不打包）
+
+- `fix/batch-20261007` --no-ff 合入 personal：iPhone 附件可选文件/相册、手机大图点按加载原图、dev 启停 PID 身份核验与独立会话、后台服务诊断与自检（过期告警 60 分钟限频）、手机查看协作子任务抽屉。全量 698 pass / 0 fail；用户 02:12 在 dev 8443 验证通过。按用户要求暂不打包，待下一批一起发布。
+- backlog 补入 10-07/10-08 反馈：桌面新建会话出现虚的草稿条目、子 Agent 跨渠道委派（clipproxy 备用）、harness interactions 定位“确认”失败。
