@@ -39,7 +39,9 @@ import {
   createToolCallIdempotencyCache,
   resolveDelegationPermissionMode,
 } from './agent-collaboration-utils'
-import { assertEnabledModelForChannel, listEnabledAgentModelsForChannel } from './agent-model-selection'
+import { listEnabledAgentModelsForChannel } from './agent-model-selection'
+import { listAvailableDelegationChannels, resolveDelegationChannelSelection } from './agent-delegation-channel-selection'
+import { listChannels } from './channel-manager'
 import { serializePiToolResultPayload } from './adapters/pi-tool-result-json'
 import { markPersonalDelegationRestarted, markPersonalDelegationsConsumed, notifyPersonalDelegationFinished } from './personal-delegation-wake'
 
@@ -238,6 +240,7 @@ interface DelegateAgentArgs {
   expectedOutput?: string
   permissionMode?: PromaPermissionMode
   modelId?: string
+  channelId?: string
   /** 子会话的目标思考强度；未传入时保持新会话默认值。 */
   thinkingLevel?: AgentThinkingLevel
 }
@@ -245,6 +248,7 @@ interface DelegateAgentArgs {
 interface StartDelegationResult {
   record: DelegationRecord
   effectivePermissionMode: PromaPermissionMode
+  effectiveChannelId: string
   effectiveModelId?: string
   configuredThinkingLevel: AgentThinkingLevel
 }
@@ -252,6 +256,7 @@ interface StartDelegationResult {
 interface PiDelegationToolResult {
   delegationId: string
   effectivePermissionMode: PromaPermissionMode
+  effectiveChannelId: string
   effectiveModelId?: string
   configuredThinkingLevel: AgentThinkingLevel
 }
@@ -637,6 +642,10 @@ function getCurrentParentPermissionMode(
 function getAvailableAgentModels(ctx: CollaborationToolContext): Record<string, unknown> {
   const currentModelId = ctx.modelId?.trim() || undefined
   const summary = listEnabledAgentModelsForChannel(ctx.channelId, '读取协作子会话可用模型')
+  const channels = listAvailableDelegationChannels(listChannels().map((channel) => ({
+    ...channel,
+    provider: String(channel.provider),
+  })), ctx.channelId)
   return {
     channelId: summary.channelId,
     channelName: summary.channelName,
@@ -650,10 +659,25 @@ function getAvailableAgentModels(ctx: CollaborationToolContext): Record<string, 
       current: model.id === currentModelId,
     })),
     modelCount: summary.models.length,
-    note: summary.models.length > 0
-      ? '创建协作子会话时，可从 models[].id 中选择 modelId；不传则继承 currentModelId。'
-      : '当前渠道没有启用的 Agent 模型，请先在渠道设置中启用模型。',
+    channels,
+    note: 'channels[].models[].id 可用于指定目标渠道和模型；不传 channelId 则沿用父会话渠道，不传 modelId 则继承 currentModelId。',
   }
+}
+
+function resolveDelegationTarget(ctx: CollaborationToolContext, args: DelegateAgentArgs): {
+  channelId: string
+  modelId?: string
+} {
+  return resolveDelegationChannelSelection({
+    channels: listChannels().map((channel) => ({
+      ...channel,
+      provider: String(channel.provider),
+    })),
+    parentChannelId: ctx.channelId,
+    parentModelId: ctx.modelId,
+    requestedChannelId: args.channelId,
+    requestedModelId: args.modelId,
+  })
 }
 
 function stopDelegation(parentSessionId: string, delegationId: string): Record<string, unknown> {
@@ -700,17 +724,13 @@ function startDelegation(
     args.permissionMode,
   )
   const thinkingLevel = assertThinkingLevel(args.thinkingLevel)
-  const effectiveModelId = args.modelId !== undefined
-    ? assertEnabledModelForChannel({
-        channelId: ctx.channelId,
-        modelId: args.modelId,
-        purpose: '创建协作子会话',
-      })
-    : ctx.modelId?.trim() || undefined
+  const target = resolveDelegationTarget(ctx, args)
+  const effectiveChannelId = target.channelId
+  const effectiveModelId = target.modelId
 
   const { completion, resolveCompletion } = createDelegationCompletion()
 
-  const child = createAgentSession(title, ctx.channelId, ctx.workspaceId, effectiveModelId)
+  const child = createAgentSession(title, effectiveChannelId, ctx.workspaceId, effectiveModelId)
   const childThinkingLevel: AgentThinkingLevel = thinkingLevel ?? child.reasoningLevel ?? 'high'
   const rootSessionId = parent?.rootSessionId ?? parent?.id ?? ctx.sessionId
   updateAgentSessionMeta(child.id, {
@@ -730,7 +750,7 @@ function startDelegation(
     delegationId,
     parentSessionId: ctx.sessionId,
     childSessionId: child.id,
-    channelId: ctx.channelId,
+    channelId: effectiveChannelId,
     modelId: effectiveModelId,
     workspaceId: ctx.workspaceId,
     thinkingLevel: childThinkingLevel,
@@ -758,7 +778,7 @@ function startDelegation(
     {
       sessionId: child.id,
       userMessage: prompt,
-      channelId: ctx.channelId,
+      channelId: effectiveChannelId,
       modelId: effectiveModelId,
       workspaceId: ctx.workspaceId,
       permissionModeOverride: permissionMode,
@@ -789,6 +809,7 @@ function startDelegation(
   return {
     record,
     effectivePermissionMode: permissionMode,
+    effectiveChannelId,
     effectiveModelId,
     configuredThinkingLevel: childThinkingLevel,
   }
@@ -830,7 +851,8 @@ export function buildPiCollaborationTools(
     role: roleType,
     task: Type.String({ description: '发送给子 Agent 的完整任务说明' }),
     expectedOutput: Type.Optional(Type.String({ description: '希望子 Agent 最终返回的格式或要点' })),
-    modelId: Type.Optional(Type.String({ description: '可选目标模型 ID' })),
+    modelId: Type.Optional(Type.String({ description: '可选目标模型 ID；可选值来自 list_available_agent_models' })),
+    channelId: Type.Optional(Type.String({ description: '可选目标渠道 ID；不传则沿用父会话渠道，可选值来自 list_available_agent_models' })),
     thinkingLevel: thinkingLevelType,
   })
 
@@ -846,7 +868,7 @@ export function buildPiCollaborationTools(
     sdk.defineTool({
       name: 'mcp__collaboration__list_available_agent_models',
       label: '列出可用模型',
-      description: '列出当前父会话渠道下已启用、可用于协作子 Agent 的模型。需要给 delegate_agent/delegate_agents 指定 modelId 前应先调用此工具。',
+      description: '按渠道分组列出所有已启用且可用于协作子 Agent 的渠道与模型（不含 Proma 官方）。需要指定 channelId/modelId 前应先调用此工具。',
       parameters: Type.Object({}),
       async execute() {
         return piJsonResult(getAvailableAgentModels(ctx))
@@ -861,7 +883,8 @@ export function buildPiCollaborationTools(
         role: roleType,
         task: Type.String({ description: '发送给子 Agent 的完整任务说明，必须自包含必要上下文' }),
         expectedOutput: Type.Optional(Type.String({ description: '希望子 Agent 最终返回的格式或要点' })),
-        modelId: Type.Optional(Type.String({ description: '可选目标模型 ID' })),
+        modelId: Type.Optional(Type.String({ description: '可选目标模型 ID；可选值来自 list_available_agent_models' })),
+        channelId: Type.Optional(Type.String({ description: '可选目标渠道 ID；不传则沿用父会话渠道，可选值来自 list_available_agent_models' })),
         thinkingLevel: thinkingLevelType,
       }),
       async execute(toolCallId: string, params: unknown) {
@@ -872,6 +895,7 @@ export function buildPiCollaborationTools(
           return {
             delegationId: created.record.delegationId,
             effectivePermissionMode: created.effectivePermissionMode,
+            effectiveChannelId: created.effectiveChannelId,
             effectiveModelId: created.effectiveModelId,
             configuredThinkingLevel: created.configuredThinkingLevel,
           }
@@ -879,6 +903,7 @@ export function buildPiCollaborationTools(
         return piJsonResult({
           delegation: getDelegationResult(ctx.sessionId, result.delegationId),
           effectivePermissionMode: result.effectivePermissionMode,
+          effectiveChannelId: result.effectiveChannelId,
           effectiveModelId: result.effectiveModelId,
           configuredThinkingLevel: result.configuredThinkingLevel,
           note: '子会话已启动，尚未完成或回传结果。记录 delegationId；如果本轮回复、决策或交付依赖它，必须在回复前调用 wait_for_delegations 收敛。仅在父会话还有完全独立的工作时才继续推进。',
@@ -913,6 +938,7 @@ export function buildPiCollaborationTools(
               created.push({
                 delegationId: started.record.delegationId,
                 effectivePermissionMode: started.effectivePermissionMode,
+                effectiveChannelId: started.effectiveChannelId,
                 effectiveModelId: started.effectiveModelId,
                 configuredThinkingLevel: started.configuredThinkingLevel,
               })
@@ -934,6 +960,7 @@ export function buildPiCollaborationTools(
           })),
           effectiveModels: batch.created.map((item) => ({
             delegationId: item.delegationId,
+            channelId: item.effectiveChannelId,
             modelId: item.effectiveModelId,
           })),
           configuredThinkingLevels: batch.created.map((item) => ({

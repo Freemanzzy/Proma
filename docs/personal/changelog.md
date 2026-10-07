@@ -1419,3 +1419,12 @@
 
 - `fix/batch-20261007` --no-ff 合入 personal：iPhone 附件可选文件/相册、手机大图点按加载原图、dev 启停 PID 身份核验与独立会话、后台服务诊断与自检（过期告警 60 分钟限频）、手机查看协作子任务抽屉。全量 698 pass / 0 fail；用户 02:12 在 dev 8443 验证通过。按用户要求暂不打包，待下一批一起发布。
 - backlog 补入 10-07/10-08 反馈：桌面新建会话出现虚的草稿条目、子 Agent 跨渠道委派（clipproxy 备用）、harness interactions 定位“确认”失败。
+
+## 2026-10-08: 子 Agent 跨渠道委派
+
+- `delegate_agent` 与 `delegate_agents.items[]` 新增可选 `channelId`；未传入时沿用父会话渠道与当前模型。指定渠道需启用且不能是 `provider=proma`；指定模型需属于目标渠道且已启用。只传 `channelId` 时使用该渠道第一个启用模型。校验错误包含可用渠道提示。
+- `list_available_agent_models` 保留原顶层字段以兼容旧调用，并新增 `channels[]` 分组（含 `channelId/channelName/provider/current/models`），排除 Proma 官方渠道。
+- 新建子会话、headless 首轮、委派记录与完成通知均传递所选渠道；恢复记录优先读取持久化子会话的 `channelId/modelId`，`continue_delegation` 使用恢复后的子会话字段。自动唤醒继续使用父会话元数据执行父会话，这是父会话恢复上下文的既有语义。
+- 新增 `agent-delegation-channel-selection.ts` 及单测：默认父渠道、指定 Codex 渠道/模型、只传渠道默认模型、模型不匹配拒绝、禁用与 Proma 官方渠道拒绝、分组及 current 标记，共 **6 pass / 0 fail**。Electron typecheck 通过。
+- dev 真实验收：通过 clipproxyapi 父测试会话调用 `list_available_agent_models`、`delegate_agent` 指定 Codex channelId 与 `gpt-5.5`，创建子会话 `d12f6153-d8ad-4f06-8e59-f7994c059399`，随后在同一子会话调用 `continue_delegation`。索引验证子会话 `channelId`/`modelId` 正确，delegationId 为 `fb8dddbd-ac8f-4fed-9fde-cdf66da0c601`。两次模型回复均因 ChatGPT 登录凭据无法刷新而失败，故真实内容回复验收未通过，未尝试切换渠道或重登。
+- 清理：经 Web Remote 应用 `deleteAgentSession` API 删除本轮新建父/子会话并复核开发会话索引回到 **831**；撤销临时测试配对设备。正式版进程未触碰，开发实例与 8443 保持运行。
