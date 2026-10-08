@@ -66,6 +66,7 @@ interface AgentSessionsIndex {
 
 /** 当前索引版本：v2 将 Claude runtime 退役为 Pi-only。 */
 const INDEX_VERSION = 2
+export const DEFAULT_AGENT_SESSION_TITLE = '新 Agent 会话'
 
 // 删除中的会话 ID 在应用生命周期内不可复用。先写入墓碑可让尚在异步预检、
 // 终止或持久化阶段的旧运行安全收束，而不会在文件删除后重新创建该会话。
@@ -483,7 +484,7 @@ export function createAgentSession(
     ?? resolvePiThinkingLevel(settings, undefined, 'openai-codex')
   const meta: AgentSessionMeta = {
     id: randomUUID(),
-    title: title || '新 Agent 会话',
+    title: title || DEFAULT_AGENT_SESSION_TITLE,
     channelId,
     modelId,
     workspaceId,

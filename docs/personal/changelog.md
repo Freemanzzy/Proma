@@ -1456,6 +1456,16 @@
 - 回归：`node --check scripts/personal/mobile-harness.mjs` 通过；`iphone:interactions` 全套通过，AskUser 返回 A，`ask_user_request/resolved` 事件齐全；计划审批完成且运行恢复；新增页面异常 0、HTTP 429 状态响应 0。截图与精简结果保存在当次会话工作台 `evidence/batch-20261008b/`。
 - 权限请求确认未纳入：当前 `PromaPermissionMode` 仅有 `bypassPermissions` 与 `plan`，不存在需要确认的权限模式；`plan` 模式阻止写操作，不能按简报示例安全触发文件写入审批。本批不伪造新模式或绕开权限策略，待父会话决定是否增加合适的权限模式/测试路径。
 
+## 2026-10-08: 未使用草稿清理
+
+- 新增 `personal-draft-cleanup-core.ts` 的纯条件函数与依赖注入清理执行器；`personal-draft-cleanup.ts` 在主进程启动后调用 `listAgentSessions()` 载入索引，再执行一次。挂载点：`apps/electron/src/main/index.ts`，`registerIpcHandlers()` 后、启动 Web Remote 前。清理调用现有 `deleteAgentSession()`，同步索引、JSONL 与会话工作目录。
+- 只有全部满足才删除：`isDraft === true`；标题为空或等于统一导出的默认标题常量 `DEFAULT_AGENT_SESSION_TITLE`；未置顶/归档；无父会话、委派或 Automation 来源；创建时间早于注入时钟 24 小时；JSONL 不存在或大小为 0；会话工作目录不存在或为空。无法检查、路径不安全、工作区缺失等不确定情况 fail closed 并计入 skipped。会话管理器与 Agent 标题自动命名逻辑共用该默认标题常量。
+- 删除前将完整会话 metadata 写入 `<数据目录>/backups/draft-cleanup-<UTC 时间戳>.json`，使用独占创建（`wx`）且文件权限 0600；不覆盖重名备份。无候选时不创建备份。逐条删除失败保留并计入 skipped；诊断日志按 `event=draft-cleanup removed=N skipped=M backup=<文件名|none>` 汇总，不含会话正文。
+- 单测覆盖非草稿、非默认标题、非空 JSONL、置顶、归档、父会话/委派/Automation 来源、24 小时边界、非空工作目录、缺失/0 字节 JSONL、完全合格删除、备份元数据、删除失败、无候选时不备份及注入时钟：**13 pass / 0 fail，21 expect**。
+- dev 运行前记录：**832** 条会话、**3** 条草稿；备份核验 3 条均符合清理标准。启动热重载时日志记录 `removed=3 skipped=0`，备份 `draft-cleanup-2026-10-08T05-34-36-962Z.json`（0600）；被清理 ID：`448c9cc8-0f41-466b-afd0-43b31b77adac`、`a748cf97-decb-43cf-be3b-9e41ab536979`、`de252621-e82f-4bb2-b665-baf05a3bcbc3`。重启 dev 后日志 `removed=0 skipped=0 backup=none`；会话索引 **829**、草稿 **0**，被清理条目不在索引、JSONL 不存在；备份含完整 metadata，无覆盖。之后 iPhone smoke 创建并由 harness API 删除测试会话，前后均 829。
+- UI/启动回归：重启后 Web Remote 在 17889 启动、IPC 分级覆盖率 **100%**；iPhone layout **11/11**、smoke **7/7**。额外桌面 full-ui smoke 中侧栏有正常会话行、索引 830 条（含 1 条临时 harness 会话）、草稿数 0；截图 `evidence/batch-20261008b/smoke-sidebar-after-draft-cleanup.png` 未见草稿条目。harness 清理临时会话后前后索引均为 829；现有非草稿会话内容/标题未变化。正式版 `/Applications/Proma.app` PID 11195 未触碰，`~/.proma` 未写入；dev 及临时 8443 保持开启。
+- 全量验证：`bun test` **719 pass / 0 fail，1,833 expect，107 files**；Electron `typecheck`、`build:main`、`build:renderer`、`build:web-preload` 通过。应用版本保持 **0.19.58**。
+
 ## 2026-10-08: 安装 903ff7ec（10-07 + 10-08 批次）
 
 - Claude Code 12:24 用 `install-update.sh` 安装 `903ff7ec`，替换 `03901c8a`（previous）；备份 `20261008-122456-10786`，BACKUP VERIFY PASS，前后 SNAPSHOT MATCH（会话 1025、渠道 7），定时任务 17 → 17、无过期。钥匙串弹 1 次。

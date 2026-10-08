@@ -511,7 +511,7 @@ async function createHarness(options) {
     await delay(300)
   }
   const clickSidebarText = async (text) => {
-    await openDrawer()
+    if (options.width < 768 || options.userAgent !== 'desktop') await openDrawer()
     const aria = { 'MCP/Skills': 'MCP/Skills', Todo: 'Todo', '定时任务': '定时任务' }[text]
     const clicked = await client.evaluate(`(() => {const root=document.querySelector('[data-web-remote-sidebar="left"]');if(!root)return false;const nodes=[...root.querySelectorAll('button,[role="button"]')];const wanted=${quoteJs(aria ?? text)};const item=nodes.find(n=>(n.getAttribute('aria-label')||'').trim()===wanted)||(nodes.find(n=>(n.innerText||'').trim()===wanted));if(!item)return false;item.click();return true})()`)
     if (!clicked) throw new Error(`侧栏入口不存在或不可用: ${text}`)
@@ -525,7 +525,7 @@ async function createHarness(options) {
     const workspace = Array.isArray(workspaces) ? workspaces[0] : null
     if (!workspace?.id) throw new Error('当前授权范围没有可用于 harness 的工作区，拒绝创建会话')
     const existingIds = new Set((await readSessionManifest()).map((item) => item.id))
-    await openDrawer()
+    if (options.width < 768 || options.userAgent !== 'desktop') await openDrawer()
     const newTaskAvailable = await client.evaluate('Boolean(document.querySelector(\'button[aria-label="新建任务"]\'))')
     if (!newTaskAvailable) {
       const switched = await client.evaluate(`(() => {const button=[...document.querySelectorAll('.mode-btn')].find(item=>(item.innerText||'').trim()==='Agent');if(!button)return false;button.click();return true})()`)
@@ -1785,6 +1785,11 @@ async function runSmoke(harness, options, result) {
   const title = `web-remote-harness-smoke-${Date.now()}`
   const session = await harness.createHarnessSession(title)
   result.harnessSession = { id: session.id, title: session.title, workspaceId: session.workspaceId }
+  if (options.userAgent === 'desktop' && options.width >= 768) {
+    result.sidebarAfterDraftCleanup = await harness.client.evaluate(`(async()=>{const root=document.querySelector('[data-web-remote-sidebar="left"]');const sessions=await window.electronAPI.listAgentSessions();const draftIds=new Set(sessions.filter(s=>s?.isDraft===true).map(s=>s.id));const rows=[...(root?.querySelectorAll('[data-session-switch-id]')??[])];return {sidebarPresent:!!root,sessionCount:sessions.length,draftCount:draftIds.size,rowCount:rows.length,visibleDraftRows:rows.filter(n=>draftIds.has(n.getAttribute('data-session-switch-id'))).map(n=>({id:n.getAttribute('data-session-switch-id'),title:n.getAttribute('data-session-switch-title')}))}})()`)
+    if(!result.sidebarAfterDraftCleanup.sidebarPresent||result.sidebarAfterDraftCleanup.draftCount!==0||result.sidebarAfterDraftCleanup.visibleDraftRows.length)throw new Error(`清理后桌面侧栏发现草稿: ${JSON.stringify(result.sidebarAfterDraftCleanup)}`)
+    result.screenshots.push(await harness.screenshot('smoke-sidebar-after-draft-cleanup'))
+  }
   result.steps.push({ name: 'open-session', ok: true, session: title })
   const smokeMessage = '只回复 pong'
   await harness.inputAndSend(smokeMessage)

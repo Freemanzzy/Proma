@@ -60,6 +60,7 @@ function registerProtocolsAndHandlers(): void {
 import { getSettings, updateSettings } from './lib/settings-service'
 import { handlePromaFileRequest } from './lib/local-file-protocol'
 import { cleanupSimulatorPreview } from './lib/simulator-preview-service'
+import { cleanupUnusedDraftSessions } from './lib/personal-draft-cleanup'
 
 // 处理 EPIPE 错误：当 stdout/stderr 管道被关闭时（如 electronmon 重启），忽略写入错误
 // 这在开发环境热重载时经常发生，不影响应用功能
@@ -764,6 +765,8 @@ async function bootstrap(): Promise<void> {
     },
   }, { packaged: app.isPackaged })
   registerIpcHandlers()
+  // 首次读取会话索引后清理不再使用的空草稿；清理器仅通过会话管理器删除。
+  safeRun('cleanupUnusedDraftSessions', cleanupUnusedDraftSessions)
   registerWebRemoteAdminIpc()
   // Web Remote only reads its own configuration/auth data and does not need Keychain secrets.
   // Start it before dock/settings and Bridge initialization, either of which may trigger a Keychain prompt.

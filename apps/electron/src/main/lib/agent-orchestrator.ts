@@ -50,7 +50,7 @@ import { getAdapter, fetchTitle } from '@proma/core'
 import pkg from '../../../package.json' with { type: 'json' }
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
-import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, removeSDKErrorMessage, updateSDKUserMessageSkillActivations, rewindPiAgentSession, resolveAgentCwd, getActiveWorktreePath, getAgentCwdMode, getSessionWorkbenchLayout, resolveSessionWorkbenchContextDir, isAgentSessionDeleting } from './agent-session-manager'
+import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, removeSDKErrorMessage, updateSDKUserMessageSkillActivations, rewindPiAgentSession, resolveAgentCwd, getActiveWorktreePath, getAgentCwdMode, getSessionWorkbenchLayout, resolveSessionWorkbenchContextDir, isAgentSessionDeleting, DEFAULT_AGENT_SESSION_TITLE } from './agent-session-manager'
 import { getAgentWorkspace, getProjectFilesPath, getWorkspaceMcpConfig, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles, getWorkspaceAgentsMdPath, readWorkspaceAgentsMd, getWorkspaceMemoryGuidance, isWorkspaceProjectKnowledgeMaintenanceApproved } from './agent-workspace-manager'
 import { getLocalProjectRootStatus } from './project-root-health'
 import { getMcpApiKeyEnvironment, getMcpOAuthHeaders } from './mcp-oauth-service'
@@ -138,8 +138,6 @@ function isAssistantDeltaSDKMessage(message: SDKMessage): message is SDKMessage 
     && !!record.delta
 }
 
-/** 默认会话标题（用于判断是否需要自动生成） */
-const DEFAULT_SESSION_TITLE = '新 Agent 会话'
 
 /** 默认模型 ID */
 const DEFAULT_MODEL_ID = 'claude-sonnet-5'
@@ -415,7 +413,7 @@ export class AgentOrchestrator {
     try {
       const meta = getAgentSessionMeta(sessionId)
       if (!meta) return
-      const isDefaultSessionTitle = meta.title === DEFAULT_SESSION_TITLE
+      const isDefaultSessionTitle = meta.title === DEFAULT_AGENT_SESSION_TITLE
       const isFirstExplorationMessage = Boolean(
         meta.explorationParentSessionId
         && !meta.explorationTitleInitializedAt,
@@ -435,7 +433,7 @@ export class AgentOrchestrator {
 
       // 标题请求是异步的；请求期间用户可能已手动重命名，不能用旧结果覆盖。
       const latestMeta = getAgentSessionMeta(sessionId)
-      const canApplyDefaultTitle = isDefaultSessionTitle && latestMeta?.title === DEFAULT_SESSION_TITLE
+      const canApplyDefaultTitle = isDefaultSessionTitle && latestMeta?.title === DEFAULT_AGENT_SESSION_TITLE
       const canApplyExplorationTitle = Boolean(
         isFirstExplorationMessage
         && latestMeta?.title === meta.title
