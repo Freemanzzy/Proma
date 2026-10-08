@@ -1419,3 +1419,27 @@
 
 - `fix/batch-20261007` --no-ff 合入 personal：iPhone 附件可选文件/相册、手机大图点按加载原图、dev 启停 PID 身份核验与独立会话、后台服务诊断与自检（过期告警 60 分钟限频）、手机查看协作子任务抽屉。全量 698 pass / 0 fail；用户 02:12 在 dev 8443 验证通过。按用户要求暂不打包，待下一批一起发布。
 - backlog 补入 10-07/10-08 反馈：桌面新建会话出现虚的草稿条目、子 Agent 跨渠道委派（clipproxy 备用）、harness interactions 定位“确认”失败。
+
+## 2026-10-08: 子 Agent 跨渠道委派
+
+- `delegate_agent` 与 `delegate_agents.items[]` 新增可选 `channelId`；未传入时沿用父会话渠道与当前模型。指定渠道需启用且不能是 `provider=proma`；指定模型需属于目标渠道且已启用。只传 `channelId` 时使用该渠道第一个启用模型。校验错误包含可用渠道提示。
+- `list_available_agent_models` 保留原顶层字段以兼容旧调用，并新增 `channels[]` 分组（含 `channelId/channelName/provider/current/models`），排除 Proma 官方渠道。
+- 新建子会话、headless 首轮、委派记录与完成通知均传递所选渠道；恢复记录优先读取持久化子会话的 `channelId/modelId`，`continue_delegation` 使用恢复后的子会话字段。自动唤醒继续使用父会话元数据执行父会话，这是父会话恢复上下文的既有语义。
+- 新增 `agent-delegation-channel-selection.ts` 及单测：默认父渠道、指定 Codex 渠道/模型、只传渠道默认模型、模型不匹配拒绝、禁用与 Proma 官方渠道拒绝、分组及 current 标记，共 **6 pass / 0 fail**。Electron typecheck 通过。
+- dev 真实验收：通过 clipproxyapi 父测试会话调用 `list_available_agent_models`、`delegate_agent` 指定 Codex channelId 与 `gpt-5.5`，创建子会话 `d12f6153-d8ad-4f06-8e59-f7994c059399`，随后在同一子会话调用 `continue_delegation`。索引验证子会话 `channelId`/`modelId` 正确，delegationId 为 `fb8dddbd-ac8f-4fed-9fde-cdf66da0c601`。两次模型回复均因 ChatGPT 登录凭据无法刷新而失败，故真实内容回复验收未通过，未尝试切换渠道或重登。
+- 清理：经 Web Remote 应用 `deleteAgentSession` API 删除本轮新建父/子会话并复核开发会话索引回到 **831**；撤销临时测试配对设备。正式版进程未触碰，开发实例与 8443 保持运行。
+
+## 2026-10-08: Agent 侧栏重复会话条目
+
+- A2 只读取证在 dev 的 Web Remote full-ui（共享 renderer，桌面宽视口）按“新建会话 → 切走 → 再新建 → 发送首条消息”复现。主进程 `listAgentSessions()` 中每个测试 ID 只有一条记录；对应侧栏 DOM 却为同一 `data-session-switch-id` 渲染多行，最多观测到 5 行。第二会话首条消息成功返回 `ok` 并自动命名为“A2回归测试”，未命名条目仍可见。正式版旧草稿的 `isDraft=true` 记录与本次复现不同：当前 LeftSidebar 活跃/置顶/自动任务/项目/归档列表均排除 `isDraft`，归档分组 helper 也排除；dev `settings.tabState` 当时只含原 Muse 会话，未引用测试会话。
+- 修复：`getVisibleAgentProjectSessions` 的可见行结果经 `dedupeAgentSessionTrees` 按根 session ID 去重，避免同一 ID 生成重复侧栏行。`useCreateSession`、`useProjectActions`、LeftSidebar 项目/会话创建、AgentView“新会话继续”、PlanningView 等创建响应改用 `upsertAgentSession`，使主进程先送达 metadata upsert、IPC Promise 后返回的竞态也不会重复插入。
+- 单测新增：metadata 事件先到、创建 IPC 响应后到仍保持一行；项目可见树同根 ID 去重。定向 `agent-session-list.test.ts` **12 pass / 0 fail，41 expect**；Electron typecheck 通过；`build:renderer` 通过。
+- 修复后 dev full-ui 回归：renderer build 后重新加载并创建一条新会话，左侧侧栏中其 ID 仅出现 **1 行**。复现前、故障态与修复后截图分别为 `A2-before.png`、`A2-after-send.png`、`A2-after-fix.png`（保存在当次会话工作台）。本轮 dev 新建的 5 条会话均经应用 `deleteAgentSession` API 删除，索引回到 **831**；临时测试配对设备已撤销，配对码已清除。正式版进程未触碰。
+- 验收边界：复现与修复后 UI 核对使用 Web Remote full-ui，而非 Proma Personal 原生桌面窗口；该 UI 共用同一 LeftSidebar/renderer 实现。原生桌面窗口的复核仍待用户现场体验。
+
+## 2026-10-08: interactions AskUser 确认按钮定位（未完成）
+
+- `AskUserBanner.tsx` 的最后确认按钮新增 `data-web-remote-ask-confirm="true"`；`mobile-harness.mjs` 优先以该标记取按钮中心坐标，并回退到 AskUser 横幅内最后一个可见按钮。`resolveVisiblePlanApproval` 已按可见按钮名称“批准并完全自动执行”定位；当前 interactions suite 不包含 PermissionBanner 的权限请求确认步骤，仅切换权限模式，因此本批未声称通过权限请求确认。
+- 定向检查：`node --check scripts/personal/mobile-harness.mjs` 通过；Electron `build:renderer` 通过。
+- 按要求执行 `bash scripts/personal/mobile-preview.sh test iphone:interactions` 两次。两次均在选择 A 后、点击确认前失败：stable marker 与横幅最后可见按钮都未命中。首次结果 JSON `mobile-harness-1791403733692.json`，第二次 `mobile-harness-1791404499173.json`；第二次截图 `ask-question-card.png` 显示提问卡片及确认按钮，但当时页面 DOM 定位结果为空。没有进入计划审批步骤，因此不标记为通过，也未继续修改同一测试第三次。
+- 两次运行均报告测试设备已撤销、Chrome/profile 已清理；第二次准确 HTTP 429 状态响应 **0**、新增页面异常 **0**。会话索引经核对回到 **831**，dev 与 8443 保持开启，正式版进程未触碰。

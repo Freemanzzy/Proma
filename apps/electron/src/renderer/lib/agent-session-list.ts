@@ -319,6 +319,16 @@ export function mergeFetchedAgentSessions(
   return sortAgentSessionsByUpdatedAtDesc([...mergedFetched, ...survivingLocalOnly])
 }
 
+/** Visible project rows must render each session root at most once. */
+export function dedupeAgentSessionTrees<T extends AgentSessionTreeLike>(items: readonly T[]): T[] {
+  const seen = new Set<string>()
+  return items.filter((item) => {
+    if (seen.has(item.session.id)) return false
+    seen.add(item.session.id)
+    return true
+  })
+}
+
 /** 收集可见会话树里的父/子会话 id，用于判断当前会话是否已显示在侧栏中。 */
 export function collectAgentSessionTreeIds(
   items: readonly AgentSessionTreeLike[],

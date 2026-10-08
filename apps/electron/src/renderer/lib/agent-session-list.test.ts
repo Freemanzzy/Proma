@@ -3,6 +3,7 @@ import type { AgentSessionMeta, AgentSessionMetadataChange } from '@proma/shared
 import {
   acceptAgentSessionMetadataChange,
   applyAgentSessionMetadataChange,
+  dedupeAgentSessionTrees,
   getAgentSessionMetadataRevision,
   mergeAgentSessionSnapshotWithChanges,
   recordAgentSessionMetadataChange,
@@ -63,6 +64,29 @@ describe('Agent session metadata synchronization', () => {
     const removed = applyAgentSessionMetadataChange(restored, change({ action: 'remove', session: { id: 'session-1' } }), true)
     expect(removed.some((item) => item.id === 'session-1')).toBe(false)
     expect(removed.some((item) => item.id === 'session-2')).toBe(true)
+  })
+
+  test('session creation IPC response upserts after an earlier metadata event without duplicate rows', () => {
+    const created = session({ title: '新 Agent 会话', updatedAt: 2 })
+    const afterMetadataEvent = applyAgentSessionMetadataChange([], change({
+      session: { ...change().session, title: created.title, updatedAt: created.updatedAt },
+    }), false)
+    const afterIpcResponse = upsertAgentSession(afterMetadataEvent, created)
+    expect(afterMetadataEvent).toHaveLength(1)
+    expect(afterIpcResponse).toHaveLength(1)
+    expect(afterIpcResponse[0]?.id).toBe(created.id)
+
+    const alreadyDuplicated = [created, session({ ...created, updatedAt: 3 })]
+    expect(upsertAgentSession(alreadyDuplicated, created).filter((item) => item.id === created.id)).toHaveLength(1)
+  })
+
+  test('visible project rows contain one root row per session ID', () => {
+    const rows = dedupeAgentSessionTrees([
+      { session: session({ id: 'duplicate' }), childSessions: [] },
+      { session: session({ id: 'duplicate', title: 'duplicate copy' }), childSessions: [] },
+      { session: session({ id: 'other' }), childSessions: [] },
+    ])
+    expect(rows.map((item) => item.session.id)).toEqual(['duplicate', 'other'])
   })
 
   test('cleared classification fields disappear instead of surviving the metadata merge', () => {

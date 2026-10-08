@@ -18,6 +18,7 @@ import {
 import { activeViewAtom } from '@/atoms/active-view'
 import { useOpenSession } from './useOpenSession'
 import type { AgentWorkspace, CreateAgentWorkspaceInput } from '@proma/shared'
+import { upsertAgentSession } from '@/lib/agent-session-list'
 
 interface UseProjectActionsResult {
   workspaces: AgentWorkspace[]
@@ -64,7 +65,7 @@ export function useProjectActions(): UseProjectActionsResult {
           agentModelId ?? undefined,
         )
         setWorkspaces((prev) => [workspace, ...prev])
-        setAgentSessions((prev) => [session, ...prev])
+        setAgentSessions((prev) => upsertAgentSession(prev, session))
         setCurrentWorkspaceId(workspace.id)
         openSession('agent', session.id, session.title)
         setActiveView('conversations')

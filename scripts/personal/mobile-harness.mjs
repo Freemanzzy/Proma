@@ -717,7 +717,16 @@ async function createHarness(options) {
     if (!await client.evaluate('Boolean(document.querySelector(".ask-user-banner"))')) return false
     const optionA = await findElement(client, 'A', '.ask-user-banner button')
     await touchAt(client, optionA.x, optionA.y)
-    const confirm = await findElement(client, '确认', '.ask-user-banner button')
+    const confirm = await client.evaluate(`(() => {
+      const banner=document.querySelector('.ask-user-banner')
+      const visible=(node)=>{const r=node.getBoundingClientRect();const style=getComputedStyle(node);return r.width>0&&r.height>0&&style.visibility!=='hidden'&&style.display!=='none'}
+      const marked=banner?.querySelector('button[data-web-remote-ask-confirm="true"]')
+      const node=marked??[...(banner?.querySelectorAll('button')??[])].filter(visible).at(-1)
+      if(!node||node.disabled)return null
+      const rect=node.getBoundingClientRect()
+      return {x:rect.left+rect.width/2,y:rect.top+rect.height/2,locator:marked?'stable-attribute':'last-visible-button'}
+    })()`)
+    if (!confirm) throw new Error('找不到 AskUser 确认按钮（稳定标记与横幅末尾按钮均未命中）')
     await touchAt(client, confirm.x, confirm.y)
     return true
   }

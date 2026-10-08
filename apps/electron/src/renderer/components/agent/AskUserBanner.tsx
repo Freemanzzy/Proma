@@ -368,6 +368,7 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
             size="sm"
             onClick={handleSubmit}
             disabled={submitting || !hasValidAnswers}
+            data-web-remote-ask-confirm="true"
             className="h-7 px-3 text-xs"
           >
             <Send className="size-3 mr-1" />
