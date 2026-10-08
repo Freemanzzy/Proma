@@ -90,7 +90,10 @@ def snapshot(root: Path) -> dict[str, Any]:
     return {
         "schema": 1,
         "versions": versions,
-        "sessions": {"count": len(sessions)},
+        "sessions": {
+            "count": len(sessions),
+            "ids": sorted(str(item["id"]) for item in sessions if item.get("id") is not None),
+        },
         "automations": {"count": len(automations), "by_id": automation_map},
         "channels": {"count": len(channels), "by_id": channel_map},
         "symlinks": count_symlinks(root),
@@ -99,7 +102,7 @@ def snapshot(root: Path) -> dict[str, Any]:
     }
 
 
-def compare(before: Path, after: Path) -> int:
+def compare(before: Path, after: Path, allow_draft_cleanup_dir: Path | None = None, since: float | None = None) -> int:
     try:
         left = json.loads(before.read_text(encoding="utf-8"))
         right = json.loads(after.read_text(encoding="utf-8"))
@@ -109,6 +112,14 @@ def compare(before: Path, after: Path) -> int:
     if left == right:
         print("SNAPSHOT MATCH")
         return 0
+    if allow_draft_cleanup_dir is not None:
+        reason = draft_cleanup_match(left, right, allow_draft_cleanup_dir, since)
+        if reason is None:
+            before_count = left.get("sessions", {}).get("count", 0)
+            after_count = right.get("sessions", {}).get("count", 0)
+            print(f"SNAPSHOT MATCH (draft cleanup): removed={before_count - after_count} backups={reason_backups}")
+            return 0
+        print(f"SNAPSHOT DIFF (draft cleanup rejected): {reason}")
     print("SNAPSHOT DIFF")
     for key in sorted(left.keys() | right.keys()):
         if left.get(key) != right.get(key):
@@ -116,16 +127,85 @@ def compare(before: Path, after: Path) -> int:
     return 1
 
 
+def draft_cleanup_match(left: dict[str, Any], right: dict[str, Any], backup_dir: Path, since: float | None) -> str | None:
+    global reason_backups
+    if since is None:
+        return "missing --since"
+    before_sessions, after_sessions = left.get("sessions"), right.get("sessions")
+    if not isinstance(before_sessions, dict) or not isinstance(after_sessions, dict):
+        return "session snapshot is invalid"
+    before_ids, after_ids = before_sessions.get("ids"), after_sessions.get("ids")
+    if not isinstance(before_ids, list) or not isinstance(after_ids, list):
+        return "session ID lists are unavailable"
+    if any(not isinstance(item, str) for item in before_ids + after_ids):
+        return "session ID list contains invalid values"
+    old, new = set(before_ids), set(after_ids)
+    removed = old - new
+    if new - old:
+        return "new session IDs appeared"
+    if after_sessions.get("count") != before_sessions.get("count", 0) - len(removed):
+        return "session count does not match the removed ID set"
+    ignored = {"sessions"}
+    for key in left.keys() | right.keys():
+        if key not in ignored and left.get(key) != right.get(key):
+            return f"non-session field changed: {key}"
+    if not isinstance(left.get("sessions"), dict) or not isinstance(right.get("sessions"), dict):
+        return "session snapshot is invalid"
+    for key in left["sessions"].keys() | right["sessions"].keys():
+        if key not in {"count", "ids"} and left["sessions"].get(key) != right["sessions"].get(key):
+            return f"session field changed beyond count/IDs: {key}"
+    backups: list[Path] = []
+    backed_ids: set[str] = set()
+    try:
+        files = sorted(backup_dir.glob("draft-cleanup-*.json"))
+        for path in files:
+            stamp = path.stat().st_mtime
+            # mtime is authoritative; the filename timestamp is a fallback for copied/restored files.
+            if stamp <= since:
+                import re
+                from datetime import datetime, timezone
+                match = re.match(r"draft-cleanup-(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z", path.name)
+                if not match:
+                    continue
+                parts = [int(x) for x in match.groups()]
+                filename_time = datetime(*parts[:6], parts[6] * 1000, tzinfo=timezone.utc).timestamp()
+                if filename_time <= since:
+                    continue
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            entries = payload.get("sessions") if isinstance(payload, dict) else payload
+            if not isinstance(entries, list) or any(not isinstance(entry, dict) for entry in entries):
+                return f"invalid backup format: {path.name}"
+            for entry in entries:
+                if entry.get("isDraft") is not True:
+                    return f"backup contains a non-draft entry: {path.name}"
+                if entry.get("id") is None:
+                    return f"backup entry has no ID: {path.name}"
+                backed_ids.add(str(entry["id"]))
+            backups.append(path)
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        return f"cannot read draft backup: {type(exc).__name__}"
+    if removed != backed_ids:
+        return f"removed IDs do not exactly match eligible backup IDs (removed={len(removed)} backed={len(backed_ids)})"
+    reason_backups = len(backups)
+    return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("data_dir", type=Path, nargs="?")
     parser.add_argument("--output", type=Path, help="write snapshot JSON here; DATA_DIR is opened read-only")
     parser.add_argument("--compare", nargs=2, type=Path, metavar=("BEFORE", "AFTER"), help="compare two snapshot JSON files")
+    parser.add_argument("--allow-draft-cleanup-dir", type=Path, help="allow only session removals backed by post-since draft-cleanup backups")
+    parser.add_argument("--since", type=float, help="Unix timestamp; only newer draft-cleanup backups qualify")
     args = parser.parse_args()
     if args.compare:
         if args.data_dir or args.output:
             parser.error("--compare cannot be combined with DATA_DIR or --output")
-        return compare(*args.compare)
+        if bool(args.allow_draft_cleanup_dir) != (args.since is not None):
+            parser.error("--allow-draft-cleanup-dir and --since must be provided together")
+        return compare(*args.compare, args.allow_draft_cleanup_dir, args.since)
+    if args.allow_draft_cleanup_dir is not None or args.since is not None:
+        parser.error("draft-cleanup comparison options require --compare")
     if args.data_dir is None:
         parser.error("DATA_DIR is required unless --compare is used")
     try:

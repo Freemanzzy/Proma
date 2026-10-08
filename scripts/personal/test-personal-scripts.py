@@ -16,6 +16,20 @@ def assert_run(args, expected=0):
     if result.returncode != expected: raise AssertionError(f'{args}: rc={result.returncode}, expected={expected}')
     return result
 
+def check_draft_compare(data_dir: Path, sessions_before: list[dict], sessions_after: list[dict], backups: list[tuple[str, dict]], enabled: bool = True, expected: int = 0):
+    data_dir.mkdir(parents=True, exist_ok=True)
+    backup_dir=data_dir/'backups'; backup_dir.mkdir(exist_ok=True)
+    for p in backup_dir.iterdir():
+        if p.is_file(): p.unlink()
+    def snap(ids): return {'schema':1,'versions':{},'sessions':{'count':len(ids),'ids':ids},'automations':{'count':0,'by_id':{}},'channels':{'count':0,'by_id':{}},'symlinks':0,'planning_user_version':7,'errors':[]}
+    before=data_dir/'before.json'; after=data_dir/'after.json'
+    before.write_text(json.dumps(snap([s['id'] for s in sessions_before])))
+    after.write_text(json.dumps(snap([s['id'] for s in sessions_after])))
+    for filename,payload in backups: (backup_dir/filename).write_text(json.dumps(payload))
+    args=['python3',str(SCRIPTS/'health-snapshot.py'),'--compare',str(before),str(after)]
+    if enabled: args += ['--allow-draft-cleanup-dir',str(backup_dir),'--since','1000']
+    return assert_run(args,expected=expected)
+
 def main():
     with tempfile.TemporaryDirectory(prefix='proma-personal-script-tests-', dir='/tmp') as td:
         root=Path(td); src=root/'source'; src.mkdir(); (src/'sub').mkdir()
@@ -81,9 +95,29 @@ def main():
         snap=json.loads(health_before.read_text()); snap_text=health_before.read_text()
         assert snap['versions']['channels.json']==7 and snap['sessions']['count']==1 and snap['automations']['by_id']=={'task-1':{'active':False}}
         assert snap['channels']['by_id']['c1']=={'name':'Sample','provider':'test','enabled':True} and snap['symlinks']==1 and snap['planning_user_version']==7
-        assert 'secret-value' not in snap_text and 'secret-prompt' not in snap_text and 'session-secret-id' not in snap_text
+        assert 'secret-value' not in snap_text and 'secret-prompt' not in snap_text and snap['sessions']['ids']==['session-secret-id']
         assert_run(['python3',str(SCRIPTS/'health-snapshot.py'),str(health_data),'--output',str(health_after)])
         assert_run(['python3',str(SCRIPTS/'health-snapshot.py'),'--compare',str(health_before),str(health_after)])
+        draft={'id':'draft-1','isDraft':True}; ordinary={'id':'ordinary-1','isDraft':False}
+        check_draft_compare(root/'compare-no-delete',[draft],[draft],[])
+        check_draft_compare(root/'compare-valid',[draft],[],[('draft-cleanup-2026-10-08T20-00-00-000Z.json',{'sessions':[draft]})])
+        check_draft_compare(root/'compare-unbacked',[draft],[],[],expected=1)
+        check_draft_compare(root/'compare-nondraft',[ordinary],[],[('draft-cleanup-2026-10-08T20-00-00-000Z.json',{'sessions':[ordinary]})],expected=1)
+        old_dir=root/'compare-old'; old_dir.mkdir(); old_backup=old_dir/'backups'; old_backup.mkdir()
+        old_before=old_dir/'before.json'; old_after=old_dir/'after.json'
+        old_before.write_text(json.dumps({'schema':1,'sessions':{'count':1,'ids':['draft-1']},'versions':{},'automations':{'count':0,'by_id':{}},'channels':{'count':0,'by_id':{}},'symlinks':0,'planning_user_version':7,'errors':[]}))
+        old_after.write_text(json.dumps({'schema':1,'sessions':{'count':0,'ids':[]},'versions':{},'automations':{'count':0,'by_id':{}},'channels':{'count':0,'by_id':{}},'symlinks':0,'planning_user_version':7,'errors':[]}))
+        oldfile=old_backup/'draft-cleanup-2026-10-08T00-00-00-000Z.json'; oldfile.write_text(json.dumps({'sessions':[draft]})); os.utime(oldfile,(1,1))
+        assert_run(['python3',str(SCRIPTS/'health-snapshot.py'),'--compare',str(old_before),str(old_after),'--allow-draft-cleanup-dir',str(old_backup),'--since','2000000000'],expected=1)
+        filename_dir=root/'compare-filename-time'; filename_dir.mkdir(); filename_backup=filename_dir/'backups'; filename_backup.mkdir()
+        filename_before=filename_dir/'before.json'; filename_after=filename_dir/'after.json'
+        filename_before.write_text(json.dumps({'schema':1,'sessions':{'count':1,'ids':['draft-1']},'versions':{},'automations':{'count':0,'by_id':{}},'channels':{'count':0,'by_id':{}},'symlinks':0,'planning_user_version':7,'errors':[]}))
+        filename_after.write_text(json.dumps({'schema':1,'sessions':{'count':0,'ids':[]},'versions':{},'automations':{'count':0,'by_id':{}},'channels':{'count':0,'by_id':{}},'symlinks':0,'planning_user_version':7,'errors':[]}))
+        filename_file=filename_backup/'draft-cleanup-2026-10-08T20-00-00-000Z.json'; filename_file.write_text(json.dumps({'sessions':[draft]})); os.utime(filename_file,(1,1))
+        assert_run(['python3',str(SCRIPTS/'health-snapshot.py'),'--compare',str(filename_before),str(filename_after),'--allow-draft-cleanup-dir',str(filename_backup),'--since','1000'])
+        check_draft_compare(root/'compare-new',[draft],[draft,{'id':'new-session','isDraft':False}],[],expected=1)
+        check_draft_compare(root/'compare-disabled',[draft],[],[('draft-cleanup-2026-10-08T20-00-00-000Z.json',{'sessions':[draft]})],enabled=False,expected=1)
+        print('DRAFT-CLEANUP COMPARISON PASS: no-delete, exact backup, unbacked removal, non-draft, stale backup, new ID, legacy strict mode')
 
         incoming=root/'incoming.app'; resources=incoming/'Contents'/'Resources'; resources.mkdir(parents=True)
         marker={'personal':True,'version':'0.19.58','commit':'abc','builtAt':'test'}
@@ -116,6 +150,24 @@ def main():
         assert not (backup_dirs[0]/'proma'/'.personal-migration').exists()
         assert (backup_dirs[0]/'health-snapshot-before.json').is_file() and (backup_dirs[0]/'health-snapshot-after.json').is_file()
         print('INSTALL PREVIOUS-LOCATION PASS: previous app kept under backup-root/previous, not /Applications')
+
+        # /tmp-only end-to-end simulation: real cleanup backup passes; deleting a non-draft without a backup fails and rolls back.
+        sim_data=root/'sim-data'; make_data(sim_data)
+        simdoc=json.loads((sim_data/'agent-sessions.json').read_text()); simdoc['sessions']=[{'id':'draft-sim','isDraft':True}]
+        (sim_data/'agent-sessions.json').write_text(json.dumps(simdoc))
+        sim_apps=root/'Applications-sim'; make_apps(sim_apps); sim_backups=root/'backups-sim'
+        sim_args=['bash',str(SCRIPTS/'install-update.sh'),str(incoming),'--apps-dir',str(sim_apps),'--data-dir',str(sim_data),'--backup-root',str(sim_backups),'--test-mode','--timeout','1','--health-seconds','0','--simulate-draft-cleanup']
+        assert_run(sim_args)
+        assert json.loads((sim_data/'agent-sessions.json').read_text())['sessions']==[]
+        bad_data=root/'sim-bad-data'; make_data(bad_data)
+        baddoc=json.loads((bad_data/'agent-sessions.json').read_text()); baddoc['sessions']=[{'id':'ordinary-sim','isDraft':False}]
+        (bad_data/'agent-sessions.json').write_text(json.dumps(baddoc))
+        bad_apps=root/'Applications-sim-bad'; make_apps(bad_apps); bad_backups=root/'backups-sim-bad'
+        bad_args=['bash',str(SCRIPTS/'install-update.sh'),str(incoming),'--apps-dir',str(bad_apps),'--data-dir',str(bad_data),'--backup-root',str(bad_backups),'--test-mode','--timeout','1','--health-seconds','0','--simulate-unbacked-session-removal']
+        assert_run(bad_args,expected=4)
+        assert (bad_apps/'Proma.app/Contents/Resources/old.txt').is_file()
+        assert len(list(bad_apps.glob('Proma.failed-*.app')))==1
+        print('INSTALL DRAFT SIMULATION PASS: backed draft cleanup accepted; unbacked non-draft removal rejected and app rolled back')
 
         # 未指定归档目录时演练模式不归档：第二次安装后本机保留 2 份。
         assert_run(common)

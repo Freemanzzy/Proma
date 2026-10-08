@@ -1514,3 +1514,10 @@
 - GPT-6.1 Sol：Codex 渠道仅新增 `gpt-6.1-sol: true`，`appliedPresetModelUpdates` 含 `openai-codex-gpt-6-1-sol-v1`，其他渠道/模型不变；用户确认正式版 6.1 Sol 正常回复、思考档位无“关闭”。
 - 健康检查：17888 监听，Serve 仅 443 → 17888，`[FATAL]`/`[ERROR]` 0，定时任务 17 → 17 无过期。打包时 serve-sim 模拟器冒烟因模拟器关机跳过。
 - 详见 handoff `install-result-2026-10-08-2.md`。
+
+## 2026-10-08: install-update 启动后比对支持草稿清理
+
+- `health-snapshot.py` 快照仅新增会话 ID 列表（不保存标题或正文）；可选 `--allow-draft-cleanup-dir` + `--since` 比对仅放行：会话减少且无新增 ID、会话数与 ID 差集吻合、减少 ID 恰等于 since 后新生成的 `draft-cleanup-*.json` ID 并集、所有备份条目 `isDraft=true` 且删除 ID 均不在启动后索引。除会话 count/IDs 外其他快照字段仍必须一致；未启用参数维持旧的完全相等逻辑。since 取安装启动前记录的 Unix 高精度时间。
+- `install-update.sh` 正式启动后及 `--test-mode` 均调用受限比对；增加仅与 `--test-mode` 同用的 `--simulate-draft-cleanup` 与 `--simulate-unbacked-session-removal`，用于在临时 `/tmp` 数据目录验证通过与拒绝回滚路径。
+- 更新 `CLAUDE.md` 的安装快照规则、`docs/personal/fallback-runbook.md` 的比对/模拟参数说明、`docs/personal/backlog.md` 对应待办状态。
+- 验证：Python 语法、`bash -n scripts/personal/install-update.sh` 通过；脚本集成测试通过，覆盖无删除、精确备份、未备份 ID、非草稿条目、过期备份、新增会话、旧模式严格拒绝，以及 `/tmp` test-mode 草稿删除通过与非草稿删除失败回滚。全量 `bun test` **728 pass / 0 fail，1,859 expect，110 files**。版本保持 `0.19.58`；未启动 dev、未触碰真实 `/Applications` 或 `~/.proma`，未安装或打包。
