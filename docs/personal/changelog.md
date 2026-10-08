@@ -1447,3 +1447,10 @@
 ## 2026-10-08: 合入 2026-10-08 批次
 
 - `fix/batch-20261008` --no-ff 合入 personal：协作子 Agent 跨渠道委派（可选 `channelId`，默认沿用父会话渠道；dev 智谱渠道 ok/ok2 内容级验收通过）、侧栏新会话重复条目去重、AskUser 确认按钮稳定标记。全量 706 pass / 0 fail；用户 11:50 验证通过。与 10-07 批次一起打包发布。interactions harness 点选后横幅消失问题转入 backlog。
+
+## 2026-10-08: 安装 903ff7ec（10-07 + 10-08 批次）
+
+- Claude Code 12:24 用 `install-update.sh` 安装 `903ff7ec`，替换 `03901c8a`（previous）；备份 `20261008-122456-10786`，BACKUP VERIFY PASS，前后 SNAPSHOT MATCH（会话 1025、渠道 7），定时任务 17 → 17、无过期。钥匙串弹 1 次。
+- 新服务诊断：启动后 web-remote-start、scheduler-start，此后每 10 分钟一次调度器心跳；无 Web Remote 重启、定时器重建或逾期告警。调度实际触发佐证：13:00 “Reddit 养号”于 13:00:11 创建会话，`runHistory` 记录 success（约 5 分钟），`nextRunAt` 推进到次日 13:00。
+- 用户确认：iPhone 附件菜单、手机子任务抽屉、桌面新建会话侧栏无重复、正式版 Codex 渠道正常对话（未受凌晨 dev 刷新失败影响）。“独立站”5 条旧 `isDraft` 草稿本批未清理，待确认是否仍可见。
+- 详见 handoff `install-result-2026-10-08.md`。
