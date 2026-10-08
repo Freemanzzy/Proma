@@ -1477,3 +1477,26 @@
 
 - `fix/batch-20261008b` --no-ff 合入 personal：harness AskUser 选项改为精确匹配（根因：子串匹配误中关闭按钮“关闭并终止 Agent”）；启动时清理未使用空草稿（备份后经会话管理器删除）。全量 719 pass / 0 fail；用户 15:02 在 dev 8443 验证正常。按用户要求暂不打包，随下一批一起发布。
 - 执行者首次经跨渠道委派运行在 ChatGPT 订阅 (Codex) · gpt-6-luna，36 分钟完成，无通道错误。父会话将一个作者邮箱不符的未推送提交按原内容重建为正确 noreply 作者。
+
+## 2026-10-08: ChatGPT 订阅渠道补齐 GPT-6.1 Sol
+
+- 新增精确 GPT-6 Sol 家族成员 `gpt-6.1-sol`，覆盖 reasoning profile、ultra 档、Fast Mode 和独立 272,000 context window；Pi Codex catalog 登记完整的 Responses provider 模型项，存量渠道只补缺失候选且不覆盖既有名称/启用状态。更新 `PERSONAL.md` 与 `docs/personal/backlog.md`。
+- 新增单测：精确模型识别与近似名排除、reasoning ultra、上下文与 Fast Mode、Pi catalog provider/baseUrl、存量渠道补入/幂等/禁用状态保留。
+- 定向测试 3 pass / 0 fail（模型族、Pi catalog），渠道迁移定向测试 3 pass / 0 fail；最终全量测试 **723 pass / 0 fail，1,846 expect，109 files**，`bun run typecheck`、`build:main` 与 `build:renderer` 均通过（renderer 有既存的大 chunk 警告）。
+- `codex exec -m gpt-6.1-sol "只回复 ok"` 使用 ChatGPT 账户返回 HTTP 400：该模型暂不支持 ChatGPT 账户的 Codex 模式；因此真实订阅对话验收未完成。未使用 Proma dev，不打包、不安装，版本仍为 0.19.58。
+
+## 2026-10-08: GPT-6.1 Sol 验收结论与档位范围更正
+
+- 更正上一条 GPT-6.1 Sol 记录：本机 codex-cli 0.154.0 的 HTTP 400 是客户端版本门控，不足以证明服务端或模型不支持。父会话复核显示，本机 models 清单不含 GPT-6.1 Sol、GPT-6 Sol、GPT-6 Luna；ChatGPT.app 自带 codex-cli 0.162.0-alpha.2 在同一账号执行 `codex exec -m gpt-6.1-sol` 返回 `ok`。Proma Pi SDK 请求包含 `originator: pi`、不含 `version` 头，能否请求成功待用户在 dev 重新登录 GPT 订阅后实测，不下最终结论。
+- 撤回本次引入的全局 `ultra` ThinkingLevel、Sol/Luna profile ultra 档、UI 标签与 Pi adapter 强转。GPT-6.1 Sol 和 GPT-6 Sol 使用相同 profile（off 至 max），ultra 支持范围另列 backlog，尚未实现。
+- GPT-6.1 Sol 与 GPT-6 Sol 共用现有 `CODEX_GPT_6_CONTEXT_WINDOW`。服务端 models 清单报告 GPT-6.1 Sol 上下文为 272,000，与现有 GPT-6 常量不同；本次沿用当前上游/既有取值，不另设模型特例。
+
+## 2026-10-08: Codex 登录模型列表合并 Proma 补丁
+
+- 修复 ChatGPT 登录/“从供应商获取”路径：Codex 可用模型列表现在在 SDK 列表后补入完整的 Proma catalog patch 模型，并去重、保留 SDK 顺序及原有 unsupported 过滤；缺失时只补 GPT-6 Astra、Sol、6.1 Sol、Luna，不引入其他 patch 模型。
+- 测试覆盖 SDK 缺失 6.1 Sol、已有项不重复与 unsupported 前缀过滤；定向 4 pass / 0 fail。全量 **726 pass / 0 fail，1,851 expect，110 files**；typecheck 与 `build:main` 通过。
+
+## 2026-10-08: GPT-6.1 Sol off effort 映射修正
+
+- 用户在 dev 手动加入 GPT-6.1 Sol 后实测对话成功，服务端接受 Proma `originator: pi` 请求；dev 标题生成日志另报 `reasoningEffort: none` 被拒，服务端支持值为 low/medium/high/xhigh/max。为 6.1 Sol 配置独立 profile：档位 low–max、默认 medium，off/minimal 编码为 low；GPT-6 Sol/Luna profile 不变。标题请求现根据模型 profile 的 Responses `off` 映射选择 effort，没有映射时仍传 none。
+- 测试：全量 **728 pass / 0 fail，1,859 expect，110 files**；typecheck、`build:main` 与 `build:renderer` 均通过。未启动 dev，符合用户要求。

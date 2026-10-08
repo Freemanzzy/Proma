@@ -7,7 +7,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import type { CodexOAuthCredentials } from '@proma/shared'
+import { resolveReasoningProfile, type CodexOAuthCredentials } from '@proma/shared'
 import type { AssistantMessage, Context, Model, OpenAICodexResponsesOptions } from '@earendil-works/pi-ai/compat'
 import type { Dispatcher } from 'undici'
 import { buildCodexModel } from './pi-model-registry'
@@ -24,6 +24,18 @@ type CodexTitleTransport = 'auto' | 'sse'
 
 const TITLE_MAX_OUTPUT_TOKENS = 40
 const TITLE_REQUEST_TIMEOUT_MS = 30_000
+
+function resolveCodexTitleReasoningEffort(modelId: string): NonNullable<OpenAICodexResponsesOptions['reasoningEffort']> {
+  const mapped = resolveReasoningProfile({
+    modelId,
+    transport: 'openai-responses',
+  })?.encodings['openai-responses']?.effortMap.off
+  if (mapped === 'none' || mapped === 'low' || mapped === 'medium' || mapped === 'high'
+    || mapped === 'xhigh' || mapped === 'max' || mapped === 'minimal') {
+    return mapped
+  }
+  return 'none'
+}
 
 export interface CodexTitleGenerationInput {
   modelId: string
@@ -116,9 +128,9 @@ export async function completeCodexTitleRequest(
         maxTokens: TITLE_MAX_OUTPUT_TOKENS,
         timeoutMs: TITLE_REQUEST_TIMEOUT_MS,
         maxRetries: 0,
-        // Codex Responses 仅接受 concise/detailed/auto；省略 summary 让 Pi 使用
-        // 协议默认的 auto，避免向 ChatGPT OAuth 发送不兼容的 off。
-        reasoningEffort: 'none',
+        // 仅在该模型 profile 明确提供 off 编码时使用；例如 GPT-6.1 Sol/Astra
+        // 把关闭思考映射为 low，而 GPT-6 Sol 仍使用 none。
+        reasoningEffort: resolveCodexTitleReasoningEffort(model.id),
         textVerbosity: 'low',
         toolChoice: 'none',
       } satisfies OpenAICodexResponsesOptions,

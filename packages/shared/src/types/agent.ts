@@ -1,4 +1,4 @@
-import { isGpt6AstraFamily, isGpt6LunaFamily, isGpt6SolFamily } from '../utils/model-family'
+import { isGpt6AstraFamily, isGpt61SolModel, isGpt6LunaFamily, isGpt6SolFamily } from '../utils/model-family'
 import type { ProviderType } from './channel'
 
 /**
@@ -93,6 +93,7 @@ export const CODEX_FAST_MODE_MODEL_IDS = [
 /** 模型 ID 是否可通过 ChatGPT Codex OAuth 使用 Fast Mode。 */
 export function isCodexFastModeSupportedModel(modelId: string | undefined): boolean {
   return isGpt6AstraFamily(modelId)
+    || isGpt61SolModel(modelId)
     || isGpt6SolFamily(modelId)
     || isGpt6LunaFamily(modelId)
     || (modelId !== undefined && (CODEX_FAST_MODE_MODEL_IDS as readonly string[]).includes(modelId.toLowerCase()))

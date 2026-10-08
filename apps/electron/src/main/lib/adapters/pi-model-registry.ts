@@ -16,7 +16,6 @@ import {
   getGeminiModelCapability,
   isGpt6AstraFamily,
   isGpt6LunaFamily,
-  isGpt6SolFamily,
   isMimoV26Model,
   resolveReasoningCapability,
   resolveReasoningProfile,
@@ -366,6 +365,8 @@ function applyPiModelCapabilityOverrides(model: PiCatalogModel | undefined): PiC
   return { ...model, input, ...(thinkingLevelMap ? { thinkingLevelMap } : {}) }
 }
 
+const CODEX_MODEL_FALLBACK_IDS = new Set(['gpt-6-astra', 'gpt-6-sol', 'gpt-6.1-sol', 'gpt-6-luna'])
+
 const CODEX_MODEL_PATCHES: PiCatalogModelPatch[] = [
   {
     id: 'gpt-6-astra',
@@ -388,6 +389,19 @@ const CODEX_MODEL_PATCHES: PiCatalogModelPatch[] = [
     baseUrl: CODEX_BASE_URL,
     reasoning: true,
     thinkingLevelMap: compilePiReasoningCapabilities('openai-responses', 'gpt-6-sol')?.thinkingLevelMap,
+    input: ['text', 'image'],
+    cost: ZERO_MODEL_COST,
+    contextWindow: CODEX_GPT_6_CONTEXT_WINDOW,
+    maxTokens: CODEX_MAX_TOKENS,
+  },
+  {
+    id: 'gpt-6.1-sol',
+    name: 'GPT-6.1 Sol',
+    api: 'openai-codex-responses',
+    provider: 'openai-codex',
+    baseUrl: CODEX_BASE_URL,
+    reasoning: true,
+    thinkingLevelMap: compilePiReasoningCapabilities('openai-responses', 'gpt-6.1-sol')?.thinkingLevelMap,
     input: ['text', 'image'],
     cost: ZERO_MODEL_COST,
     contextWindow: CODEX_GPT_6_CONTEXT_WINDOW,
@@ -822,7 +836,10 @@ function createCodexAstraFamilyModel(
   }
 }
 
-function mergeCodexModels(models: readonly PiCatalogModel[]): PiCatalogModel[] {
+function mergeCodexModels(
+  models: readonly PiCatalogModel[],
+  fallbackIds?: ReadonlySet<string>,
+): PiCatalogModel[] {
   const merged = models.map((model) => ({ ...model }))
   const indexById = new Map(merged.map((model, index) => [model.id, index]))
   for (const patch of CODEX_MODEL_PATCHES) {
@@ -830,7 +847,7 @@ function mergeCodexModels(models: readonly PiCatalogModel[]): PiCatalogModel[] {
     const existing = existingIndex !== undefined ? merged[existingIndex] : undefined
     if (existingIndex !== undefined && existing) {
       merged[existingIndex] = { ...existing, ...patch }
-    } else if (isCompleteCatalogModel(patch)) {
+    } else if ((!fallbackIds || fallbackIds.has(patch.id)) && isCompleteCatalogModel(patch)) {
       indexById.set(patch.id, merged.length)
       merged.push(patch)
     }
@@ -902,19 +919,28 @@ export async function buildCodexModel(sdk: PiSdk, input: CodexModelInput) {
   return { modelRuntime, model }
 }
 
+type CodexAvailableModelRuntime = {
+  getAvailable(provider: 'openai-codex'): Promise<PiCatalogModel[]>
+}
+
 /**
- * List Codex models through Pi's availability abstraction. Codex currently uses
- * Pi's catalog, while a future provider-level subscription filter will be honored automatically.
+ * List Codex models through Pi's availability abstraction, then merge the same
+ * complete local model fallbacks as the runtime catalog while preserving SDK order.
  */
 export async function listCodexModels(
   credentials: CodexOAuthCredentials,
+  createRuntime?: () => Promise<CodexAvailableModelRuntime>,
 ): Promise<{ id: string; name: string }[]> {
-  const sdk = await import('@earendil-works/pi-coding-agent')
-  const modelRuntime = await sdk.ModelRuntime.create({
-    credentials: createCodexRuntimeCredentialStore(credentials),
-    allowModelNetwork: false,
-  })
-  return (await modelRuntime.getAvailable('openai-codex'))
+  const modelRuntime = createRuntime
+    ? await createRuntime()
+    : await (async () => {
+      const sdk = await import('@earendil-works/pi-coding-agent')
+      return sdk.ModelRuntime.create({
+        credentials: createCodexRuntimeCredentialStore(credentials),
+        allowModelNetwork: false,
+      })
+    })()
+  return mergeCodexModels(await modelRuntime.getAvailable('openai-codex'), CODEX_MODEL_FALLBACK_IDS)
     .filter(isSupportedCodexModel)
     .map((model) => ({ id: model.id, name: model.name }))
 }

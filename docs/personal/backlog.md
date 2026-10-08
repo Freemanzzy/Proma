@@ -32,6 +32,8 @@
 | 2026-10-08 | harness `iphone:interactions` 的 AskUser 确认定位不稳定；计划审批与权限确认覆盖需确认 | 测试 | 已在 `AskUserBanner.tsx` 给确认按钮添加 `data-web-remote-ask-confirm="true"`，harness 优先使用该标记，回退到横幅最后一个可见按钮；计划审批仍按可见按钮名称“批准并完全自动执行”定位（按钮含同名可见文本），权限请求确认不在当前 interactions suite 中。两次 dev `iphone:interactions` 均在选择 A 后报未找到确认按钮（标记与末尾按钮均未命中），未进入计划审批步骤；需先查明选择后 AskUser DOM/按钮状态再继续，不能标为通过。两次 harness 均完成设备/Chrome/profile 清理，索引复核 831。
 | 2026-10-08 | harness `iphone:interactions` 点选 A 后 AskUser 横幅立即消失；真机交互正常 | 测试 | ✅ harness 根因已查明并修复：`findElement('A')` 把关闭按钮 `title="关闭并终止 Agent"` 的 A 子串当作选项，实际触碰 X；精确按选项 `span` 匹配后 `iphone:interactions` 全套通过（AskUser 回答 A、计划审批通过）。证据与截图见 `docs/personal/changelog.md` 2026-10-08 条目/本次会话工作台。权限请求确认仍未覆盖：应用只有 `bypassPermissions`、`plan` 两种模式，没有需确认模式，待父会话决策是否补足产品/测试路径 |
 | 2026-10-08 | 持久化的未使用草稿累积（正式版 9 条；用户确认侧栏不显示） | 数据 | ✅ 已实现启动时严格筛选空草稿，备份完整 metadata 后经会话删除 API 清理；dev 初始 832 会话/3 草稿，清理 3 后 829/0，备份权限 0600；全量测试通过。正式版 `~/.proma` 未触碰。详见 changelog 2026-10-08 “未使用草稿清理” |
+| 2026-10-08 | ChatGPT 订阅 (Codex) 模型目录缺少 GPT-6.1 Sol | Mac | ✅ 已加入精确模型识别、与 GPT-6 Sol 相同的推理档位/上下文、Fast Mode、Pi catalog 与存量渠道幂等候选迁移。CLI 0.154.0 的 HTTP 400 属客户端版本门控；ChatGPT.app 自带 codex-cli 0.162.0-alpha.2 在同一账号返回 ok。Pi SDK 请求头为 `originator: pi` 且无 `version` 头，是否可用待用户在 dev 重新登录后实测，不下最终结论 |
+| 2026-10-08 | Codex Ultra reasoning 档位 | 产品能力 | 未实现：虽然服务端模型清单报告支持 ultra，但该档位会影响 Astra/Sol 等多个模型系列；当前产品 ThinkingLevel/profile 类型没有 ultra，本次仅保持 6.1 Sol 与 6 Sol 一致，不扩展全局档位。后续需单独评估产品 UI、协议映射与各模型支持范围 |
 
 ## 后续待办（按建议优先级）
 
