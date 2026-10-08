@@ -1490,3 +1490,8 @@
 - 更正上一条 GPT-6.1 Sol 记录：本机 codex-cli 0.154.0 的 HTTP 400 是客户端版本门控，不足以证明服务端或模型不支持。父会话复核显示，本机 models 清单不含 GPT-6.1 Sol、GPT-6 Sol、GPT-6 Luna；ChatGPT.app 自带 codex-cli 0.162.0-alpha.2 在同一账号执行 `codex exec -m gpt-6.1-sol` 返回 `ok`。Proma Pi SDK 请求包含 `originator: pi`、不含 `version` 头，能否请求成功待用户在 dev 重新登录 GPT 订阅后实测，不下最终结论。
 - 撤回本次引入的全局 `ultra` ThinkingLevel、Sol/Luna profile ultra 档、UI 标签与 Pi adapter 强转。GPT-6.1 Sol 和 GPT-6 Sol 使用相同 profile（off 至 max），ultra 支持范围另列 backlog，尚未实现。
 - GPT-6.1 Sol 与 GPT-6 Sol 共用现有 `CODEX_GPT_6_CONTEXT_WINDOW`。服务端 models 清单报告 GPT-6.1 Sol 上下文为 272,000，与现有 GPT-6 常量不同；本次沿用当前上游/既有取值，不另设模型特例。
+
+## 2026-10-08: Codex 登录模型列表合并 Proma 补丁
+
+- 修复 ChatGPT 登录/“从供应商获取”路径：Codex 可用模型列表现在在 SDK 列表后补入完整的 Proma catalog patch 模型，并去重、保留 SDK 顺序及原有 unsupported 过滤；缺失时只补 GPT-6 Astra、Sol、6.1 Sol、Luna，不引入其他 patch 模型。
+- 测试覆盖 SDK 缺失 6.1 Sol、已有项不重复与 unsupported 前缀过滤；定向 4 pass / 0 fail。全量 **726 pass / 0 fail，1,851 expect，110 files**；typecheck 与 `build:main` 通过。
