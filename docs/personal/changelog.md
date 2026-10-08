@@ -1443,3 +1443,7 @@
 - 定向检查：`node --check scripts/personal/mobile-harness.mjs` 通过；Electron `build:renderer` 通过。
 - 按要求执行 `bash scripts/personal/mobile-preview.sh test iphone:interactions` 两次。两次均在选择 A 后、点击确认前失败：stable marker 与横幅最后可见按钮都未命中。首次结果 JSON `mobile-harness-1791403733692.json`，第二次 `mobile-harness-1791404499173.json`；第二次截图 `ask-question-card.png` 显示提问卡片及确认按钮，但当时页面 DOM 定位结果为空。没有进入计划审批步骤，因此不标记为通过，也未继续修改同一测试第三次。
 - 两次运行均报告测试设备已撤销、Chrome/profile 已清理；第二次准确 HTTP 429 状态响应 **0**、新增页面异常 **0**。会话索引经核对回到 **831**，dev 与 8443 保持开启，正式版进程未触碰。
+
+## 2026-10-08: 合入 2026-10-08 批次
+
+- `fix/batch-20261008` --no-ff 合入 personal：协作子 Agent 跨渠道委派（可选 `channelId`，默认沿用父会话渠道；dev 智谱渠道 ok/ok2 内容级验收通过）、侧栏新会话重复条目去重、AskUser 确认按钮稳定标记。全量 706 pass / 0 fail；用户 11:50 验证通过。与 10-07 批次一起打包发布。interactions harness 点选后横幅消失问题转入 backlog。
