@@ -4,7 +4,7 @@
 
 ## 待合入分支（已验证、未发布）
 
-- **已合入 personal、尚未打包安装（2026-10-08 15:02 用户决定攒批）**：`fix/batch-20261008b`（AskUser harness 精确匹配选项；启动时清理未使用空草稿，正式版首次启动预计清理约 9 条，日志 `event=draft-cleanup`）。下一批有改动时一起打包；安装申请需写明草稿清理与备份文件位置。
+- **已合入 personal、打包中（2026-10-08 20:22）**：`fix/batch-20261008b`（AskUser harness 精确匹配；启动时清理未使用空草稿，正式版首次启动预计清理约 9 条，日志 `event=draft-cleanup`）+ `feat/codex-gpt61-sol`（ChatGPT 订阅渠道 GPT-6.1 Sol）。
 
 | 分支 | 基于 | 内容 | 验证 | 状态 |
 |---|---|---|---|---|
@@ -53,7 +53,7 @@
 - **真实负载测试触发条件**（父会话在派单前判断，并在交接/安装申请写明做了或没做及原因）：改动涉及手机列表数据内容（字段、投影、瘦身）、历史加载（分页、加载更早、按需媒体）、传输层（WebSocket、压缩、分块、超时、重连同步）、首次加载前端资源明显变大、同步官方版本且上游改了会话存储或 Web Remote、用户反馈手机变慢。其余改动用功能回归 + 打包冒烟即可。
 - **个人自建 Skill 预装**：`~/.proma/default-skills/` 是新建工作区复制 Skill 的模板。Proma 启动时只同步安装包内置的 slug（缺失才复制、版本更高才覆盖），并只删除 `RETIRED_DEFAULT_SKILL_SLUGS` 列出的 slug，因此放入其中的个人 Skill（目前 `cliproxy-image` 1.0.1）不会被更新覆盖。副作用：Skills 页面会把它归入“内置”分组。修改个人 Skill 时需同步 `default-skills` 与各工作区副本。若以后上游内置同名 slug，会被上游版本覆盖，届时改名。
 - **dev 数据**：`~/.proma-dev` 含按 `scripts/personal/import-session-workspace.py` 选择性导入的真实会话（单工作区 allowlist），以及用户 2026-10-01 授权复制的正式渠道 `channels.json`（权限 600，原文件改名保留）。只在本机，不提交仓库；密钥不解密、不打印。dev 中让 Agent 运行只用新建会话，不在导入的旧会话中运行（其附加目录可能指向真实仓库）；dev 对话消耗真实 API 额度。8443 只在测试期间开启。
-- **dev 中禁用 OAuth 渠道**（2026-10-08）：dev 的 `channels.json` 是正式渠道副本，ChatGPT 订阅 (Codex) 等 OAuth 渠道的 access token 过期后，dev 会用正式版已轮换的旧 refresh token 刷新并失败，还可能触发服务端重放检测、影响正式版登录。dev 验收只用 API Key 渠道（clipproxyapi、智谱、DeepSeek）；需要验证 OAuth 渠道时在正式版做。
+- **dev 中禁用 OAuth 渠道**（2026-10-08）：dev 的 `channels.json` 是正式渠道副本，ChatGPT 订阅 (Codex) 等 OAuth 渠道的 access token 过期后，dev 会用正式版已轮换的旧 refresh token 刷新并失败，还可能触发服务端重放检测、影响正式版登录。dev 验收默认只用 API Key 渠道（clipproxyapi、智谱、DeepSeek）；确需验证 OAuth 渠道时，由用户在 dev 中**重新登录**取得 dev 自己的凭据（2026-10-08 验证 GPT-6.1 Sol 时如此操作，正式版登录不受影响），不得使用复制来的过期凭据。
 
 
 - 用户 2026-10-07 决定：不把 Proma 加入登录项，继续由用户手动启动。

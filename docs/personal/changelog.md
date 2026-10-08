@@ -1500,3 +1500,8 @@
 
 - 用户在 dev 手动加入 GPT-6.1 Sol 后实测对话成功，服务端接受 Proma `originator: pi` 请求；dev 标题生成日志另报 `reasoningEffort: none` 被拒，服务端支持值为 low/medium/high/xhigh/max。为 6.1 Sol 配置独立 profile：档位 low–max、默认 medium，off/minimal 编码为 low；GPT-6 Sol/Luna profile 不变。标题请求现根据模型 profile 的 Responses `off` 映射选择 effort，没有映射时仍传 none。
 - 测试：全量 **728 pass / 0 fail，1,859 expect，110 files**；typecheck、`build:main` 与 `build:renderer` 均通过。未启动 dev，符合用户要求。
+
+## 2026-10-08: 合入 GPT-6.1 Sol 支持
+
+- `feat/codex-gpt61-sol` --no-ff 合入 personal：ChatGPT 订阅 (Codex) 渠道加入 `gpt-6.1-sol`（预设迁移 `openai-codex-gpt-6-1-sol-v1` 补入存量渠道；登录/“从供应商获取”也合并 Proma 补丁模型）；6.1 Sol 独立 reasoning profile（low–max，默认 medium，无 off——服务端拒绝 `none`）；Codex 标题生成按模型 profile 选择 effort（6.1 Sol/Astra 用 low）。全量 728 pass / 0 fail。
+- 用户 20:22 在 dev（重新登录 GPT 订阅）验证：6.1 Sol 正常对话、档位无“关闭”、标题正常生成（“自我介绍”）、6-Sol 档位不变。服务端接受 Proma `originator: pi` 请求；本机 codex-cli 0.154 的 400 属客户端版本门控。
