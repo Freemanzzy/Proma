@@ -22,6 +22,8 @@ export const CODEX_GPT_54_MINI_CONTEXT_WINDOW = 400_000
 export const CODEX_GPT_56_CONTEXT_WINDOW = 372_000
 /** ChatGPT Codex 订阅中的 GPT-6 Astra、Sol 与 Luna 上下文窗口。 */
 export const CODEX_GPT_6_CONTEXT_WINDOW = 372_000
+/** ChatGPT Codex 订阅中的 GPT-6.1 Sol 上下文窗口。 */
+export const CODEX_GPT_61_SOL_CONTEXT_WINDOW = 272_000
 
 /**
  * 为 ChatGPT Codex 中的 GPT-5.x / GPT-6 模型返回统一上下文窗口。
@@ -30,6 +32,9 @@ export const CODEX_GPT_6_CONTEXT_WINDOW = 372_000
  * provider catalog 决定，避免把不同 SKU 误写成同一窗口。
  */
 export function inferCodexAlignedGPT5ContextWindow(modelId: string | undefined): number | undefined {
+  if (modelId?.trim().toLowerCase().replace(/\[1m\]$/i, '') === 'gpt-6.1-sol') {
+    return CODEX_GPT_61_SOL_CONTEXT_WINDOW
+  }
   if (isGpt6AstraFamily(modelId) || isGpt6SolFamily(modelId) || isGpt6LunaFamily(modelId)) {
     return CODEX_GPT_6_CONTEXT_WINDOW
   }

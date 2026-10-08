@@ -1477,3 +1477,10 @@
 
 - `fix/batch-20261008b` --no-ff 合入 personal：harness AskUser 选项改为精确匹配（根因：子串匹配误中关闭按钮“关闭并终止 Agent”）；启动时清理未使用空草稿（备份后经会话管理器删除）。全量 719 pass / 0 fail；用户 15:02 在 dev 8443 验证正常。按用户要求暂不打包，随下一批一起发布。
 - 执行者首次经跨渠道委派运行在 ChatGPT 订阅 (Codex) · gpt-6-luna，36 分钟完成，无通道错误。父会话将一个作者邮箱不符的未推送提交按原内容重建为正确 noreply 作者。
+
+## 2026-10-08: ChatGPT 订阅渠道补齐 GPT-6.1 Sol
+
+- 新增精确 GPT-6 Sol 家族成员 `gpt-6.1-sol`，覆盖 reasoning profile、ultra 档、Fast Mode 和独立 272,000 context window；Pi Codex catalog 登记完整的 Responses provider 模型项，存量渠道只补缺失候选且不覆盖既有名称/启用状态。更新 `PERSONAL.md` 与 `docs/personal/backlog.md`。
+- 新增单测：精确模型识别与近似名排除、reasoning ultra、上下文与 Fast Mode、Pi catalog provider/baseUrl、存量渠道补入/幂等/禁用状态保留。
+- 定向测试 3 pass / 0 fail（模型族、Pi catalog），渠道迁移定向测试 3 pass / 0 fail；最终全量测试 **723 pass / 0 fail，1,846 expect，109 files**，`bun run typecheck`、`build:main` 与 `build:renderer` 均通过（renderer 有既存的大 chunk 警告）。
+- `codex exec -m gpt-6.1-sol "只回复 ok"` 使用 ChatGPT 账户返回 HTTP 400：该模型暂不支持 ChatGPT 账户的 Codex 模式；因此真实订阅对话验收未完成。未使用 Proma dev，不打包、不安装，版本仍为 0.19.58。

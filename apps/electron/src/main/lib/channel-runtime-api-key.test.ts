@@ -92,6 +92,28 @@ describe('渠道运行时认证解析', () => {
       .resolves.toBe('oauth-access-token')
   })
 
+  test('Given 存量 Codex 渠道 When 迁移 6.1 Sol Then 补入默认候选且保留用户禁用状态并幂等', () => {
+    writeChannels([
+      {
+        id: 'codex-channel',
+        name: 'ChatGPT',
+        provider: 'openai-codex',
+        baseUrl: '',
+        apiKey: '',
+        models: [{ id: 'gpt-6-sol', name: 'My Sol', enabled: false }],
+        enabled: true,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ])
+
+    const first = channelManager.listChannels().find(({ id }) => id === 'codex-channel')
+    expect(first?.models).toContainEqual({ id: 'gpt-6-sol', name: 'My Sol', enabled: false })
+    expect(first?.models).toContainEqual({ id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', enabled: true })
+    const second = channelManager.listChannels().find(({ id }) => id === 'codex-channel')
+    expect(second?.models).toEqual(first?.models)
+  })
+
   test('Given 普通渠道 When 解析运行时 key Then 返回解密后的 API Key', async () => {
     writeChannels([
       {

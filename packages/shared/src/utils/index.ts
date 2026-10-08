@@ -24,6 +24,7 @@ export {
   CODEX_GPT_54_MINI_CONTEXT_WINDOW,
   CODEX_GPT_56_CONTEXT_WINDOW,
   CODEX_GPT_6_CONTEXT_WINDOW,
+  CODEX_GPT_61_SOL_CONTEXT_WINDOW,
   inferCodexAlignedGPT5ContextWindow,
   supports1MContext,
   inferContextWindow,

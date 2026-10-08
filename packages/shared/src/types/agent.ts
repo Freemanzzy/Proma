@@ -74,7 +74,7 @@ export type ThinkingConfig =
 export type AgentEffort = 'low' | 'medium' | 'high' | 'max'
 
 /** Agent 思考等级（用于 Pi runtime；Claude runtime 继续使用 ThinkingConfig/AgentEffort） */
-export type AgentThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export type AgentThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'
 
 // Model-specific reasoning profiles and level normalization live in reasoning-profile.ts.
 
@@ -87,6 +87,7 @@ export const CODEX_FAST_MODE_MODEL_IDS = [
   'gpt-5.6-luna',
   'gpt-6-astra',
   'gpt-6-sol',
+  'gpt-6.1-sol',
   'gpt-6-luna',
 ] as const
 

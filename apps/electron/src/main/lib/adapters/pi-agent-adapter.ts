@@ -1539,7 +1539,8 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         resourceLoader,
         sessionManager,
         model,
-        thinkingLevel: input.thinkingLevel ?? 'off',
+        // Pi's upstream ThinkingLevel union predates Codex's ultra effort; the provider profile validates it.
+        thinkingLevel: (input.thinkingLevel ?? 'off') as never,
         noTools: 'builtin',
         customTools,
       })
