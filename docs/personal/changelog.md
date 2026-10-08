@@ -1505,3 +1505,12 @@
 
 - `feat/codex-gpt61-sol` --no-ff 合入 personal：ChatGPT 订阅 (Codex) 渠道加入 `gpt-6.1-sol`（预设迁移 `openai-codex-gpt-6-1-sol-v1` 补入存量渠道；登录/“从供应商获取”也合并 Proma 补丁模型）；6.1 Sol 独立 reasoning profile（low–max，默认 medium，无 off——服务端拒绝 `none`）；Codex 标题生成按模型 profile 选择 effort（6.1 Sol/Astra 用 low）。全量 728 pass / 0 fail。
 - 用户 20:22 在 dev（重新登录 GPT 订阅）验证：6.1 Sol 正常对话、档位无“关闭”、标题正常生成（“自我介绍”）、6-Sol 档位不变。服务端接受 Proma `originator: pi` 请求；本机 codex-cli 0.154 的 400 属客户端版本门控。
+
+## 2026-10-08: 安装 b3a24028（10-08b 批次 + GPT-6.1 Sol）
+
+- Claude Code 20:31 安装 `b3a24028`，替换 `903ff7ec`（previous）；备份 `20261008-203118-91282`，BACKUP VERIFY PASS（24,817 条目）；`20261008-122456-10786` 归档到外置硬盘。钥匙串弹 1 次。
+- **流程偏差（用户授权“方案 2”）**：标准 `install-update.sh` 启动后快照比对要求会话数完全一致，本批启动即清理草稿会被误判并自动回滚（回滚只换应用、不恢复已删草稿）。Claude Code 用脚本副本安装，仅把启动后比对改为“除会话数外全部一致，且减少数 = 最新 `draft-cleanup-*.json` 条目数、ID ⊆ 安装前只读预演的 8 个 ID、均已不在索引中”；仓库脚本未改。后续修正见下一条待办。
+- 草稿清理：安装前只读预演命中 8 条（独立站 5、默认工作区 3；10-08 12:56 新草稿未满 24 小时保留），用户看过清单后同意。启动日志 `draft-cleanup removed=8 skipped=0 backup=draft-cleanup-2026-10-08T12-31-56-677Z.json`；备份 0600、8 条，ID 与预演一致；会话 1034 → 1026，无其他条目丢失。另有 2 条会话被上游既有的 7 天自动归档标记为 archived，与本批无关。
+- GPT-6.1 Sol：Codex 渠道仅新增 `gpt-6.1-sol: true`，`appliedPresetModelUpdates` 含 `openai-codex-gpt-6-1-sol-v1`，其他渠道/模型不变；用户确认正式版 6.1 Sol 正常回复、思考档位无“关闭”。
+- 健康检查：17888 监听，Serve 仅 443 → 17888，`[FATAL]`/`[ERROR]` 0，定时任务 17 → 17 无过期。打包时 serve-sim 模拟器冒烟因模拟器关机跳过。
+- 详见 handoff `install-result-2026-10-08-2.md`。
