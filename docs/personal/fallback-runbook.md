@@ -40,7 +40,7 @@
 **先判断阶段**：`ls /Applications/Proma.app/Contents/Resources/personal-build.json`
 - 不存在 → 仍是官方版（并存期或切换失败已回退）。个人版问题只影响开发实例（`~/.proma-dev`），不要动 `/Applications` 与 `~/.proma`；§3 不适用。
 - 存在 → 已切换，按下文处理。
-- 对照基线：`~/.proma-switch-backups/pre-switch-snapshot.json`（切换前）与每次更新备份目录里的快照；`python3 scripts/personal/health-snapshot.py ~/.proma --output /tmp/now.json && python3 scripts/personal/health-snapshot.py --compare <基线> /tmp/now.json`。
+- 对照基线：`~/.proma-switch-backups/pre-switch-snapshot.json`（切换前）与每次更新备份目录里的快照；`python3 scripts/personal/health-snapshot.py ~/.proma --output /tmp/now.json && python3 scripts/personal/health-snapshot.py --compare <基线> /tmp/now.json`。安装启动可能清理未使用草稿；只有减少的会话 ID 与 `--since` 之后生成的 `backups/draft-cleanup-*.json` 中 ID 并集完全相同，且备份条目全部为草稿时，安装脚本才会接受该差异；其他字段仍必须一致。
 - 周检报告只是生成时刻的快照；同步完成后以 `PERSONAL.md` 为准。
 
 ```bash
@@ -192,7 +192,7 @@ python3 scripts/personal/health-snapshot.py --compare /tmp/health-snapshot-befor
 
 - 不要在 `personal` 分支上 `reset --hard` 或强推；在 `recover/*` 分支修复，验证通过后请用户确认再合并。
 - `scripts/personal/package-personal.sh` 负责安装依赖、typecheck、基线测试、全部 Electron 构建及 arm64 目录包；产物仅写入仓库 `apps/electron/out/`，不启动、不安装。
-- `scripts/personal/install-update.sh NEW_APP` 默认安装到 `/Applications/Proma.app` 并备份 `~/.proma`；安装时先复制到同卷 `.Proma.installing-*`，再原子改名，并用 EXIT/ERR/INT/TERM 恢复原应用。只可在 `/tmp` 用 `--test-mode --apps-dir --data-dir --backup-root` 演练。`--dry-run` 不写数据；`--simulate-health-failure` 与 `--simulate-copy-failure` 可分别演练健康失败回滚和 staging 复制中断。新版失败时会在停止本次跟踪的新版 PID/子进程后保留 `Proma.failed-*.app`（仍留在 `/Applications`）；脚本不自动还原数据或移动官方更新缓存。默认健康观察 60 秒，更新前后快照写在时间戳备份目录的外层，不污染 `proma/` 副本。上一版应用（2026-09-27 起）保存在 `--backup-root` 下的 `previous/Proma.app`（默认即 `~/.proma-switch-backups/previous/Proma.app`，可用 `--previous-dir` 覆盖），不再放进 `/Applications`；替换已存在的上一版时先移入 `$HOME/.Trash`（可自行清空，重名加时间戳后缀，绝不覆盖）；旧版脚本留在 `/Applications/Proma.previous.app` 的上一版会在下次安装开始前自动迁移到新位置。
+- `scripts/personal/install-update.sh NEW_APP` 默认安装到 `/Applications/Proma.app` 并备份 `~/.proma`；安装时先复制到同卷 `.Proma.installing-*`，再原子改名，并用 EXIT/ERR/INT/TERM 恢复原应用。只可在 `/tmp` 用 `--test-mode --apps-dir --data-dir --backup-root` 演练。`--dry-run` 不写数据；`--simulate-health-failure` 与 `--simulate-copy-failure` 可分别演练健康失败回滚和 staging 复制中断；`--simulate-draft-cleanup` 与 `--simulate-unbacked-session-removal` 仅供 `/tmp` 的 `--test-mode` 演练草稿清理通过及未备份删除回滚。健康快照只在 `--allow-draft-cleanup-dir <DATA_DIR>/backups --since <启动前Unix时间戳>` 同时启用时接受符合规则的删除；不启用时仍要求快照完全一致。新版失败时会在停止本次跟踪的新版 PID/子进程后保留 `Proma.failed-*.app`（仍留在 `/Applications`）；脚本不自动还原数据或移动官方更新缓存。默认健康观察 60 秒，更新前后快照写在时间戳备份目录的外层，不污染 `proma/` 副本。上一版应用（2026-09-27 起）保存在 `--backup-root` 下的 `previous/Proma.app`（默认即 `~/.proma-switch-backups/previous/Proma.app`，可用 `--previous-dir` 覆盖），不再放进 `/Applications`；替换已存在的上一版时先移入 `$HOME/.Trash`（可自行清空，重名加时间戳后缀，绝不覆盖）；旧版脚本留在 `/Applications/Proma.previous.app` 的上一版会在下次安装开始前自动迁移到新位置。
 - `python3 scripts/personal/verify-backup.py SRC BACKUP` 对比目录或 zip 的文件内容、大小、SHA-256、符号链接目标和权限；可多次传 `--exclude GLOB`。
 - 修复后在 `docs/personal/changelog.md` 末尾追加 `## YYYY-MM-DD: 故障回退记录`（原因、操作、结果）。
 

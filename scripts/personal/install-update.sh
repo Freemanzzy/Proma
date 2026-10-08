@@ -8,6 +8,9 @@ DRY_RUN=0
 TEST_MODE=0
 SIMULATE_FAILURE=0
 SIMULATE_COPY_FAILURE=0
+SIMULATE_DRAFT_CLEANUP=0
+SIMULATE_UNBACKED_REMOVAL=0
+DRAFT_CLEANUP_SINCE=0
 APPS_DIR="/Applications"
 DATA_DIR="$HOME/.proma"
 BACKUP_ROOT="$HOME/.proma-switch-backups"
@@ -23,6 +26,7 @@ usage() {
        [--apps-dir DIR] [--data-dir DIR] [--backup-root DIR] [--logs-dir DIR]
        [--previous-dir DIR] [--archive-dir DIR | --no-archive] [--keep-local N]
        [--dry-run] [--test-mode] [--simulate-health-failure] [--simulate-copy-failure]
+       [--simulate-draft-cleanup | --simulate-unbacked-session-removal]
 安装成功后，除最新 N 份（默认 1）外的旧更新前备份会复制到 --archive-dir（默认外置硬盘
 “proma 备份/switch-backups”），校验通过后才删除本机副本；外置硬盘未挂载或校验失败则保留本机副本。
 默认目标为 /Applications 与 ~/.proma；--test-mode 仅允许配合临时目录使用，跳过真实应用启动。
@@ -50,6 +54,8 @@ while (($#)); do
     --test-mode) TEST_MODE=1; shift;;
     --simulate-health-failure) SIMULATE_FAILURE=1; shift;;
     --simulate-copy-failure) SIMULATE_COPY_FAILURE=1; shift;;
+    --simulate-draft-cleanup) SIMULATE_DRAFT_CLEANUP=1; shift;;
+    --simulate-unbacked-session-removal) SIMULATE_UNBACKED_REMOVAL=1; shift;;
     -h|--help) usage; exit 0;;
     --*) echo "未知参数: $1" >&2; usage >&2; exit 2;;
     *) if [[ -n "$NEW_APP" ]]; then echo '只允许一个新应用路径' >&2; exit 2; fi; NEW_APP="$1"; shift;;
@@ -58,8 +64,11 @@ done
 [[ -n "$NEW_APP" ]] || { usage >&2; exit 2; }
 [[ "$KEEP_LOCAL" =~ ^[1-9][0-9]*$ ]] || { echo 'ERROR: --keep-local 必须是正整数（至少保留 1 份）。' >&2; exit 2; }
 [[ "$TIMEOUT" =~ ^[0-9]+$ && "$HEALTH_SECONDS" =~ ^[0-9]+$ ]] || { echo 'ERROR: timeout 与 health-seconds 必须是非负整数。' >&2; exit 2; }
-if (( SIMULATE_FAILURE || SIMULATE_COPY_FAILURE )) && (( ! TEST_MODE )); then
+if (( SIMULATE_FAILURE || SIMULATE_COPY_FAILURE || SIMULATE_DRAFT_CLEANUP || SIMULATE_UNBACKED_REMOVAL )) && (( ! TEST_MODE )); then
   echo 'ERROR: 模拟故障参数只允许与 --test-mode 一起使用。' >&2; exit 2
+fi
+if (( SIMULATE_DRAFT_CLEANUP && SIMULATE_UNBACKED_REMOVAL )); then
+  echo 'ERROR: 草稿清理模拟与未备份会话删除模拟不能同时使用。' >&2; exit 2
 fi
 NEW_APP="$(cd "$(dirname "$NEW_APP")" && pwd)/$(basename "$NEW_APP")"
 APPS_DIR="$(python3 -c 'import os,sys;print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$APPS_DIR")"
@@ -338,6 +347,8 @@ cp -a "$DATA_DIR" "$BACKUP/proma"
 python3 "$ROOT/scripts/personal/verify-backup.py" "$DATA_DIR" "$BACKUP/proma"
 BEFORE_SNAPSHOT="$BACKUP/health-snapshot-before.json"
 AFTER_SNAPSHOT="$BACKUP/health-snapshot-after.json"
+# 记录在启动前的快照时点；只有此后生成的草稿清理备份才可解释会话减少。
+DRAFT_CLEANUP_SINCE="$(python3 -c 'import time; print(time.time())')"
 python3 "$ROOT/scripts/personal/health-snapshot.py" "$DATA_DIR" --output "$BEFORE_SNAPSHOT" >/dev/null
 # Capture the copy as a separate snapshot outside the proma directory; verify all requested object counts.
 python3 "$ROOT/scripts/personal/health-snapshot.py" "$BACKUP/proma" --output "$BACKUP/health-snapshot-backup.json" >/dev/null
@@ -419,8 +430,34 @@ if [[ "$SIMULATE_FAILURE" == 1 ]]; then
 fi
 if [[ "$TEST_MODE" == 1 ]]; then
   echo 'TEST-MODE: 已跳过真实应用启动与进程/端口健康检查；执行只读数据快照比对。'
+  if (( SIMULATE_DRAFT_CLEANUP || SIMULATE_UNBACKED_REMOVAL )); then
+    python3 - "$DATA_DIR" "$SIMULATE_DRAFT_CLEANUP" <<'PY'
+import json,sys
+from pathlib import Path
+from datetime import datetime,timezone
+root=Path(sys.argv[1]); doc=json.loads((root/'agent-sessions.json').read_text())
+sessions=doc.get('sessions') if isinstance(doc,dict) else doc
+if not isinstance(sessions,list) or not sessions: raise SystemExit('simulation needs at least one session')
+if sys.argv[2]=='1':
+    selected=[s for s in sessions if isinstance(s,dict) and s.get('isDraft') is True]
+    if not selected: raise SystemExit('draft-cleanup simulation needs a draft session fixture')
+    backup=root/'backups'; backup.mkdir(exist_ok=True)
+    stamp=datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace(':','-').replace('.','-')
+    (backup/f'draft-cleanup-{stamp}.json').write_text(json.dumps({'createdAt':datetime.now(timezone.utc).timestamp(),'sessions':selected},indent=2))
+else:
+    selected=[s for s in sessions if isinstance(s,dict) and s.get('isDraft') is not True]
+    if not selected: raise SystemExit('unbacked-removal simulation needs a non-draft session fixture')
+    selected=selected[:1]
+removed={str(s.get('id')) for s in selected}
+remaining=[s for s in sessions if not isinstance(s,dict) or str(s.get('id')) not in removed]
+if isinstance(doc,dict): doc['sessions']=remaining
+else: doc=remaining
+(root/'agent-sessions.json').write_text(json.dumps(doc,indent=2))
+print(f'SIMULATION: removed={len(removed)} backup={sys.argv[2]=="1"}')
+PY
+  fi
   python3 "$ROOT/scripts/personal/health-snapshot.py" "$DATA_DIR" --output "$AFTER_SNAPSHOT" >/dev/null
-  python3 "$ROOT/scripts/personal/health-snapshot.py" --compare "$BEFORE_SNAPSHOT" "$AFTER_SNAPSHOT"
+  python3 "$ROOT/scripts/personal/health-snapshot.py" --compare "$BEFORE_SNAPSHOT" "$AFTER_SNAPSHOT" --allow-draft-cleanup-dir "$DATA_DIR/backups" --since "$DRAFT_CLEANUP_SINCE" || { echo 'TEST-MODE 健康快照不匹配；触发安装回滚。' >&2; exit 4; }
 else
   APP_BEFORE_PIDS="$(find_app_pids "$APP_PATH/Contents/MacOS/Proma")"
   STARTED_AT_EPOCH="$(date -u +%s)"
@@ -482,7 +519,7 @@ if not starts: raise SystemExit('new personal startup marker missing after launc
 if any('[FATAL]' in line for line in lines[starts[-1]+1:]): raise SystemExit('fatal event after latest personal startup')
 PY
   python3 "$ROOT/scripts/personal/health-snapshot.py" "$DATA_DIR" --output "$AFTER_SNAPSHOT" >/dev/null || { echo '健康检查失败：启动后健康快照不完整。' >&2; exit 4; }
-  python3 "$ROOT/scripts/personal/health-snapshot.py" --compare "$BEFORE_SNAPSHOT" "$AFTER_SNAPSHOT" || { echo '健康检查失败：会话/Automation/渠道/格式版本/链接数与备份快照不同。' >&2; exit 4; }
+  python3 "$ROOT/scripts/personal/health-snapshot.py" --compare "$BEFORE_SNAPSHOT" "$AFTER_SNAPSHOT" --allow-draft-cleanup-dir "$DATA_DIR/backups" --since "$DRAFT_CLEANUP_SINCE" || { echo '健康检查失败：除本次启动草稿清理外，数据与备份快照不同。' >&2; exit 4; }
   if [[ -n "$REMOTE_PORT" ]]; then
     owners="$(port_listeners "$REMOTE_PORT")"
     own_listener=0
