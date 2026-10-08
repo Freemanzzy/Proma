@@ -329,12 +329,12 @@ const OPENAI_ASTRA_PROFILE: ReasoningProfile = {
 /** GPT-6 Sol/Luna allow disabling reasoning and default to medium effort. */
 const OPENAI_SOL_LUNA_PROFILE: ReasoningProfile = {
   id: 'openai-reasoning-sol-luna',
-  levels: ['off', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+  levels: ['off', 'low', 'medium', 'high', 'xhigh', 'max'],
   defaultLevel: 'medium',
   normalize: (level) => level === 'minimal' ? 'low' : level ?? 'medium',
   encodings: {
-    'openai-completions': { kind: 'openai-reasoning-effort', effortMap: { off: 'none', minimal: 'low', xhigh: 'xhigh', max: 'max', ultra: 'ultra' } },
-    'openai-responses': { kind: 'openai-reasoning-effort', effortMap: { off: 'none', minimal: 'low', xhigh: 'xhigh', max: 'max', ultra: 'ultra' } },
+    'openai-completions': { kind: 'openai-reasoning-effort', effortMap: { off: 'none', minimal: 'low', xhigh: 'xhigh', max: 'max' } },
+    'openai-responses': { kind: 'openai-reasoning-effort', effortMap: { off: 'none', minimal: 'low', xhigh: 'xhigh', max: 'max' } },
   },
 }
 
@@ -384,7 +384,7 @@ export function resolveReasoningProfile(input: ResolveReasoningProfileInput): Re
   return profile?.encodings[input.transport] ? profile : undefined
 }
 
-const PI_EXTENDED_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'] as const satisfies readonly AgentThinkingLevel[]
+const PI_EXTENDED_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const satisfies readonly AgentThinkingLevel[]
 
 function getPiCatalogThinkingLevels(catalog: PiCatalogReasoningMetadata): AgentThinkingLevel[] {
   if (!catalog.reasoning) return []

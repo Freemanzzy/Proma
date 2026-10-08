@@ -314,7 +314,6 @@ const OPENAI_THINKING_LABELS: Record<OpenAIThinkingLevel, string> = {
   high: '高',
   xhigh: '极高',
   max: '最大',
-  ultra: 'Ultra',
 }
 
 function normalizeOpenAIThinkingLevel(

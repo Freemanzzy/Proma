@@ -10,7 +10,6 @@ import {
   CODEX_GPT_54_MINI_CONTEXT_WINDOW,
   CODEX_GPT_56_CONTEXT_WINDOW,
   CODEX_GPT_6_CONTEXT_WINDOW,
-  CODEX_GPT_61_SOL_CONTEXT_WINDOW,
   extractZhipuCodingTeamApiToken,
   inferContextWindow,
   inferCodexAlignedGPT5ContextWindow,
@@ -404,7 +403,7 @@ const CODEX_MODEL_PATCHES: PiCatalogModelPatch[] = [
     thinkingLevelMap: compilePiReasoningCapabilities('openai-responses', 'gpt-6.1-sol')?.thinkingLevelMap,
     input: ['text', 'image'],
     cost: ZERO_MODEL_COST,
-    contextWindow: CODEX_GPT_61_SOL_CONTEXT_WINDOW,
+    contextWindow: CODEX_GPT_6_CONTEXT_WINDOW,
     maxTokens: CODEX_MAX_TOKENS,
   },
   {

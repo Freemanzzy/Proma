@@ -12,12 +12,13 @@ describe('GPT-6.1 Sol model support', () => {
     expect(isGpt6SolFamily('gpt-6.10-sol')).toBe(false)
   })
 
-  test('exposes GPT-6.1 Sol reasoning profile, ultra tier, context window, and Fast Mode', () => {
-    const profile = resolveReasoningProfile({ modelId: 'gpt-6.1-sol', transport: 'openai-responses' })
-    expect(profile?.id).toBe('openai-reasoning-sol-luna')
-    expect(profile?.levels).toContain('ultra')
-    expect(profile?.encodings['openai-responses']?.effortMap?.ultra).toBe('ultra')
-    expect(inferContextWindow('gpt-6.1-sol')).toBe(272_000)
+  test('uses the GPT-6 Sol reasoning levels and context window and supports Fast Mode', () => {
+    const solProfile = resolveReasoningProfile({ modelId: 'gpt-6-sol', transport: 'openai-responses' })
+    const sol61Profile = resolveReasoningProfile({ modelId: 'gpt-6.1-sol', transport: 'openai-responses' })
+    expect(sol61Profile?.id).toBe(solProfile?.id)
+    expect(sol61Profile?.levels).toEqual(solProfile?.levels)
+    expect(sol61Profile?.levels).not.toContain('ultra')
+    expect(inferContextWindow('gpt-6.1-sol')).toBe(inferContextWindow('gpt-6-sol'))
     expect(isCodexFastModeSupportedModel('gpt-6.1-sol')).toBe(true)
   })
 })

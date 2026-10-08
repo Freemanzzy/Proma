@@ -1484,3 +1484,9 @@
 - 新增单测：精确模型识别与近似名排除、reasoning ultra、上下文与 Fast Mode、Pi catalog provider/baseUrl、存量渠道补入/幂等/禁用状态保留。
 - 定向测试 3 pass / 0 fail（模型族、Pi catalog），渠道迁移定向测试 3 pass / 0 fail；最终全量测试 **723 pass / 0 fail，1,846 expect，109 files**，`bun run typecheck`、`build:main` 与 `build:renderer` 均通过（renderer 有既存的大 chunk 警告）。
 - `codex exec -m gpt-6.1-sol "只回复 ok"` 使用 ChatGPT 账户返回 HTTP 400：该模型暂不支持 ChatGPT 账户的 Codex 模式；因此真实订阅对话验收未完成。未使用 Proma dev，不打包、不安装，版本仍为 0.19.58。
+
+## 2026-10-08: GPT-6.1 Sol 验收结论与档位范围更正
+
+- 更正上一条 GPT-6.1 Sol 记录：本机 codex-cli 0.154.0 的 HTTP 400 是客户端版本门控，不足以证明服务端或模型不支持。父会话复核显示，本机 models 清单不含 GPT-6.1 Sol、GPT-6 Sol、GPT-6 Luna；ChatGPT.app 自带 codex-cli 0.162.0-alpha.2 在同一账号执行 `codex exec -m gpt-6.1-sol` 返回 `ok`。Proma Pi SDK 请求包含 `originator: pi`、不含 `version` 头，能否请求成功待用户在 dev 重新登录 GPT 订阅后实测，不下最终结论。
+- 撤回本次引入的全局 `ultra` ThinkingLevel、Sol/Luna profile ultra 档、UI 标签与 Pi adapter 强转。GPT-6.1 Sol 和 GPT-6 Sol 使用相同 profile（off 至 max），ultra 支持范围另列 backlog，尚未实现。
+- GPT-6.1 Sol 与 GPT-6 Sol 共用现有 `CODEX_GPT_6_CONTEXT_WINDOW`。服务端 models 清单报告 GPT-6.1 Sol 上下文为 272,000，与现有 GPT-6 常量不同；本次沿用当前上游/既有取值，不另设模型特例。
