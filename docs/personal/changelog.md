@@ -1472,3 +1472,8 @@
 - 新服务诊断：启动后 web-remote-start、scheduler-start，此后每 10 分钟一次调度器心跳；无 Web Remote 重启、定时器重建或逾期告警。调度实际触发佐证：13:00 “Reddit 养号”于 13:00:11 创建会话，`runHistory` 记录 success（约 5 分钟），`nextRunAt` 推进到次日 13:00。
 - 用户确认：iPhone 附件菜单、手机子任务抽屉、桌面新建会话侧栏无重复、正式版 Codex 渠道正常对话（未受凌晨 dev 刷新失败影响）。“独立站”5 条旧 `isDraft` 草稿本批未清理，待确认是否仍可见。
 - 详见 handoff `install-result-2026-10-08.md`。
+
+## 2026-10-08: 合入 2026-10-08b 批次（暂不打包）
+
+- `fix/batch-20261008b` --no-ff 合入 personal：harness AskUser 选项改为精确匹配（根因：子串匹配误中关闭按钮“关闭并终止 Agent”）；启动时清理未使用空草稿（备份后经会话管理器删除）。全量 719 pass / 0 fail；用户 15:02 在 dev 8443 验证正常。按用户要求暂不打包，随下一批一起发布。
+- 执行者首次经跨渠道委派运行在 ChatGPT 订阅 (Codex) · gpt-6-luna，36 分钟完成，无通道错误。父会话将一个作者邮箱不符的未推送提交按原内容重建为正确 noreply 作者。

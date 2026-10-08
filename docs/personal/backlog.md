@@ -4,6 +4,8 @@
 
 ## 待合入分支（已验证、未发布）
 
+- **已合入 personal、尚未打包安装（2026-10-08 15:02 用户决定攒批）**：`fix/batch-20261008b`（AskUser harness 精确匹配选项；启动时清理未使用空草稿，正式版首次启动预计清理约 9 条，日志 `event=draft-cleanup`）。下一批有改动时一起打包；安装申请需写明草稿清理与备份文件位置。
+
 | 分支 | 基于 | 内容 | 验证 | 状态 |
 |---|---|---|---|---|
 | `fix/mobile-dedupe-20261001`（已合入） | `personal` efc420c1 | P：手机端 `agent:list-active-sessions` / `count-archived-sessions` 并发合并 + 3 秒复用，元数据变更事件使缓存失效（同组操作 13 次 / 825 KB → 6 次 / 382 KB）。Q：IPC WebSocket 带 `src` 与随机 `page` 参数，v2 `open` 行记录来源，用于区分同页双连接与多页面实例。R：非省流量模式首屏历史预算 2 MiB → 1 MiB（41.9 MB 历史弱网首屏 11.3 s → 7.7 s），“加载更早”仍 2 MiB/页 | 原分支 678 pass / 0 fail；合入后本批全量 685 pass / 0 fail；typecheck 与 main/renderer/web-preload 构建通过 | 2026-10-02 以 `--no-ff` 合入 `fix/mobile-batch-20261002`（未推送、未发布）；冲突仅在 changelog，双方记录均保留并按时间顺序排列 |
