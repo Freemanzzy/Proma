@@ -29,6 +29,7 @@
 | 2026-10-08 | **子 Agent 跨渠道委派**：clipproxyapi 链路不稳时，子 Agent 改走其他已启用渠道 | Mac | 已实现：`delegate_agent(s)` 增加可选 `channelId`（省略时保留父渠道行为）；`list_available_agent_models` 返回分组渠道列表并排除 `provider=proma`；显式目标渠道/模型校验，省略模型时取目标渠道首个启用模型；子会话记录及 continue/恢复使用子会话的渠道。单测 6 pass，Electron typecheck 通过。真实 dev 已触发跨渠道委派及同一子会话 continue，确认子会话 channelId/modelId 为指定 Codex/gpt-5.5；两轮回复均因 ChatGPT 登录凭据无法刷新而失败，故内容级真实验收待凭据恢复后重跑。
 | 2026-10-08 | harness `iphone:interactions` 的 AskUser 确认定位不稳定；计划审批与权限确认覆盖需确认 | 测试 | 已在 `AskUserBanner.tsx` 给确认按钮添加 `data-web-remote-ask-confirm="true"`，harness 优先使用该标记，回退到横幅最后一个可见按钮；计划审批仍按可见按钮名称“批准并完全自动执行”定位（按钮含同名可见文本），权限请求确认不在当前 interactions suite 中。两次 dev `iphone:interactions` 均在选择 A 后报未找到确认按钮（标记与末尾按钮均未命中），未进入计划审批步骤；需先查明选择后 AskUser DOM/按钮状态再继续，不能标为通过。两次 harness 均完成设备/Chrome/profile 清理，索引复核 831。
 | 2026-10-08 | harness `iphone:interactions` 点选 A 后 AskUser 横幅立即消失（0/300/1000 ms 均无 `.ask-user-banner`），Agent 回合结束且无回复文本；用户真机提问交互验证通过 | 测试 | 证据：子会话 31b1a46f 工作台 `B1-after-A-*.png`。待查：触摸选项是否触发了提交/关闭，或 AskUser 工具本身返回；需保留测试会话 JSONL 再分析。计划审批、权限请求确认仍无自动化覆盖 |
+| 2026-10-08 | 持久化的未使用草稿累积（正式数据 9 条 `isDraft`、标题“新 Agent 会话”、无 JSONL：独立站 6、默认工作区 3，含 903ff7ec 安装后 12:56 新建 1 条）；用户 13:12 确认侧栏不显示 | 数据 | 不影响使用，仅数据残留。方案：启动时清理“isDraft 且无 JSONL、无自定义标题、未置顶/归档、创建超过 24 小时”的草稿，清理前写本地备份；单测覆盖不误删。低优先级，用户说开工再做 |
 
 ## 后续待办（按建议优先级）
 
