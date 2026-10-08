@@ -1495,3 +1495,8 @@
 
 - 修复 ChatGPT 登录/“从供应商获取”路径：Codex 可用模型列表现在在 SDK 列表后补入完整的 Proma catalog patch 模型，并去重、保留 SDK 顺序及原有 unsupported 过滤；缺失时只补 GPT-6 Astra、Sol、6.1 Sol、Luna，不引入其他 patch 模型。
 - 测试覆盖 SDK 缺失 6.1 Sol、已有项不重复与 unsupported 前缀过滤；定向 4 pass / 0 fail。全量 **726 pass / 0 fail，1,851 expect，110 files**；typecheck 与 `build:main` 通过。
+
+## 2026-10-08: GPT-6.1 Sol off effort 映射修正
+
+- 用户在 dev 手动加入 GPT-6.1 Sol 后实测对话成功，服务端接受 Proma `originator: pi` 请求；dev 标题生成日志另报 `reasoningEffort: none` 被拒，服务端支持值为 low/medium/high/xhigh/max。为 6.1 Sol 配置独立 profile：档位 low–max、默认 medium，off/minimal 编码为 low；GPT-6 Sol/Luna profile 不变。标题请求现根据模型 profile 的 Responses `off` 映射选择 effort，没有映射时仍传 none。
+- 测试：全量 **728 pass / 0 fail，1,859 expect，110 files**；typecheck、`build:main` 与 `build:renderer` 均通过。未启动 dev，符合用户要求。

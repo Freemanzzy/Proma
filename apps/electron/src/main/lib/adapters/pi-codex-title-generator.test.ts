@@ -8,7 +8,7 @@ import {
   type CodexTitleRuntime,
 } from './pi-codex-title-generator'
 
-const model = {} as Model<'openai-codex-responses'>
+const model = { id: 'gpt-6-sol' } as Model<'openai-codex-responses'>
 
 function createEnvironment(dispatcher?: Dispatcher): CodexTitleRequestEnvironment & { closed: Dispatcher | undefined; installed: boolean } {
   return {
@@ -63,6 +63,28 @@ describe('Codex OAuth 标题生成', () => {
     expect(environment.installed).toBe(true)
     expect(environment.closed).toBe(dispatcher)
   })
+
+  test.each(['gpt-6.1-sol', 'gpt-6-astra'])(
+    'Given %s When title generation disables reasoning Then sends the profile off effort',
+    async (modelId) => {
+      let receivedOptions: OpenAICodexResponsesOptions | undefined
+      const runtime: CodexTitleRuntime = {
+        async complete(_model, _context, options) {
+          receivedOptions = options
+          return { content: [], stopReason: 'stop' }
+        },
+      }
+
+      await completeCodexTitleRequest(
+        runtime,
+        { id: modelId } as Model<'openai-codex-responses'>,
+        '生成标题',
+        createEnvironment(),
+      )
+
+      expect(receivedOptions?.reasoningEffort).toBe('low')
+    },
+  )
 
   test('Given Codex request failure When completing title Then still closes its proxy', async () => {
     const runtime: CodexTitleRuntime = {

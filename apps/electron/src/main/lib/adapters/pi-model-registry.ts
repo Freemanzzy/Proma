@@ -16,7 +16,6 @@ import {
   getGeminiModelCapability,
   isGpt6AstraFamily,
   isGpt6LunaFamily,
-  isGpt6SolFamily,
   isMimoV26Model,
   resolveReasoningCapability,
   resolveReasoningProfile,
