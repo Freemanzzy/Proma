@@ -396,6 +396,7 @@ async function createHarness(options) {
   if (!pageTarget) throw new Error('Chrome 没有可用页面 target')
   const client = await new CdpClient(pageTarget.webSocketDebuggerUrl).connect()
   const consoleErrors = []; const exceptions = []
+  let lastAskUserTouchDiagnostic = null
   client.on('Runtime.consoleAPICalled', (event) => { if (['error', 'assert'].includes(event.type)) consoleErrors.push({ type: event.type, args: event.args?.map((arg) => arg.value ?? arg.description) }) })
   client.on('Runtime.exceptionThrown', (event) => exceptions.push({ text: event.exceptionDetails?.text, description: event.exceptionDetails?.exception?.description }))
   await client.command('Runtime.enable')
@@ -715,8 +716,26 @@ async function createHarness(options) {
   const clickText = (text, selector = 'body *') => touchText(client, text, selector)
   const resolveVisibleAskUserA = async () => {
     if (!await client.evaluate('Boolean(document.querySelector(".ask-user-banner"))')) return false
-    const optionA = await findElement(client, 'A', '.ask-user-banner button')
+    const before = await client.evaluate(`(() => {
+      const banner=document.querySelector('.ask-user-banner')
+      window.__askTouchAudit={events:[],ipc:[]}
+      for(const type of ['touchstart','touchend','pointerdown','pointerup','click','keydown']) document.addEventListener(type,(event)=>{if(window.__askTouchAudit.events.length<100){const target=event.target;const r=target?.getBoundingClientRect?.();window.__askTouchAudit.events.push({at:performance.now(),type,target:{tag:target?.tagName,text:(target?.innerText||target?.textContent||'').trim().slice(0,120),aria:target?.getAttribute?.('aria-label'),outerHTML:target?.outerHTML?.slice(0,300)},rect:r?{x:r.x,y:r.y,w:r.width,h:r.height}:null})}},true)
+      const original=window.__PROMA_WEB_REMOTE_INVOKE
+      if(typeof original==='function'&&!window.__askTouchInvokeWrapped){window.__askTouchInvokeWrapped=true;window.__PROMA_WEB_REMOTE_INVOKE=function(channel,...args){if(String(channel).includes('ask-user'))window.__askTouchAudit.ipc.push({at:performance.now(),channel,args});return original.call(this,channel,...args)}}
+      return {buttons:[...(banner?.querySelectorAll('button')??[])].map((node)=>{const r=node.getBoundingClientRect();return {text:(node.innerText||node.textContent||'').trim(),aria:node.getAttribute('aria-label'),title:node.title,disabled:node.disabled,outerHTML:node.outerHTML.slice(0,300),rect:{x:r.x,y:r.y,w:r.width,h:r.height}}})}
+    })()`)
+    const optionA = await client.evaluate(`(() => {
+      const visible=(node)=>{const r=node.getBoundingClientRect();const s=getComputedStyle(node);return r.width>0&&r.height>0&&s.visibility!=='hidden'&&s.display!=='none'}
+      const button=[...(document.querySelector('.ask-user-banner')?.querySelectorAll('button')??[])].find((node)=>visible(node)&&[...node.querySelectorAll('span')].some((span)=>(span.innerText||span.textContent||'').trim()==='A'))
+      if(!button)return null
+      const r=button.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2,tag:button.tagName,text:(button.innerText||button.textContent||'').trim(),outerHTML:button.outerHTML.slice(0,300),rect:{x:r.x,y:r.y,w:r.width,h:r.height}}
+    })()`)
+    if(!optionA)throw new Error('找不到 AskUser 的 A 选项按钮（要求选项标签精确匹配）')
+    const target = await client.evaluate(`(() => {const x=${optionA.x},y=${optionA.y};const n=document.elementFromPoint(x,y);return {tag:n?.tagName,text:(n?.innerText||n?.textContent||'').trim().slice(0,120),outerHTML:n?.outerHTML?.slice(0,300),rect:(()=>{const r=n?.getBoundingClientRect();return r?{x:r.x,y:r.y,w:r.width,h:r.height}:null})()}})()`)
     await touchAt(client, optionA.x, optionA.y)
+    await delay(2_000)
+    const after = await client.evaluate('({banner:Boolean(document.querySelector(".ask-user-banner")),audit:window.__askTouchAudit})')
+    lastAskUserTouchDiagnostic = { before, optionA, target, after }
     const confirm = await client.evaluate(`(() => {
       const banner=document.querySelector('.ask-user-banner')
       const visible=(node)=>{const r=node.getBoundingClientRect();const style=getComputedStyle(node);return r.width>0&&r.height>0&&style.visibility!=='hidden'&&style.display!=='none'}
@@ -726,7 +745,7 @@ async function createHarness(options) {
       const rect=node.getBoundingClientRect()
       return {x:rect.left+rect.width/2,y:rect.top+rect.height/2,locator:marked?'stable-attribute':'last-visible-button'}
     })()`)
-    if (!confirm) throw new Error('找不到 AskUser 确认按钮（稳定标记与横幅末尾按钮均未命中）')
+    if (!confirm) return false
     await touchAt(client, confirm.x, confirm.y)
     return true
   }
@@ -748,7 +767,7 @@ async function createHarness(options) {
     activeChrome = null
     activeProfile = null
   }
-  return { client, chrome, profile, pair, navigate, installInteractionStreamAudit, loadMetrics, openDrawer, clickSidebarText, clickText, openSession, createHarnessSession, createHarnessSessionRaw, setPermissionMode, inputAndSend, waitText, readHistory, waitForUserSubmission, waitForAssistantReply, waitForRunning, waitForAbortedAssistant, resolveVisibleAskUserA, resolveVisiblePlanApproval, getInteractionStreamEvents, getActiveSessionId: () => activeSessionId, getCreatedSessionIds: () => new Set(createdSessionIds), invokeApi, invokeRaw, websocketUrls, websocketHandshakes, websocketFramesReceived, websocketFramesSent, historyReadRequests, websocketDataReceived, http429Responses, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, readSessionManifest, close }
+  return { client, chrome, profile, pair, navigate, installInteractionStreamAudit, loadMetrics, openDrawer, clickSidebarText, clickText, openSession, createHarnessSession, createHarnessSessionRaw, setPermissionMode, inputAndSend, waitText, readHistory, waitForUserSubmission, waitForAssistantReply, waitForRunning, waitForAbortedAssistant, resolveVisibleAskUserA, resolveVisiblePlanApproval, getInteractionStreamEvents, getLastAskUserTouchDiagnostic: () => lastAskUserTouchDiagnostic, getActiveSessionId: () => activeSessionId, getCreatedSessionIds: () => new Set(createdSessionIds), invokeApi, invokeRaw, websocketUrls, websocketHandshakes, websocketFramesReceived, websocketFramesSent, historyReadRequests, websocketDataReceived, http429Responses, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, readSessionManifest, close }
 }
 
 async function runDeadSocket(harness, options, result) {
@@ -785,13 +804,20 @@ async function runInteractions(harness, options, result) {
   const harnessSession = await harness.createHarnessSession(harnessSessionTitle)
   await harness.setPermissionMode('plan')
   result.harnessSession = { title: harnessSessionTitle, id: harnessSession?.id ?? null, workspaceId: harnessSession?.workspaceId ?? null, permissionMode: 'plan' }
+  result.preserveHarnessSessionIds = harnessSession?.id ? [harnessSession.id] : []
   const askMessage = '请用 AskUserQuestion 工具问我一个二选一问题（A 或 B），我回答后只回复我选了什么'
   const existingAsk = await harness.client.evaluate('Boolean(document.querySelector(".ask-user-banner"))')
   if (!existingAsk) await harness.inputAndSend(askMessage)
   await waitUntil(harness.client, `Boolean(document.querySelector('.ask-user-banner')) && document.body.innerText.includes('Proma Agent 需要你的输入')`, 90_000)
   const askCard = await harness.screenshot('ask-question-card')
   result.screenshots.push(askCard)
-  await harness.resolveVisibleAskUserA()
+  const askResolved = await harness.resolveVisibleAskUserA()
+  result.askTouchDiagnostic = harness.getLastAskUserTouchDiagnostic()
+  if (!askResolved) {
+    const afterTouch = await harness.screenshot('ask-after-option-a')
+    result.screenshots.push(afterTouch)
+    throw new Error('找不到 AskUser 确认按钮（稳定标记与横幅末尾按钮均未命中）')
+  }
   const askReply = await harness.waitForAssistantReply(askMessage, 'A', 90_000)
   const askAnswerScreenshot = await harness.screenshot('ask-answer-a')
   result.screenshots.push(askAnswerScreenshot)
@@ -1908,9 +1934,21 @@ async function main() {
     try {
       const beforeDelete = await harness.readSessionManifest()
       harnessSessionCleanup.beforeIds = beforeDelete.map((session) => session.id)
-      const createdIds = harness.getCreatedSessionIds()
       const preserveIds = new Set(result.preserveHarnessSessionIds ?? [])
-      const createdBeforeDelete = beforeDelete.filter((session) => createdIds.has(session.id) && !preserveIds.has(session.id)).map((session) => session.id)
+      if (preserveIds.size) {
+        const evidenceDir = join(options.outputDir, 'ask-user-evidence')
+        mkdirSync(evidenceDir, { recursive: true })
+        for (const sessionId of preserveIds) {
+          const jsonl = join(homedir(), '.proma-dev', 'agent-sessions', `${sessionId}.jsonl`)
+          if (existsSync(jsonl)) {
+            const evidencePath = join(evidenceDir, `${sessionId}.jsonl`)
+            writeFileSync(evidencePath, readFileSync(jsonl))
+            result.askUserJsonlEvidence = evidencePath
+          }
+        }
+      }
+      const createdIds = harness.getCreatedSessionIds()
+      const createdBeforeDelete = beforeDelete.filter((session) => createdIds.has(session.id)).map((session) => session.id)
       const acceptDeleteConfirm = (event) => {
         if (event.type === 'confirm') void harness.client.command('Page.handleJavaScriptDialog', { accept: true }).catch((error) => harnessSessionCleanup.errors.push(String(error)))
       }

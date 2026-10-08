@@ -1448,6 +1448,14 @@
 
 - `fix/batch-20261008` --no-ff 合入 personal：协作子 Agent 跨渠道委派（可选 `channelId`，默认沿用父会话渠道；dev 智谱渠道 ok/ok2 内容级验收通过）、侧栏新会话重复条目去重、AskUser 确认按钮稳定标记。全量 706 pass / 0 fail；用户 11:50 验证通过。与 10-07 批次一起打包发布。interactions harness 点选后横幅消失问题转入 backlog。
 
+## 2026-10-08: interactions AskUser 点选定位修复
+
+- 真实 CDP 触屏取证：AskUser 横幅的关闭按钮位于 `(360,657)-(380,677)`；A 选项位于 `(32,751)-(380,783)`。旧 `findElement('A', '.ask-user-banner button')` 按可访问名称子串匹配，关闭按钮 `title="关闭并终止 Agent"` 因含大写 `A` 被命中，因按钮面积最小而排在 A 选项之前。 harness 随后将触点落在关闭按钮 SVG 的 `path` 上，而不是选项 A。
+- 事件时间线（相对页面 `performance.now()`）：触点命中关闭图标后依次产生 `pointerdown`、`touchstart`、17 ms 后 `pointerup`、`touchend`，再约 0.8 ms 产生 `click`；2 秒后 `.ask-user-banner` 已消失。捕获阶段记录未观察到 `agent:ask-user:respond` IPC。保留的测试会话 JSONL 原文为 `Main runtime request aborted: agent.capability.canUseTool`，与误触 `handleDismiss` 相符，不是自然超时。
+- 修复仅改 harness：用横幅内选项按钮的 `span` 标签与 `A` 精确匹配，排除关闭按钮及其它包含字母 A 的可访问名称；仍使用原 CDP `Input.dispatchTouchEvent` 真实触屏事件。未改产品实现。
+- 回归：`node --check scripts/personal/mobile-harness.mjs` 通过；`iphone:interactions` 全套通过，AskUser 返回 A，`ask_user_request/resolved` 事件齐全；计划审批完成且运行恢复；新增页面异常 0、HTTP 429 状态响应 0。截图与精简结果保存在当次会话工作台 `evidence/batch-20261008b/`。
+- 权限请求确认未纳入：当前 `PromaPermissionMode` 仅有 `bypassPermissions` 与 `plan`，不存在需要确认的权限模式；`plan` 模式阻止写操作，不能按简报示例安全触发文件写入审批。本批不伪造新模式或绕开权限策略，待父会话决定是否增加合适的权限模式/测试路径。
+
 ## 2026-10-08: 安装 903ff7ec（10-07 + 10-08 批次）
 
 - Claude Code 12:24 用 `install-update.sh` 安装 `903ff7ec`，替换 `03901c8a`（previous）；备份 `20261008-122456-10786`，BACKUP VERIFY PASS，前后 SNAPSHOT MATCH（会话 1025、渠道 7），定时任务 17 → 17、无过期。钥匙串弹 1 次。
