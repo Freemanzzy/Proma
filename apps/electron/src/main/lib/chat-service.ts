@@ -614,8 +614,8 @@ export async function generateTitle(input: GenerateTitleInput): Promise<string |
     apiKey = await resolveChannelRuntimeApiKey(channelId)
   } catch {
     console.warn('[标题生成] 解密 API Key 失败')
-    // 自定义渠道无法解密也仍要完成重命名，避免对话长期停在默认标题。
-    return (channel.provider === 'custom') ? createFallbackTitle(userMessage) : null
+    // Chat 模式不重试；所有渠道均使用本地标题兜底。
+    return createFallbackTitle(userMessage)
   }
 
   try {
@@ -632,16 +632,16 @@ export async function generateTitle(input: GenerateTitleInput): Promise<string |
     const title = await fetchTitle(request, adapter, fetchFn)
     const result = title ? sanitizeGeneratedTitle(title) : null
     if (!result) {
-      console.warn('[标题生成] API 未返回可用标题')
-      // 自定义渠道的服务端偶发返回空标题时，仍要完成重命名，避免对话长期停在默认标题。
-      return (channel.provider === 'custom') ? createFallbackTitle(userMessage) : null
+      console.warn('[标题生成] API 未返回可用标题，使用本地兜底')
+      // Chat 模式不重试；所有渠道均使用本地标题兜底。
+      return createFallbackTitle(userMessage)
     }
 
     console.log('[标题生成] 成功生成标题:', result)
     return result
   } catch (error) {
     console.warn('[标题生成] 请求失败:', error)
-    // 自定义渠道的服务端偶发返回空标题/异常响应/超时，异常路径同样要完成重命名。
-    return (channel.provider === 'custom') ? createFallbackTitle(userMessage) : null
+    // Chat 模式不重试；所有渠道均使用本地标题兜底。
+    return createFallbackTitle(userMessage)
   }
 }

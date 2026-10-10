@@ -65,4 +65,15 @@ describe('AnthropicAdapter headers', () => {
     expect(request.headers['User-Agent']).toBe('Proma/9.9.9 (+https://github.com/ErlichLiu/Proma)')
     expect(request.headers['api-key']).toBeUndefined()
   })
+
+  test('Claude 5.5 title request omits thinking field', () => {
+    const adapter = new AnthropicAdapter('anthropic')
+    const request = adapter.buildTitleRequest({
+      baseUrl: 'https://api.anthropic.com',
+      apiKey: 'test-key',
+      modelId: 'claude-opus-5-5',
+      prompt: '请生成标题',
+    })
+    expect(JSON.parse(request.body)).not.toHaveProperty('thinking')
+  })
 })

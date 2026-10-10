@@ -39,6 +39,7 @@
 | 2026-10-08 | `install-update.sh` 启动后快照比对要求会话数完全一致，会把启动时的草稿清理误判为失败并回滚；本次由 Claude Code 用授权的脚本副本安装 | 安装 | ✅ 已实现：`health-snapshot.py --compare` 仅在启动前 `since` 之后生成的草稿备份 ID 并集与减少 ID 完全一致、备份条目均为草稿、减少 ID 不在启动后索引且其他快照字段一致时接受差异；旧调用保持严格一致。脚本测试与 `/tmp` `--test-mode` 演练覆盖。另：打包前先 Boot 模拟器，避免 serve-sim 冒烟被跳过 |
 | 2026-10-10 | macOS 退出完成服务清理后进程仍存活，17888/17889 均停止 | Mac/dev | 对照实验支持根因是个人版两阶段 `before-quit`：保留 `preventDefault` + async 清理后再次 `app.quit()` 时稳定进入 watchdog；临时单阶段变体触发 `will-quit` 且未触发 watchdog。已改为单阶段调用同步模拟器子进程清理，watchdog 保留兜底。SIGTERM dev 验证 0.319 秒退出；active serve-sim 预览清理与正常 Dock 退出未实测 |
 | 2026-10-10 | `mobile-preview.sh stop` 在启动器 DEV_PID 已不存在时拒绝清理残余的 electronmon/vite/Electron 进程树 | 开发 | 10-10 退出半停取证中由父会话按 PID 手工清理。方案：DEV_PID 不在时按记录的进程组/命令行路径（仓库 node_modules、非 /Applications）核对后清理 |
+| 2026-10-10 | Agent 标题请求对 Claude Opus 5.5 发送 `thinking.type=disabled` 后 HTTP 400，标题退回首行 | Mac | ✅ 已实现：Claude 5.5+ 的标题请求省略 `thinking`；仅网络错误/超时/429/5xx 重试，其他 4xx 直接本地兜底。dev 两个 clipproxyapi / Claude Opus 5.5 会话均记录 HTTP 200 并生成非首行语义标题。错误日志已含状态码/正文，详见 changelog 2026-10-10「Claude 5.5 标题请求参数兼容性修复」 |
 | 2026-10-10 | 正式版退出半停期间，main.log 每分钟一条 `子任务唤醒 queued … suppressed=59`（同一 parentSessionId） | Mac | 仅观察；退出半停修复后若仍出现再查子任务唤醒在调度器停止后的排队逻辑 |
 
 ## 后续待办（按建议优先级）

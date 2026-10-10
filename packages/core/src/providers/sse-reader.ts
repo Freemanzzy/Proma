@@ -369,20 +369,23 @@ async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSERes
  * @param adapter 供应商适配器（用于解析响应）
  * @returns 提取的标题文本，失败返回 null
  */
+export type FetchTitleFailure =
+  | { kind: 'http'; status: number; retryable: boolean }
+  | { kind: 'network'; retryable: true }
+  | { kind: 'response'; retryable: false }
+
 export async function fetchTitle(
   request: ProviderRequest,
   adapter: ProviderAdapter,
   fetchFn: typeof globalThis.fetch = fetch,
+  onFailure?: (failure: FetchTitleFailure) => void,
 ): Promise<string | null> {
   // 标题请求必须有时限：推理模型响应可能较慢，若无限挂起，
   // 会话会一直停在默认标题（fallback 也不会执行）。
   const TITLE_REQUEST_TIMEOUT_MS = 30_000
+  let responseReceived = false
   try {
-    console.log('[fetchTitle] 发送请求:', {
-      url: request.url,
-      provider: adapter.providerType,
-      bodyPreview: request.body.slice(0, 200),
-    })
+    console.log(`[fetchTitle] 发送请求: provider=${adapter.providerType}`)
 
     const response = await fetchFn(request.url, {
       method: 'POST',
@@ -390,6 +393,7 @@ export async function fetchTitle(
       body: request.body,
       signal: AbortSignal.timeout(TITLE_REQUEST_TIMEOUT_MS),
     })
+    responseReceived = true
 
     console.log('[fetchTitle] 收到响应:', {
       status: response.status,
@@ -399,9 +403,12 @@ export async function fetchTitle(
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'unknown')
-      console.warn('[fetchTitle] 请求失败:', {
+      const safeErrorText = errorText.slice(0, 300).replace(/[\r\n]+/g, ' ')
+      console.warn(`[fetchTitle] 请求失败: status=${response.status} error=${safeErrorText}`)
+      onFailure?.({
+        kind: 'http',
         status: response.status,
-        error: errorText.slice(0, 500),
+        retryable: response.status === 429 || response.status >= 500,
       })
       return null
     }
@@ -416,7 +423,11 @@ export async function fetchTitle(
     console.log('[fetchTitle] 解析标题结果:', { title })
     return title
   } catch (error) {
-    console.error('[fetchTitle] 异常:', error)
+    const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+    console.error(`[fetchTitle] 异常: ${detail.slice(0, 300).replace(/[\r\n]+/g, ' ')}`)
+    onFailure?.(responseReceived
+      ? { kind: 'response', retryable: false }
+      : { kind: 'network', retryable: true })
     return null
   }
 }

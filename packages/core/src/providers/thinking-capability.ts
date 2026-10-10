@@ -30,7 +30,7 @@ export type ThinkingMode =
 export type ThinkingDisableStrategy =
   /** 显式发送 `thinking: {type: 'disabled'}` */
   | 'explicit-disabled'
-  /** 省略 thinking 字段（Mythos Preview 不接受 disabled） */
+  /** 省略 thinking 字段（Claude 5.5+ 与 Mythos Preview 不接受 disabled） */
   | 'omit-field'
 
 export interface ThinkingCapability {
@@ -46,6 +46,15 @@ export interface ThinkingCapability {
 function startsWith(modelId: string, prefix: string): boolean {
   const id = modelId.toLowerCase()
   return id === prefix || id.startsWith(`${prefix}-`)
+}
+
+/** Claude 5.5+ defaults to adaptive thinking and rejects explicit `disabled`. */
+function isClaude55OrLater(modelId: string): boolean {
+  const match = modelId.toLowerCase().match(/^claude-(?:opus|sonnet|haiku)-(\d+)-(\d+)(?:-|$)/)
+  if (!match) return false
+  const major = Number(match[1])
+  const minor = Number(match[2])
+  return major > 5 || (major === 5 && minor >= 5)
 }
 
 /**
@@ -69,11 +78,13 @@ export function detectThinkingCapability(
     transport: 'anthropic-messages',
   })
   const encoding = profile?.encodings['anthropic-messages']
+  const omitClaudeDisabled = (providerType === 'anthropic' || providerType === 'anthropic-compatible')
+    && isClaude55OrLater(modelId)
   if (encoding?.kind === 'adaptive-effort') {
     const effort = profile && encoding.effortMap[profile.defaultLevel]
     return {
       mode: 'adaptive-preferred',
-      disableStrategy: 'explicit-disabled',
+      disableStrategy: omitClaudeDisabled ? 'omit-field' : 'explicit-disabled',
       ...(typeof effort === 'string' ? { effort } : {}),
     }
   }
@@ -128,9 +139,16 @@ export function detectThinkingCapability(
     startsWith(modelId, 'claude-opus-4-6') ||
     startsWith(modelId, 'claude-sonnet-5')
   ) {
-    return { mode: 'adaptive-preferred', disableStrategy: 'explicit-disabled' }
+    return {
+      mode: 'adaptive-preferred',
+      disableStrategy: omitClaudeDisabled ? 'omit-field' : 'explicit-disabled',
+    }
   }
 
-  // 其它 Claude（4.5 及以下、3.x 等）：仅 manual
-  return { mode: 'manual-only', disableStrategy: 'explicit-disabled' }
+  // Claude 5.5+ 采用 adaptive 默认策略，关闭思考时省略 thinking 字段；旧模型仍显式 disabled。
+  // 保持原 mode 判断，仅改变 disableStrategy。
+  return {
+    mode: 'manual-only',
+    disableStrategy: omitClaudeDisabled ? 'omit-field' : 'explicit-disabled',
+  }
 }

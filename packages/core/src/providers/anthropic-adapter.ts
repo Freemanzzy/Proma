@@ -459,7 +459,7 @@ export class AnthropicAdapter implements ProviderAdapter {
     }
 
     // 标题生成不需要思考：按模型能力选择禁用方式
-    // - Mythos Preview 不接受 disabled，省略字段即可
+    // - Claude 5.5+ 与 Mythos Preview 默认 adaptive，不接受显式 disabled，省略字段即可
     // - 其它 Claude 显式 disabled（对 manual / adaptive 模型都有效）
     if (capability.disableStrategy === 'explicit-disabled') {
       body.thinking = { type: 'disabled' }
