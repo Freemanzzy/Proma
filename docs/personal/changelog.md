@@ -1541,3 +1541,11 @@
 ## 2026-10-10: 合入退出半停修复（暂不打包）
 
 - `fix/quit-stall` --no-ff 合入 personal。根因：个人版 iOS 模拟器侧栏引入的两段式 before-quit（第一次 preventDefault → 异步清理 → 再次 `app.quit()`）使 Electron 第二次退出走不到 `will-quit`，服务全停而进程存活（正式版 10-09 22:38 起半停，10-10 02:00–06:00 定时任务全部漏跑、手机无法连接）。dev 对照：原样 SIGTERM → `quit-stalled`（看门狗 15 秒）；单阶段 → `will-quit`，0.3 秒退出。全量 737 pass / 0 fail。随下一批打包。
+
+## 2026-10-10: Agent 标题生成失败回退本地标题
+
+- `fetchTitle` 不再记录请求 URL 或请求体；HTTP 失败改为单行日志，包含状态码与去换行后的错误正文前 300 字符。网络异常/超时记录异常 `name/message`（最多 300 字符）。请求头/API Key/URL 查询串不进入这些日志。
+- Agent 标题生成遇到空结果或异常时，若未 abort，等待 2 秒重试一次；仍失败则所有 provider 返回 `createFallbackTitle(userMessage)`，abort 时不重试也不兜底。自定义渠道现有兜底结果保持不变。Chat 模式也改为所有渠道本地兜底，但不增加重试。
+- 新增重试/兜底/abort/自定义渠道及失败日志安全单测。全量 `bun test` **743 pass / 0 fail，1,900 expect，115 files**；Electron `typecheck` 与 `build:main` 通过。
+- dev 通过 Web Remote 使用 API Key 渠道 clipproxyapi / Claude Opus 5.5 发 3 条首消息，模型均返回消息；标题均落为首行本地兜底。3 个测试会话均由应用 UI 删除。未能从 dev 启动日志或 `main.log` 找到对应标题请求记录，故请求状态码/错误正文的现场取证未完成；待确认 dev 日志捕获路径。`mobile-preview.sh stop` 后 17889/5173 未监听，正式版 PID 91750 仍存活。
+- 版本保持 `0.19.58`；未打包、安装或 push。

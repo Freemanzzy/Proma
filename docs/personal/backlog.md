@@ -39,6 +39,7 @@
 | 2026-10-08 | `install-update.sh` 启动后快照比对要求会话数完全一致，会把启动时的草稿清理误判为失败并回滚；本次由 Claude Code 用授权的脚本副本安装 | 安装 | ✅ 已实现：`health-snapshot.py --compare` 仅在启动前 `since` 之后生成的草稿备份 ID 并集与减少 ID 完全一致、备份条目均为草稿、减少 ID 不在启动后索引且其他快照字段一致时接受差异；旧调用保持严格一致。脚本测试与 `/tmp` `--test-mode` 演练覆盖。另：打包前先 Boot 模拟器，避免 serve-sim 冒烟被跳过 |
 | 2026-10-10 | macOS 退出完成服务清理后进程仍存活，17888/17889 均停止 | Mac/dev | 对照实验支持根因是个人版两阶段 `before-quit`：保留 `preventDefault` + async 清理后再次 `app.quit()` 时稳定进入 watchdog；临时单阶段变体触发 `will-quit` 且未触发 watchdog。已改为单阶段调用同步模拟器子进程清理，watchdog 保留兜底。SIGTERM dev 验证 0.319 秒退出；active serve-sim 预览清理与正常 Dock 退出未实测 |
 | 2026-10-10 | `mobile-preview.sh stop` 在启动器 DEV_PID 已不存在时拒绝清理残余的 electronmon/vite/Electron 进程树 | 开发 | 10-10 退出半停取证中由父会话按 PID 手工清理。方案：DEV_PID 不在时按记录的进程组/命令行路径（仓库 node_modules、非 /Applications）核对后清理 |
+| 2026-10-10 | Agent 会话标题偶发停留在默认标题；日志中的 `[fetchTitle] 请求失败:` 未保留状态码/错误正文 | Mac | ✅ 已实现：失败日志单行记录 HTTP 状态及正文（前 300 字符），单次失败后 2 秒重试一次，仍失败时所有渠道回退本地标题；Chat 模式仅回退、不重试。测试与 dev 结果见 changelog 2026-10-10「Agent 标题生成失败回退本地标题」。dev 用 clipproxyapi / Claude Opus 5.5 发 3 条首消息并以应用 UI 删除测试会话；消息完成且会话标题为首行兜底，但 main.log 与 dev 启动日志均未出现本次标题请求日志，故状态码/错误正文取证未完成，需后续确认 dev 日志捕获路径 |
 | 2026-10-10 | 正式版退出半停期间，main.log 每分钟一条 `子任务唤醒 queued … suppressed=59`（同一 parentSessionId） | Mac | 仅观察；退出半停修复后若仍出现再查子任务唤醒在调度器停止后的排队逻辑 |
 
 ## 后续待办（按建议优先级）

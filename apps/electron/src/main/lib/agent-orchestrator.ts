@@ -79,6 +79,7 @@ import { resolvePiThinkingLevel } from './agent-thinking-level'
 import { resolvePiReasoningCapability } from './adapters/pi-model-registry'
 import { generateCodexTitle } from './adapters/pi-codex-title-generator'
 import { createFallbackTitle, sanitizeGeneratedTitle, TITLE_PROMPT } from './title-generation'
+import { fetchAgentTitleWithFallback } from './agent-title-retry'
 import { claimWorkspaceMemoryRefreshOpportunity } from './agent-memory-refresh-service'
 import { resolveRuntimeAdditionalDirectories } from './agent-orchestrator-vault-access'
 
@@ -365,7 +366,7 @@ export class AgentOrchestrator {
       return fallbackTitle
     }
 
-    try {
+    return fetchAgentTitleWithFallback(async () => {
       const apiKey = await resolveChannelRuntimeApiKey(channelId)
       const providerAdapter = getAdapter(channel.provider)
       const request = providerAdapter.buildTitleRequest({
@@ -379,20 +380,9 @@ export class AgentOrchestrator {
       const fetchFn = getFetchFn(proxyUrl)
       const title = await fetchTitle(request, providerAdapter, fetchFn)
       const result = title ? sanitizeGeneratedTitle(title) : null
-      if (!result) {
-        console.warn('[Agent 标题生成] API 未返回可用标题')
-        // 自定义渠道（custom）可能返回空/异常；任何取不到可用标题的情况
-        // 都回退到首行兜底，保证会话一定被重命名。
-        return (channel.provider === 'custom') ? createFallbackTitle(userMessage) : null
-      }
-
-      console.log(`[Agent 标题生成] 生成标题成功: "${result}"`)
+      if (result) console.log(`[Agent 标题生成] 生成标题成功: "${result}"`)
       return result
-    } catch (error) {
-      console.warn('[Agent 标题生成] 生成失败:', error)
-      // 自定义渠道的服务端偶发返回空标题/异常响应/超时，异常路径同样要完成重命名。
-      return (channel.provider === 'custom') ? createFallbackTitle(userMessage) : null
-    }
+    }, () => createFallbackTitle(userMessage), signal)
   }
 
   /**
