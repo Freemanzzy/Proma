@@ -59,7 +59,7 @@ function registerProtocolsAndHandlers(): void {
 
 import { getSettings, updateSettings } from './lib/settings-service'
 import { handlePromaFileRequest } from './lib/local-file-protocol'
-import { cleanupSimulatorPreview } from './lib/simulator-preview-service'
+import { cleanupSimulatorPreviewOnQuit } from './lib/simulator-preview-service'
 import { cleanupUnusedDraftSessions } from './lib/personal-draft-cleanup'
 
 // 处理 EPIPE 错误：当 stdout/stderr 管道被关闭时（如 electronmon 重启），忽略写入错误
@@ -969,22 +969,13 @@ app.on('child-process-gone', (_event, details) => {
   recordPersonalInfo('服务诊断', `event=child-process-gone type=${details.type} reason=${details.reason} exitCode=${details.exitCode}`)
 })
 
-let simulatorCleanupFinished = false
 let cancelPersonalQuitWatchdog: (() => void) | undefined
-app.on('before-quit', (event) => {
+app.on('before-quit', () => {
   const startedAt = Date.now()
   recordPersonalInfo('服务诊断', 'event=before-quit stage=start')
-  if (!simulatorCleanupFinished) {
-    event.preventDefault()
-    simulatorCleanupFinished = true
-    void cleanupSimulatorPreview().finally(() => {
-      recordPersonalInfo('服务诊断', `event=before-quit stage=simulator-cleanup-complete durationMs=${Date.now() - startedAt}`)
-      app.quit()
-    })
-    return
-  }
   // 标记正在退出，让 close 事件不再阻止关闭
   setQuitting()
+  cleanupSimulatorPreviewOnQuit()
 
   // 中止所有活跃的 Agent 和 Chat 子进程
   stopAllAgents()
