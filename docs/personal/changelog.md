@@ -1549,3 +1549,11 @@
 - 新增重试/兜底/abort/自定义渠道及失败日志安全单测。全量 `bun test` **743 pass / 0 fail，1,900 expect，115 files**；Electron `typecheck` 与 `build:main` 通过。
 - dev 通过 Web Remote 使用 API Key 渠道 clipproxyapi / Claude Opus 5.5 发 3 条首消息，模型均返回消息；标题均落为首行本地兜底。3 个测试会话均由应用 UI 删除。未能从 dev 启动日志或 `main.log` 找到对应标题请求记录，故请求状态码/错误正文的现场取证未完成；待确认 dev 日志捕获路径。`mobile-preview.sh stop` 后 17889/5173 未监听，正式版 PID 91750 仍存活。
 - 版本保持 `0.19.58`；未打包、安装或 push。
+
+## 2026-10-10: Claude 5.5 标题请求参数兼容性修复
+
+- 根因：dev 标题请求日志显示 Claude Opus 5.5 收到 HTTP 400，错误为 `thinking.type.disabled` 不受支持；该模型要求 `thinking.type.adaptive` 与 `output_config.effort`，或省略 `thinking`。同类验证表明 Sonnet 5.5 也拒绝 `disabled`。此为确定性协议不兼容，不是网络故障。
+- `detectThinkingCapability` 按 Claude 模型 ID 解析 opus/sonnet/haiku 的主次版本，5.5+ 的 `disableStrategy` 设为 `omit-field`，不改变原 `mode` 判定；日期及 `-latest` 后缀可识别。Claude 4.7、4.6、Sonnet 5 等旧模型策略保持不变。已核对全部策略使用点：Anthropic 标题构造器据此省略 `thinking`；Agent Chat 思考关闭路径本来就不写入该字段，5.5+ 因而使用模型默认 adaptive。Dev验收证明生成器在后续语义标题请求中通过。
+- `fetchTitle` 暴露失败分类：网络错误/超时、429、5xx 可重试；其他 4xx（含 400）不重试，立即本地兜底。测试覆盖 400/429/503 分类、Opus/Sonnet 5.5 含日期后缀、旧模型不变及 5.5 标题请求体不含 `thinking`。
+- dev 用 API Key 渠道 clipproxyapi / Claude Opus 5.5 创建 2 个测试会话：两次标题请求均记录 `status=200`，分别生成“周末出行行李与天气准备”“秋季城市旅行交通住宿预算”等语义标题（均非首行兜底）；两测试会话均经应用 UI 删除。另有一次初始测试会话继承了默认 Codex OAuth 模型并误发送一条消息，发现后立即删除；它不计入上述两次验收。之后所有验收会话均先明确选择 clipproxyapi。
+- 全量 `bun test` **749 pass / 0 fail，1,916 expect，116 files**；Electron `typecheck`、`build:main` 通过。`mobile-preview.sh stop` 后 17889/5173 未监听，正式版 PID 91750 仍存活；未触碰 `~/.proma`，版本保持 `0.19.58`，未打包、安装或 push。

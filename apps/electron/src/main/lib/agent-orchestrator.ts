@@ -366,7 +366,9 @@ export class AgentOrchestrator {
       return fallbackTitle
     }
 
+    let retryableTitleFailure = false
     return fetchAgentTitleWithFallback(async () => {
+      retryableTitleFailure = false
       const apiKey = await resolveChannelRuntimeApiKey(channelId)
       const providerAdapter = getAdapter(channel.provider)
       const request = providerAdapter.buildTitleRequest({
@@ -378,11 +380,13 @@ export class AgentOrchestrator {
 
       const proxyUrl = await getEffectiveProxyUrl()
       const fetchFn = getFetchFn(proxyUrl)
-      const title = await fetchTitle(request, providerAdapter, fetchFn)
+      const title = await fetchTitle(request, providerAdapter, fetchFn, (failure) => {
+        retryableTitleFailure = failure.retryable
+      })
       const result = title ? sanitizeGeneratedTitle(title) : null
       if (result) console.log(`[Agent 标题生成] 生成标题成功: "${result}"`)
       return result
-    }, () => createFallbackTitle(userMessage), signal)
+    }, () => createFallbackTitle(userMessage), signal, undefined, () => retryableTitleFailure)
   }
 
   /**

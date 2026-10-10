@@ -32,6 +32,24 @@ describe('fetchTitle failure logging', () => {
     }
   })
 
+  test('400 错误标记为不可重试，429 与 5xx 可重试', async () => {
+    for (const [status, retryable] of [[400, false], [429, true], [503, true]] as const) {
+      let failure: { kind: string; status?: number; retryable: boolean } | undefined
+      await fetchTitle(request, adapter, async () => new Response('bad', { status }), (value) => {
+        failure = value
+      })
+      expect(failure).toEqual({ kind: 'http', status, retryable })
+    }
+  })
+
+  test('收到响应后的 JSON 解析失败不标记为可重试网络错误', async () => {
+    let failure: { kind: string; retryable: boolean } | undefined
+    await fetchTitle(request, adapter, async () => new Response('not-json', { status: 200 }), (value) => {
+      failure = value
+    })
+    expect(failure).toEqual({ kind: 'response', retryable: false })
+  })
+
   test('异常日志写出 name/message 且不含查询串和请求头', async () => {
     const error = new TypeError('network\ntimeout')
     const errorLog = mock(() => {})

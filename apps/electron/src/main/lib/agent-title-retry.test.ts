@@ -47,6 +47,21 @@ describe('fetchAgentTitleWithFallback', () => {
     expect(fallback).not.toHaveBeenCalled()
   })
 
+  test('不可重试的 4xx 直接回退、不等待也不重试', async () => {
+    let calls = 0
+    const delay = mock(async () => {})
+    const result = await fetchAgentTitleWithFallback(
+      async () => { calls += 1; return null },
+      () => '本地标题',
+      undefined,
+      delay,
+      () => false,
+    )
+    expect(result).toBe('本地标题')
+    expect(calls).toBe(1)
+    expect(delay).not.toHaveBeenCalled()
+  })
+
   test('自定义渠道既有本地标题行为保持不变', async () => {
     const result = await fetchAgentTitleWithFallback(
       async () => null,

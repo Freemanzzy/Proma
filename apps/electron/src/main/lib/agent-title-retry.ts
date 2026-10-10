@@ -4,6 +4,7 @@ export async function fetchAgentTitleWithFallback(
   fallback: () => string | null,
   signal?: AbortSignal,
   delay: (ms: number, signal?: AbortSignal) => Promise<void> = abortableDelay,
+  canRetry: () => boolean = () => true,
 ): Promise<string | null> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     if (signal?.aborted) return null
@@ -14,6 +15,7 @@ export async function fetchAgentTitleWithFallback(
       if (signal?.aborted) return null
     }
     if (signal?.aborted) return null
+    if (!canRetry()) break
     if (attempt === 0) {
       try {
         await delay(2_000, signal)
