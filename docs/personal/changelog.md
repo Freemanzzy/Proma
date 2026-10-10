@@ -1557,3 +1557,7 @@
 - `fetchTitle` 暴露失败分类：网络错误/超时、429、5xx 可重试；其他 4xx（含 400）不重试，立即本地兜底。测试覆盖 400/429/503 分类、Opus/Sonnet 5.5 含日期后缀、旧模型不变及 5.5 标题请求体不含 `thinking`。
 - dev 用 API Key 渠道 clipproxyapi / Claude Opus 5.5 创建 2 个测试会话：两次标题请求均记录 `status=200`，分别生成“周末出行行李与天气准备”“秋季城市旅行交通住宿预算”等语义标题（均非首行兜底）；两测试会话均经应用 UI 删除。另有一次初始测试会话继承了默认 Codex OAuth 模型并误发送一条消息，发现后立即删除；它不计入上述两次验收。之后所有验收会话均先明确选择 clipproxyapi。
 - 全量 `bun test` **749 pass / 0 fail，1,916 expect，116 files**；Electron `typecheck`、`build:main` 通过。`mobile-preview.sh stop` 后 17889/5173 未监听，正式版 PID 91750 仍存活；未触碰 `~/.proma`，版本保持 `0.19.58`，未打包、安装或 push。
+
+## 2026-10-10: 合入 Agent 标题修复（暂不打包）
+
+- `fix/title-fallback` --no-ff 合入 personal。根因：标题请求对 Claude 5.5 发送 `thinking:{type:'disabled'}`，claude-opus-5-5 / claude-sonnet-5-5 一律 400，会话停在“新 Agent 会话”（非 custom 渠道失败时无兜底）。父会话经 clipproxy 实测：disabled → 400，省略 thinking → 200。修复：Claude 5.5+ `disableStrategy=omit-field`；标题失败对所有渠道回退首行本地标题；仅网络错误/超时/5xx/429 重试一次；`fetchTitle` 失败日志改为单行含状态码与错误摘要。dev 实测 Opus 5.5 标题 200 并生成语义标题。全量测试通过。随下一批打包。
