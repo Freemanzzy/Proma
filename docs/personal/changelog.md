@@ -1561,3 +1561,7 @@
 ## 2026-10-10: 合入 Agent 标题修复（暂不打包）
 
 - `fix/title-fallback` --no-ff 合入 personal。根因：标题请求对 Claude 5.5 发送 `thinking:{type:'disabled'}`，claude-opus-5-5 / claude-sonnet-5-5 一律 400，会话停在“新 Agent 会话”（非 custom 渠道失败时无兜底）。父会话经 clipproxy 实测：disabled → 400，省略 thinking → 200。修复：Claude 5.5+ `disableStrategy=omit-field`；标题失败对所有渠道回退首行本地标题；仅网络错误/超时/5xx/429 重试一次；`fetchTitle` 失败日志改为单行含状态码与错误摘要。dev 实测 Opus 5.5 标题 200 并生成语义标题。全量测试通过。随下一批打包。
+
+## 2026-10-10: 修正 core 测试类型错误（打包被阻断）
+
+- 打包脚本运行全工作区 typecheck，`packages/core/src/providers/sse-reader.test.ts`（标题修复新增）在 bun test 下通过但 tsc 报错（fetch mock 与 adapter 类型转换），打包中止。改为显式 `as unknown as typeof fetch` 等转换，仅测试文件；全仓 typecheck 通过，749 pass / 0 fail。教训：执行者验收须跑**全仓** `bun run typecheck`，不能只跑 Electron 包。
