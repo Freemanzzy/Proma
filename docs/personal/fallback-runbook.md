@@ -41,6 +41,7 @@
 - 不存在 → 仍是官方版（并存期或切换失败已回退）。个人版问题只影响开发实例（`~/.proma-dev`），不要动 `/Applications` 与 `~/.proma`；§3 不适用。
 - 存在 → 已切换，按下文处理。
 - 对照基线：`~/.proma-switch-backups/pre-switch-snapshot.json`（切换前）与每次更新备份目录里的快照；`python3 scripts/personal/health-snapshot.py ~/.proma --output /tmp/now.json && python3 scripts/personal/health-snapshot.py --compare <基线> /tmp/now.json`。安装启动可能清理未使用草稿；只有减少的会话 ID 与 `--since` 之后生成的 `backups/draft-cleanup-*.json` 中 ID 并集完全相同，且备份条目全部为草稿时，安装脚本才会接受该差异；其他字段仍必须一致。
+- 2026-10-08 之前写入的快照没有 `sessions.ids`；与新快照比较时 `--compare` 自动只比会话数量并输出 `SNAPSHOT MATCH (legacy snapshot without sessions.ids; compared counts only)`，数量不同仍报 DIFF。
 - 周检报告只是生成时刻的快照；同步完成后以 `PERSONAL.md` 为准。
 
 ```bash
@@ -89,6 +90,8 @@ ls -lt "/Volumes/Lexar ssd 2tb/proma 备份/" 2>/dev/null | head
 ---
 
 ## 3. 回退 A：恢复上一版应用
+
+> **注意（2026-10-10 起）**：`previous` 若为 `b3a24028` 或更早含两段式 before-quit 的版本，该版本**正常退出可能半停**（日志只有 `before-quit stage=cleanup-complete`、无 `will-quit`，进程存活且 17888 不监听）。回退后再次退出时须按 PID 确认进程已结束，未结束则核对身份后按 PID 结束。`ac21c948` 起已修复。
 
 > 换应用前先按 §4 第 2 步把当前 `~/.proma` 另存一份（`cp -a`，不移动），再换应用。两边版本相同时通常不需要恢复数据。
 
