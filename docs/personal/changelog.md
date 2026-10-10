@@ -1537,3 +1537,7 @@
 - 模拟器清理新增测试：无 child no-op；有 child 时检查 detached spawn 参数、unref、owned child SIGTERM 与状态重置；无 bundled script 时不启动 npx。定向测试 **12 pass / 0 fail**。全量 `bun test` **737 pass / 0 fail，1,880 expect，113 files**；Electron `typecheck` 与 `build:main` 通过。
 - dev SIGTERM 验证：日志 `before-quit stage=start` → `cleanup-complete durationMs=4` → `will-quit start/complete`；进程 **0.319 秒**后消失，无 `quit-stalled`。本次未启动模拟器或 serve-sim 预览，因此未验证活动预览子进程清理；正常 Dock 退出未单独测试。
 - dev 已停止；17889/5173 未监听；模拟器未启动。正式版 PID 91750 与 `~/.proma` 未触碰；未打包、安装或 push；版本保持 `0.19.58`。
+
+## 2026-10-10: 合入退出半停修复（暂不打包）
+
+- `fix/quit-stall` --no-ff 合入 personal。根因：个人版 iOS 模拟器侧栏引入的两段式 before-quit（第一次 preventDefault → 异步清理 → 再次 `app.quit()`）使 Electron 第二次退出走不到 `will-quit`，服务全停而进程存活（正式版 10-09 22:38 起半停，10-10 02:00–06:00 定时任务全部漏跑、手机无法连接）。dev 对照：原样 SIGTERM → `quit-stalled`（看门狗 15 秒）；单阶段 → `will-quit`，0.3 秒退出。全量 737 pass / 0 fail。随下一批打包。
