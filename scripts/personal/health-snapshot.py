@@ -102,6 +102,18 @@ def snapshot(root: Path) -> dict[str, Any]:
     }
 
 
+def _drop_ids_if_legacy(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    """Snapshots written before 2026-10-08 have no sessions.ids; compare such pairs by counts only."""
+    ls, rs = left.get("sessions"), right.get("sessions")
+    if not isinstance(ls, dict) or not isinstance(rs, dict):
+        return False
+    if ("ids" in ls) == ("ids" in rs):
+        return False
+    ls.pop("ids", None)
+    rs.pop("ids", None)
+    return True
+
+
 def compare(before: Path, after: Path, allow_draft_cleanup_dir: Path | None = None, since: float | None = None) -> int:
     try:
         left = json.loads(before.read_text(encoding="utf-8"))
@@ -109,8 +121,9 @@ def compare(before: Path, after: Path, allow_draft_cleanup_dir: Path | None = No
     except (OSError, json.JSONDecodeError) as exc:
         print(f"SNAPSHOT COMPARE ERROR: {exc}", file=sys.stderr)
         return 2
+    legacy_ids = _drop_ids_if_legacy(left, right)
     if left == right:
-        print("SNAPSHOT MATCH")
+        print("SNAPSHOT MATCH (legacy snapshot without sessions.ids; compared counts only)" if legacy_ids else "SNAPSHOT MATCH")
         return 0
     if allow_draft_cleanup_dir is not None:
         reason = draft_cleanup_match(left, right, allow_draft_cleanup_dir, since)

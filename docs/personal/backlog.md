@@ -4,7 +4,7 @@
 
 ## 待合入分支（已验证、未发布）
 
-- **已合入 personal、尚未打包安装（2026-10-10）**：`fix/quit-stall`（退出改为单阶段 before-quit + 同步模拟器清理；15 秒退出看门狗兜底）。 另含 `fix/title-fallback`（Claude 5.5+ 标题请求省略 thinking 字段——此前每次 400；标题失败统一回退首行本地标题，仅网络/5xx/429 重试一次）。**在装上之前，正式版每次退出都可能半停**：退出后须按 PID 确认进程已结束，未结束则按 PID 结束后再打开。安装申请需写明此点；开着模拟器预览时退出的清理未实测。
+- 无（`ac21c948` 已于 2026-10-10 15:33 安装）。
 
 - 无（`b3a24028` 已于 2026-10-08 20:31 安装）。
 
@@ -41,6 +41,7 @@
 | 2026-10-10 | `mobile-preview.sh stop` 在启动器 DEV_PID 已不存在时拒绝清理残余的 electronmon/vite/Electron 进程树 | 开发 | 10-10 退出半停取证中由父会话按 PID 手工清理。方案：DEV_PID 不在时按记录的进程组/命令行路径（仓库 node_modules、非 /Applications）核对后清理 |
 | 2026-10-10 | Agent 标题请求对 Claude Opus 5.5 发送 `thinking.type=disabled` 后 HTTP 400，标题退回首行 | Mac | ✅ 已实现：Claude 5.5+ 的标题请求省略 `thinking`；仅网络错误/超时/429/5xx 重试，其他 4xx 直接本地兜底。dev 两个 clipproxyapi / Claude Opus 5.5 会话均记录 HTTP 200 并生成非首行语义标题。错误日志已含状态码/正文，详见 changelog 2026-10-10「Claude 5.5 标题请求参数兼容性修复」 |
 | 2026-10-10 | 正式版退出半停期间，main.log 每分钟一条 `子任务唤醒 queued … suppressed=59`（同一 parentSessionId） | Mac | 仅观察；退出半停修复后若仍出现再查子任务唤醒在调度器停止后的排队逻辑 |
+| 2026-10-10 | 开着 iOS 模拟器预览时退出 Proma 的清理路径（detached serve-sim 停流 + 结束子进程）尚未实测 | Mac | 下次用到模拟器侧栏时顺带验证：开预览 → Cmd+Q → 日志 `will-quit`、无 `quit-stalled`、`ps` 无 serve-sim 残留 |
 
 ## 后续待办（按建议优先级）
 

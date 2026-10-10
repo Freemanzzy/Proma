@@ -117,6 +117,15 @@ def main():
         assert_run(['python3',str(SCRIPTS/'health-snapshot.py'),'--compare',str(filename_before),str(filename_after),'--allow-draft-cleanup-dir',str(filename_backup),'--since','1000'])
         check_draft_compare(root/'compare-new',[draft],[draft,{'id':'new-session','isDraft':False}],[],expected=1)
         check_draft_compare(root/'compare-disabled',[draft],[],[('draft-cleanup-2026-10-08T20-00-00-000Z.json',{'sessions':[draft]})],enabled=False,expected=1)
+        legacy_dir=root/'compare-legacy-ids'; legacy_dir.mkdir()
+        def legacy_snap(sessions, with_ids): return {'schema':1,'versions':{},'sessions':({'count':len(sessions),'ids':sessions} if with_ids else {'count':len(sessions)}),'automations':{'count':0,'by_id':{}},'channels':{'count':0,'by_id':{}},'symlinks':0}
+        (legacy_dir/'old.json').write_text(json.dumps(legacy_snap(['a','b'],False)))
+        (legacy_dir/'new.json').write_text(json.dumps(legacy_snap(['a','b'],True)))
+        (legacy_dir/'new-fewer.json').write_text(json.dumps(legacy_snap(['a'],True)))
+        out=assert_run(['python3',str(SCRIPTS/'health-snapshot.py'),'--compare',str(legacy_dir/'old.json'),str(legacy_dir/'new.json')])
+        assert 'legacy snapshot without sessions.ids' in out.stdout
+        assert_run(['python3',str(SCRIPTS/'health-snapshot.py'),'--compare',str(legacy_dir/'old.json'),str(legacy_dir/'new-fewer.json')],expected=1)
+        print('LEGACY SNAPSHOT COMPARISON PASS: missing ids compared by counts only, count change still rejected')
         print('DRAFT-CLEANUP COMPARISON PASS: no-delete, exact backup, unbacked removal, non-draft, stale backup, new ID, legacy strict mode')
 
         incoming=root/'incoming.app'; resources=incoming/'Contents'/'Resources'; resources.mkdir(parents=True)

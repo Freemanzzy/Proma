@@ -1565,3 +1565,13 @@
 ## 2026-10-10: 修正 core 测试类型错误（打包被阻断）
 
 - 打包脚本运行全工作区 typecheck，`packages/core/src/providers/sse-reader.test.ts`（标题修复新增）在 bun test 下通过但 tsc 报错（fetch mock 与 adapter 类型转换），打包中止。改为显式 `as unknown as typeof fetch` 等转换，仅测试文件；全仓 typecheck 通过，749 pass / 0 fail。教训：执行者验收须跑**全仓** `bun run typecheck`，不能只跑 Electron 包。
+
+## 2026-10-10: 安装 ac21c948（退出半停修复 + 标题修复）
+
+- Claude Code 15:33 用**仓库标准 `install-update.sh`**（8d601b0e 起的草稿清理核验，首次实装使用）安装 `ac21c948`，替换 `b3a24028`（previous，有退出半停缺陷）；备份 `20261010-153314-75109`，BACKUP VERIFY PASS（25,401 条目）；启动后 SNAPSHOT MATCH（会话 1049、渠道 7，`draft-cleanup removed=0`）；`20261008-203118-91282` 归档到外置硬盘。钥匙串弹 1 次。
+- 安装前旧版 `b3a24028` 本次正常退出（有 `will-quit`），未需按 PID 结束。
+- 服务诊断：15:33:52 web-remote-start、15:33:58 scheduler-start，首个心跳 15:43:58，至 10-11 01:54 共 62 次无缺口，无 `quit-stalled`。
+- **退出修复实测**：用户 10-11 01:54 用 Dock/Cmd+Q 退出，`before-quit start → cleanup-complete (22ms) → will-quit complete`，约 42 ms，无 `quit-stalled`，无 serve-sim 残留；重开后 17888 与调度器正常。
+- 用户确认 clipproxyapi Claude Opus 5.5 新会话标题为模型生成的语义标题。10-10 漏跑的定时任务按用户决定不补跑。
+- 待办处理：`health-snapshot.py --compare` 对缺 `sessions.ids` 的旧格式快照降级为只比数量（新增脚本测试）；`fallback-runbook.md` 注明旧快照比较行为与 previous `b3a24028` 的退出半停注意事项。“开着 iOS 模拟器预览时退出”的清理路径仍未实测，保留在 backlog。
+- 详见 handoff `install-result-2026-10-10.md`。
