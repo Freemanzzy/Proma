@@ -16,6 +16,18 @@ const FIRST_PORT = 3200
 
 interface ServeSimInvocation { command: string; scriptPath?: string; env: NodeJS.ProcessEnv }
 
+type QuitCleanupChild = Pick<ChildProcess, 'pid' | 'exitCode' | 'kill'>
+interface QuitCleanupState {
+  child: QuitCleanupChild | null
+  invocation: ServeSimInvocation | null
+  udid?: string
+  reset(): void
+}
+interface QuitCleanupDependencies {
+  spawn: typeof spawn
+  terminate: typeof terminateOwnedChild
+}
+
 function findBundledServeSimScript(): string | undefined {
   const require = createRequire(__filename)
   const searchPaths = require.resolve.paths('serve-sim') ?? []
@@ -244,6 +256,46 @@ export async function shutdownSimulator(udid: string): Promise<void> {
   if (status.running && (status.udid === udid || status.streams?.some((stream) => stream.udid === udid))) await stopSimulatorPreview()
   await execFile('/usr/bin/xcrun', ['simctl', 'shutdown', udid], { timeout: 60_000 }).catch((error: { stderr?: string }) => {
     if (!/current state: Shutdown/i.test(error?.stderr ?? '')) throw error
+  })
+}
+
+export function cleanupSimulatorPreviewOnQuitWith(
+  state: QuitCleanupState,
+  dependencies: QuitCleanupDependencies = { spawn, terminate: terminateOwnedChild },
+): void {
+  const ownChild = state.child
+  if (!ownChild) return
+
+  const invocation = state.invocation
+  if (invocation?.scriptPath && state.udid) {
+    try {
+      const cleanupProcess = dependencies.spawn(
+        invocation.command,
+        invocationArgs(invocation, buildKillArgs(state.udid)),
+        { env: invocation.env, detached: true, stdio: 'ignore' },
+      )
+      cleanupProcess.once('error', () => undefined)
+      cleanupProcess.unref()
+    } catch {
+      // Exit cleanup must not block the application's remaining quit handlers.
+    }
+  }
+
+  dependencies.terminate(ownChild)
+  state.reset()
+}
+
+export function cleanupSimulatorPreviewOnQuit(): void {
+  cleanupSimulatorPreviewOnQuitWith({
+    child,
+    invocation: currentInvocation,
+    udid: currentUdid,
+    reset: () => {
+      child = null
+      currentInvocation = null
+      currentUdid = undefined
+      current = { running: false }
+    },
   })
 }
 

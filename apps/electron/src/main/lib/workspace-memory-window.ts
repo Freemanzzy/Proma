@@ -2,6 +2,8 @@ import { app, BrowserWindow, screen, shell } from 'electron'
 import { existsSync } from 'node:fs'
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
 import { join } from 'node:path'
+import { getIsQuitting } from './app-lifecycle'
+import { shouldInterceptWorkspaceMemoryClose } from './workspace-memory-window-close'
 
 const DEFAULT_WIDTH = 980
 const DEFAULT_HEIGHT = 720
@@ -99,7 +101,12 @@ function createWorkspaceMemoryWindow(workspaceSlug: string, relativePath?: strin
   // All platform close paths (traffic lights, Alt+F4, Cmd/Ctrl+W and custom buttons)
   // converge here so dirty renderer state can explicitly save or discard first.
   win.on('close', (event) => {
-    if (approvedCloseWindows.has(win) || !rendererReadyWindows.has(win) || win.webContents.isDestroyed()) return
+    if (!shouldInterceptWorkspaceMemoryClose({
+      isQuitting: getIsQuitting(),
+      approved: approvedCloseWindows.has(win),
+      rendererReady: rendererReadyWindows.has(win),
+      webContentsDestroyed: win.webContents.isDestroyed(),
+    })) return
     event.preventDefault()
     win.webContents.send(AGENT_IPC_CHANNELS.WORKSPACE_MEMORY_WINDOW_CLOSE_REQUESTED)
   })

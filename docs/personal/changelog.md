@@ -1521,3 +1521,19 @@
 - `install-update.sh` 正式启动后及 `--test-mode` 均调用受限比对；增加仅与 `--test-mode` 同用的 `--simulate-draft-cleanup` 与 `--simulate-unbacked-session-removal`，用于在临时 `/tmp` 数据目录验证通过与拒绝回滚路径。
 - 更新 `CLAUDE.md` 的安装快照规则、`docs/personal/fallback-runbook.md` 的比对/模拟参数说明、`docs/personal/backlog.md` 对应待办状态。
 - 验证：Python 语法、`bash -n scripts/personal/install-update.sh` 通过；脚本集成测试通过，覆盖无删除、精确备份、未备份 ID、非草稿条目、过期备份、新增会话、旧模式严格拒绝，以及 `/tmp` test-mode 草稿删除通过与非草稿删除失败回滚。全量 `bun test` **728 pass / 0 fail，1,859 expect，110 files**。版本保持 `0.19.58`；未启动 dev、未触碰真实 `/Applications` 或 `~/.proma`，未安装或打包。
+
+## 2026-10-10: 退出被取消后服务半停
+
+- 取证：dev 无渠道设置改动、无记忆编辑窗口时按 PID 向 Electron 主进程发 SIGTERM。第一阶段 `before-quit` 因模拟器清理执行 `preventDefault`，之后第二阶段 `before-quit` 未被阻止；主窗口在 `getIsQuitting()=true` 时 `close` 且 `prevented=false`，无 `will-prevent-unload`，所有窗口均关闭并触发 `window-all-closed`，2 秒后窗口与 WebContents 数均为 0，但仍无 `will-quit` 且 Electron 主进程存活。未发现窗口/renderer 拦截；退出生命周期在清理完成后未推进到 `will-quit`。该结论来自 SIGTERM 场景，正常 Dock 退出未实测。
+- 修复：新增 `personal-quit-watchdog.ts`，第二阶段清理完成后启动默认 15 秒 watchdog；`will-quit` 先到则取消，否则记录 `event=quit-stalled waitedMs=… windows=count=… types=…`（仅窗口数及内容类型，不含标题/内容）并 `app.exit(0)`。退出中 `will-prevent-unload` 通过 `preventDefault()` 放行；记忆窗口退出时跳过渲染器确认，非退出行为不变。
+- 新增 watchdog、退出时 unload、记忆窗口 close guard 单测：**6 pass / 0 fail**。全量 `bun test`：**734 pass / 0 fail，1,869 expect，113 files**；Electron `typecheck`、`build:main`、`build:renderer` 通过（renderer 有既存大 chunk 警告）。
+- dev 验证：修改后再次对身份核验的 Electron dev PID 发 SIGTERM；日志出现 `event=quit-stalled waitedMs=15001 windows=count=0 types=none`，随后该 PID 消失。该轮没有 `will-quit`；已通过 watchdog 兜底完成退出。渠道 dirty 表单、记忆窗口关闭及正常 Dock 退出未在 UI 中实测；对应边界由单测覆盖或保持原 handler 不变。dev 未触发模型请求、未使用渠道、未新增会话。
+- 正式版进程与 `~/.proma` 未触碰；未打包、未安装、未 push。版本保持 `0.19.58`。
+
+## 2026-10-10: quit-stall 两阶段退出根因修复
+
+- 根因与对照：无活动模拟器预览的 dev SIGTERM 对照中，临时单阶段变体（不 `preventDefault`；发起 `void cleanupSimulatorPreview()` 后继续第二阶段，不再异步回调 `app.quit()`）日志为 `before-quit start` → `cleanup-complete durationMs=4` → `will-quit start/complete`，未触发 watchdog，17 秒观察点进程已消失。恢复两阶段原样后日志为首个 `before-quit start` → `simulator-cleanup-complete durationMs=0` → 第二个 `before-quit start` → `cleanup-complete durationMs=8` → `quit-stalled waitedMs=15000 windows=count=0 types=none`，实测 15.198 秒退出。对照支持个人版两阶段 before-quit 流程是本次 stall 的根因；对照时无活动模拟器子进程。
+- 修复：before-quit 改为单阶段，移除 `simulatorCleanupFinished`、`preventDefault()` 与异步后再次 `app.quit()`；`setQuitting()` 后调用同步 `cleanupSimulatorPreviewOnQuit()`，再执行原服务清理。该函数对已知 UDID 和已有 bundled invocation 用 detached、unref 的子进程发出 serve-sim 停流命令（不走 npx/异步枚举），对本进程拥有的 child 发 SIGTERM，并同步重置服务状态。原异步 `cleanupSimulatorPreview()` 保留给非退出流程。15 秒 quit watchdog 保留兜底。
+- 模拟器清理新增测试：无 child no-op；有 child 时检查 detached spawn 参数、unref、owned child SIGTERM 与状态重置；无 bundled script 时不启动 npx。定向测试 **12 pass / 0 fail**。全量 `bun test` **737 pass / 0 fail，1,880 expect，113 files**；Electron `typecheck` 与 `build:main` 通过。
+- dev SIGTERM 验证：日志 `before-quit stage=start` → `cleanup-complete durationMs=4` → `will-quit start/complete`；进程 **0.319 秒**后消失，无 `quit-stalled`。本次未启动模拟器或 serve-sim 预览，因此未验证活动预览子进程清理；正常 Dock 退出未单独测试。
+- dev 已停止；17889/5173 未监听；模拟器未启动。正式版 PID 91750 与 `~/.proma` 未触碰；未打包、安装或 push；版本保持 `0.19.58`。

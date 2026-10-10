@@ -35,6 +35,7 @@
 | 2026-10-08 | ChatGPT 订阅 (Codex) 模型目录缺少 GPT-6.1 Sol | Mac | ✅ 已加入精确模型识别、与 GPT-6 Sol 相同的推理档位/上下文、Fast Mode、Pi catalog 与存量渠道幂等候选迁移。CLI 0.154.0 的 HTTP 400 属客户端版本门控；ChatGPT.app 自带 codex-cli 0.162.0-alpha.2 在同一账号返回 ok。Pi SDK 请求头为 `originator: pi` 且无 `version` 头，是否可用待用户在 dev 重新登录后实测，不下最终结论 |
 | 2026-10-08 | Codex Ultra reasoning 档位 | 产品能力 | 未实现：虽然服务端模型清单报告支持 ultra，但该档位会影响 Astra/Sol 等多个模型系列；当前产品 ThinkingLevel/profile 类型没有 ultra，本次仅保持 6.1 Sol 与 6 Sol 一致，不扩展全局档位。后续需单独评估产品 UI、协议映射与各模型支持范围 |
 | 2026-10-08 | `install-update.sh` 启动后快照比对要求会话数完全一致，会把启动时的草稿清理误判为失败并回滚；本次由 Claude Code 用授权的脚本副本安装 | 安装 | ✅ 已实现：`health-snapshot.py --compare` 仅在启动前 `since` 之后生成的草稿备份 ID 并集与减少 ID 完全一致、备份条目均为草稿、减少 ID 不在启动后索引且其他快照字段一致时接受差异；旧调用保持严格一致。脚本测试与 `/tmp` `--test-mode` 演练覆盖。另：打包前先 Boot 模拟器，避免 serve-sim 冒烟被跳过 |
+| 2026-10-10 | macOS 退出完成服务清理后进程仍存活，17888/17889 均停止 | Mac/dev | 对照实验支持根因是个人版两阶段 `before-quit`：保留 `preventDefault` + async 清理后再次 `app.quit()` 时稳定进入 watchdog；临时单阶段变体触发 `will-quit` 且未触发 watchdog。已改为单阶段调用同步模拟器子进程清理，watchdog 保留兜底。SIGTERM dev 验证 0.319 秒退出；active serve-sim 预览清理与正常 Dock 退出未实测 |
 
 ## 后续待办（按建议优先级）
 
