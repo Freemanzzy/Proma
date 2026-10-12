@@ -1575,3 +1575,11 @@
 - 用户确认 clipproxyapi Claude Opus 5.5 新会话标题为模型生成的语义标题。10-10 漏跑的定时任务按用户决定不补跑。
 - 待办处理：`health-snapshot.py --compare` 对缺 `sessions.ids` 的旧格式快照降级为只比数量（新增脚本测试）；`fallback-runbook.md` 注明旧快照比较行为与 previous `b3a24028` 的退出半停注意事项。“开着 iOS 模拟器预览时退出”的清理路径仍未实测，保留在 backlog。
 - 详见 handoff `install-result-2026-10-10.md`。
+
+## 2026-10-12: Claude 5.5 标题请求改用 adaptive low，兜底标题清理引用标记
+
+- Claude 5.5+ 标题请求改为 `thinking: { type: 'adaptive' }` + `output_config.effort: 'low'`，标题请求 `max_tokens` 对所有 Anthropic 模型从 50 提高到 256；4.x / 5.0 仍显式禁用 thinking，流式 Chat 思考路径不变。
+- 发给标题模型的文本与本地兜底共用纯函数清理 UI 引用协议：会话/待办/日程的编码标签解码替换，文件引用解码为文件名，Skill/MCP 标记移除，历史引用按 payload 提取文本；无可读内容时本地兜底返回 null。新增标记解码与回退测试。
+- 验证：定向测试 12 pass / 0 fail；全仓 `bun run typecheck` 所有 6 个 workspace package 均退出 0；全量 `bun test` **754 pass / 0 fail，1,929 expect，117 files**；`apps/electron` 的 `build:main` 通过。
+- Clipproxy 实测：使用同一 adaptive-low / 256-token 请求体，Opus 5.5 与 Sonnet 5.5 各测复现消息及两条普通消息，共 6 次；全部 HTTP 200、`stop_reason=end_turn`，每次均返回可读标题。复现消息两模型均返回“对话卡顿原因排查”；未输出 API Key。
+- 未启动 dev，未打包、安装、推送或改版本；版本仍为 0.19.58。

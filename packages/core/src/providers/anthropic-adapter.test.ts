@@ -66,7 +66,7 @@ describe('AnthropicAdapter headers', () => {
     expect(request.headers['api-key']).toBeUndefined()
   })
 
-  test('Claude 5.5 title request omits thinking field', () => {
+  test('Claude 5.5 title request uses adaptive low with a safe token budget', () => {
     const adapter = new AnthropicAdapter('anthropic')
     const request = adapter.buildTitleRequest({
       baseUrl: 'https://api.anthropic.com',
@@ -74,6 +74,27 @@ describe('AnthropicAdapter headers', () => {
       modelId: 'claude-opus-5-5',
       prompt: '请生成标题',
     })
-    expect(JSON.parse(request.body)).not.toHaveProperty('thinking')
+    expect(JSON.parse(request.body)).toMatchObject({
+      max_tokens: 256,
+      thinking: { type: 'adaptive' },
+      output_config: { effort: 'low' },
+    })
+  })
+
+  test('older Claude title requests keep disabled thinking with the same title token budget', () => {
+    const adapter = new AnthropicAdapter('anthropic')
+    for (const modelId of ['claude-opus-4-6', 'claude-sonnet-5']) {
+      const request = adapter.buildTitleRequest({
+        baseUrl: 'https://api.anthropic.com',
+        apiKey: 'test-key',
+        modelId,
+        prompt: '请生成标题',
+      })
+      expect(JSON.parse(request.body)).toMatchObject({
+        max_tokens: 256,
+        thinking: { type: 'disabled' },
+      })
+      expect(JSON.parse(request.body)).not.toHaveProperty('output_config')
+    }
   })
 })
