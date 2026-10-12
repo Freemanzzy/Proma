@@ -4,7 +4,7 @@
 
 ## 待合入分支（已验证、未发布）
 
-- 无（`ac21c948` 已于 2026-10-10 15:33 安装）。
+- **已合入 personal、尚未打包安装（2026-10-12）**：`fix/title-claude55-adaptive`（Claude 5.5 标题请求改为 adaptive + effort low、max_tokens 256；兜底标题与标题提示清理 `&session`/`@file` 引用标记）。随下一批打包。
 
 - 无（`b3a24028` 已于 2026-10-08 20:31 安装）。
 
