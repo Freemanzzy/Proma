@@ -40,6 +40,7 @@
 | 2026-10-10 | macOS 退出完成服务清理后进程仍存活，17888/17889 均停止 | Mac/dev | 对照实验支持根因是个人版两阶段 `before-quit`：保留 `preventDefault` + async 清理后再次 `app.quit()` 时稳定进入 watchdog；临时单阶段变体触发 `will-quit` 且未触发 watchdog。已改为单阶段调用同步模拟器子进程清理，watchdog 保留兜底。SIGTERM dev 验证 0.319 秒退出；active serve-sim 预览清理与正常 Dock 退出未实测 |
 | 2026-10-10 | `mobile-preview.sh stop` 在启动器 DEV_PID 已不存在时拒绝清理残余的 electronmon/vite/Electron 进程树 | 开发 | 10-10 退出半停取证中由父会话按 PID 手工清理。方案：DEV_PID 不在时按记录的进程组/命令行路径（仓库 node_modules、非 /Applications）核对后清理 |
 | 2026-10-10 | Agent 标题请求对 Claude Opus 5.5 发送 `thinking.type=disabled` 后 HTTP 400，标题退回首行 | Mac | ✅ 已实现：Claude 5.5+ 的标题请求省略 `thinking`；仅网络错误/超时/429/5xx 重试，其他 4xx 直接本地兜底。dev 两个 clipproxyapi / Claude Opus 5.5 会话均记录 HTTP 200 并生成非首行语义标题。错误日志已含状态码/正文，详见 changelog 2026-10-10「Claude 5.5 标题请求参数兼容性修复」 |
+| 2026-10-12 | Claude 5.5 标题偶发为空标题回退；本地兜底标题包含会话引用 ID 与 URL 编码文本 | Mac | ✅ 已实现：Claude 5.5+ 标题请求改用 adaptive + low、`max_tokens=256`；提示词与兜底先清理 session/file 等 UI 引用标记。Opus 5.5 / Sonnet 5.5 各以复现消息和两条普通消息请求一次，6/6 HTTP 200、`end_turn` 且有可读标题；全仓 typecheck、全量测试、`build:main` 通过。详见 changelog 2026-10-12「Claude 5.5 标题请求改用 adaptive low，兜底标题清理引用标记」 |
 | 2026-10-10 | 正式版退出半停期间，main.log 每分钟一条 `子任务唤醒 queued … suppressed=59`（同一 parentSessionId） | Mac | 仅观察；退出半停修复后若仍出现再查子任务唤醒在调度器停止后的排队逻辑 |
 | 2026-10-10 | 开着 iOS 模拟器预览时退出 Proma 的清理路径（detached serve-sim 停流 + 结束子进程）尚未实测 | Mac | 下次用到模拟器侧栏时顺带验证：开预览 → Cmd+Q → 日志 `will-quit`、无 `quit-stalled`、`ps` 无 serve-sim 残留 |
 

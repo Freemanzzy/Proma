@@ -454,14 +454,16 @@ export class AnthropicAdapter implements ProviderAdapter {
 
     const body: Record<string, unknown> = {
       model: input.modelId,
-      max_tokens: 50,
+      max_tokens: 256,
       messages: [{ role: 'user', content: input.prompt }],
     }
 
-    // 标题生成不需要思考：按模型能力选择禁用方式
-    // - Claude 5.5+ 与 Mythos Preview 默认 adaptive，不接受显式 disabled，省略字段即可
-    // - 其它 Claude 显式 disabled（对 manual / adaptive 模型都有效）
-    if (capability.disableStrategy === 'explicit-disabled') {
+    // Claude 5.5+ 默认 adaptive 思考；标题请求限制为 low，避免短 token 上限被思考耗尽。
+    // 其它模型维持原来的禁用策略。
+    if (capability.titleThinking === 'adaptive-low') {
+      body.thinking = { type: 'adaptive' }
+      body.output_config = { effort: 'low' }
+    } else if (capability.disableStrategy === 'explicit-disabled') {
       body.thinking = { type: 'disabled' }
     }
 

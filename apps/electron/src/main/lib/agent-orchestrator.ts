@@ -78,7 +78,7 @@ import { isVisibleRunMessage } from './agent-run-message-visibility'
 import { resolvePiThinkingLevel } from './agent-thinking-level'
 import { resolvePiReasoningCapability } from './adapters/pi-model-registry'
 import { generateCodexTitle } from './adapters/pi-codex-title-generator'
-import { createFallbackTitle, sanitizeGeneratedTitle, TITLE_PROMPT } from './title-generation'
+import { cleanUserMessageForTitle, createFallbackTitle, sanitizeGeneratedTitle, TITLE_PROMPT } from './title-generation'
 import { fetchAgentTitleWithFallback } from './agent-title-retry'
 import { claimWorkspaceMemoryRefreshOpportunity } from './agent-memory-refresh-service'
 import { resolveRuntimeAdditionalDirectories } from './agent-orchestrator-vault-access'
@@ -313,6 +313,7 @@ export class AgentOrchestrator {
    */
   async generateTitle(input: AgentGenerateTitleInput, signal?: AbortSignal): Promise<string | null> {
     const { userMessage, channelId, modelId } = input
+    const titleMessage = cleanUserMessageForTitle(userMessage)
     if (signal?.aborted) return null
     console.log('[Agent 标题生成] 开始生成标题:', { channelId, modelId, userMessage: userMessage.slice(0, 50) })
 
@@ -346,7 +347,7 @@ export class AgentOrchestrator {
         if (signal?.aborted) return null
         const generatedTitle = await generateCodexTitle({
           modelId,
-          prompt: TITLE_PROMPT + userMessage,
+          prompt: TITLE_PROMPT + titleMessage,
           credentials,
           proxyUrl,
           signal,
@@ -375,7 +376,7 @@ export class AgentOrchestrator {
         baseUrl: channel.baseUrl,
         apiKey,
         modelId,
-        prompt: TITLE_PROMPT + userMessage,
+        prompt: TITLE_PROMPT + titleMessage,
       })
 
       const proxyUrl = await getEffectiveProxyUrl()

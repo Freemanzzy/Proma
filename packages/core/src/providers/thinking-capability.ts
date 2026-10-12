@@ -38,6 +38,8 @@ export interface ThinkingCapability {
   disableStrategy: ThinkingDisableStrategy
   /** adaptive effort 模型的默认强度；仅在支持 output_config.effort 时设置。 */
   effort?: string
+  /** 标题请求专用策略；Claude 5.5+ 需用 adaptive low 避免默认思考耗尽短 token 上限。 */
+  titleThinking?: 'adaptive-low'
 }
 
 /**
@@ -80,12 +82,14 @@ export function detectThinkingCapability(
   const encoding = profile?.encodings['anthropic-messages']
   const omitClaudeDisabled = (providerType === 'anthropic' || providerType === 'anthropic-compatible')
     && isClaude55OrLater(modelId)
+  const titleThinking = omitClaudeDisabled ? 'adaptive-low' as const : undefined
   if (encoding?.kind === 'adaptive-effort') {
     const effort = profile && encoding.effortMap[profile.defaultLevel]
     return {
       mode: 'adaptive-preferred',
       disableStrategy: omitClaudeDisabled ? 'omit-field' : 'explicit-disabled',
       ...(typeof effort === 'string' ? { effort } : {}),
+      ...(titleThinking ? { titleThinking } : {}),
     }
   }
   if (encoding?.kind === 'deepseek-output-effort') {
@@ -150,5 +154,6 @@ export function detectThinkingCapability(
   return {
     mode: 'manual-only',
     disableStrategy: omitClaudeDisabled ? 'omit-field' : 'explicit-disabled',
+    ...(titleThinking ? { titleThinking } : {}),
   }
 }
