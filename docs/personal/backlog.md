@@ -4,7 +4,7 @@
 
 ## 待合入分支（已验证、未发布）
 
-- **已合入 personal（本地，未推送）、尚未打包安装（2026-10-14）**：`fix/title-claude55-adaptive`（Claude 5.5 标题 adaptive low、引用标记清理）+ `fix/batch-20261014`（fixture 回归层与 `mobile-preview.sh fixture`、stop 按进程组安全清理、`PROMA_DEV_DATA_DIR_NAME`、手机抽屉“文件/改动”菜单被省流量胶囊遮挡修复、fixture 沿用 dev 受信设备）。用户 16:32 验证通过，暂不推送。
+- **已合入 personal（本地，未推送）、尚未打包安装（2026-10-14）**：`fix/title-claude55-adaptive`（Claude 5.5 标题 adaptive low、引用标记清理）+ `fix/batch-20261014`（fixture 回归层与 `mobile-preview.sh fixture`、stop 按进程组安全清理、`PROMA_DEV_DATA_DIR_NAME`、手机抽屉“文件/改动”菜单被省流量胶囊遮挡修复、fixture 沿用 dev 受信设备）。用户 16:32 验证通过；17:57 决定打包。
 
 - 无（`b3a24028` 已于 2026-10-08 20:31 安装）。
 
@@ -37,8 +37,8 @@
 | 2026-10-08 | ChatGPT 订阅 (Codex) 模型目录缺少 GPT-6.1 Sol | Mac | ✅ 已加入精确模型识别、与 GPT-6 Sol 相同的推理档位/上下文、Fast Mode、Pi catalog 与存量渠道幂等候选迁移。CLI 0.154.0 的 HTTP 400 属客户端版本门控；ChatGPT.app 自带 codex-cli 0.162.0-alpha.2 在同一账号返回 ok。Pi SDK 请求头为 `originator: pi` 且无 `version` 头，是否可用待用户在 dev 重新登录后实测，不下最终结论 |
 | 2026-10-08 | Codex Ultra reasoning 档位 | 产品能力 | 未实现：虽然服务端模型清单报告支持 ultra，但该档位会影响 Astra/Sol 等多个模型系列；当前产品 ThinkingLevel/profile 类型没有 ultra，本次仅保持 6.1 Sol 与 6 Sol 一致，不扩展全局档位。后续需单独评估产品 UI、协议映射与各模型支持范围 |
 | 2026-10-08 | `install-update.sh` 启动后快照比对要求会话数完全一致，会把启动时的草稿清理误判为失败并回滚；本次由 Claude Code 用授权的脚本副本安装 | 安装 | ✅ 已实现：`health-snapshot.py --compare` 仅在启动前 `since` 之后生成的草稿备份 ID 并集与减少 ID 完全一致、备份条目均为草稿、减少 ID 不在启动后索引且其他快照字段一致时接受差异；旧调用保持严格一致。脚本测试与 `/tmp` `--test-mode` 演练覆盖。另：打包前先 Boot 模拟器，避免 serve-sim 冒烟被跳过 |
-| 2026-10-10 | macOS 退出完成服务清理后进程仍存活，17888/17889 均停止 | Mac/dev | 对照实验支持根因是个人版两阶段 `before-quit`：保留 `preventDefault` + async 清理后再次 `app.quit()` 时稳定进入 watchdog；临时单阶段变体触发 `will-quit` 且未触发 watchdog。已改为单阶段调用同步模拟器子进程清理，watchdog 保留兜底。SIGTERM dev 验证 0.319 秒退出；active serve-sim 预览清理与正常 Dock 退出未实测 |
-| 2026-10-10 | `mobile-preview.sh stop` 在启动器 DEV_PID 已不存在时拒绝清理残余的 electronmon/vite/Electron 进程树 | 开发 | 10-10 退出半停取证中由父会话按 PID 手工清理。方案：DEV_PID 不在时按记录的进程组/命令行路径（仓库 node_modules、非 /Applications）核对后清理 |
+| 2026-10-10 | macOS 退出完成服务清理后进程仍存活，17888/17889 均停止 | Mac/dev | ✅ 已修复并安装（ac21c948，10-11 实测退出 42 ms 到 will-quit）。对照实验支持根因是个人版两阶段 `before-quit`：保留 `preventDefault` + async 清理后再次 `app.quit()` 时稳定进入 watchdog；临时单阶段变体触发 `will-quit` 且未触发 watchdog。已改为单阶段调用同步模拟器子进程清理，watchdog 保留兜底。SIGTERM dev 验证 0.319 秒退出；active serve-sim 预览清理与正常 Dock 退出未实测 |
+| 2026-10-10 | `mobile-preview.sh stop` 在启动器 DEV_PID 已不存在时拒绝清理残余的 electronmon/vite/Electron 进程树 | 开发 | ✅ 已实现（2026-10-14，按记录进程组逐 PID 核验清理）。10-10 退出半停取证中由父会话按 PID 手工清理。方案：DEV_PID 不在时按记录的进程组/命令行路径（仓库 node_modules、非 /Applications）核对后清理 |
 | 2026-10-10 | Agent 标题请求对 Claude Opus 5.5 发送 `thinking.type=disabled` 后 HTTP 400，标题退回首行 | Mac | ✅ 已实现：Claude 5.5+ 的标题请求省略 `thinking`；仅网络错误/超时/429/5xx 重试，其他 4xx 直接本地兜底。dev 两个 clipproxyapi / Claude Opus 5.5 会话均记录 HTTP 200 并生成非首行语义标题。错误日志已含状态码/正文，详见 changelog 2026-10-10「Claude 5.5 标题请求参数兼容性修复」 |
 | 2026-10-12 | Claude 5.5 标题偶发为空标题回退；本地兜底标题包含会话引用 ID 与 URL 编码文本 | Mac | ✅ 已实现：Claude 5.5+ 标题请求改用 adaptive + low、`max_tokens=256`；提示词与兜底先清理 session/file 等 UI 引用标记。Opus 5.5 / Sonnet 5.5 各以复现消息和两条普通消息请求一次，6/6 HTTP 200、`end_turn` 且有可读标题；全仓 typecheck、全量测试、`build:main` 通过。详见 changelog 2026-10-12「Claude 5.5 标题请求改用 adaptive low，兜底标题清理引用标记」 |
 | 2026-10-14 | iPhone 空/有历史会话切换“文件/改动”菜单时，省流量按钮可能盖住菜单选项并截获触摸 | Web Remote | ✅ 已修复：移动端 tab menu 的层级提升到高于会话历史条，fixture `iphone:layout` 触屏/CDP 命中审计 11/11 页面通过；旧层级复现截图与修复后截图分别为 `/tmp/proma-mobile-layout-before-20261014.png`、`/tmp/proma-mobile-layout-after-20261014.png`。`mobile-preview.sh fixture` 的 smoke/layout/session-sync/interactions 全部通过。另在 harness 等待面板切换稳定后再执行布局审计，避免动画期间误判。详见 changelog 2026-10-14「完成隔离 fixture 手机回归并修复菜单遮挡」 |
@@ -51,7 +51,7 @@
 2. **开发启动小修复**：✅ 已完成（2026-10-07），只读 dev 进程诊断、独立 session 启动、PID 启动时间核对及异常健康状态处理均已实现；真实 start → stop 与伪造启动时间拒绝验证见 changelog。
 3. **正式版后台服务诊断**：✅ 已实现（2026-10-07），Web Remote/调度器/子进程/退出阶段事件日志与定时自检详见 `docs/personal/web-remote.md`。
 4. **两层测试**：✅ 已实现。功能回归默认用 `bash scripts/personal/mobile-preview.sh fixture` 重置并运行合成 fixture（2 个工作区、20 条会话、父子委派、Automation、归档、合成大历史）；真实负载层仍按下方触发条件执行，只测量、不作功能判定。2026-10-14 已跑 smoke/layout/session-sync/interactions 全套通过。
-5. **手机查看子任务**：点子任务时自动打开右侧抽屉并在窄屏正常显示（只改 mobile-patch，约半天）。
+5. **手机查看子任务**：✅ 已完成（2026-10-07）。
 6. **`restoreQueuedMessages()` 合并为一次请求**（目前 Web Remote 已限定范围，约 10 次）。
 7. **发送的可见确认标记**（可选，用户未要求）。
 8. **“只推送手机正在看的会话的实时输出”**：完成事件瘦身与背压上线后积压已消除，暂不需要；若计量再出现 MB 级峰值再评估。

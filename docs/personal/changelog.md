@@ -1636,3 +1636,8 @@
 ## 2026-10-14: fixture 沿用 dev 受信设备（测试手机免配对码）
 
 - 用户要求三台测试手机进入测试页面免输入配对码。`make-fixture-data.py` 改为复制 `~/.proma-dev/web-remote/config.json` 的 `trustedTailscaleNodes`（仅 Tailscale 设备名，非密钥）；配对设备、推送订阅仍不复制。父会话同时在 dev 与 fixture 的受信列表中加入 `iphone-air`（此前 dev 列表为 oppo-find-x8-ultra、iphone-15plus-shadowrocket、oppo-clash）。脚本测试更新为断言受信列表被沿用。
+
+## 2026-10-14: 正式版受信设备加入 iPhone Air；准备打包
+
+- 经用户 17:57 同意，在 `~/.proma/web-remote/config.json` 的 `trustedTailscaleNodes` 加入 `iphone-air`（改前备份 `config.json.bak-20261014-180703`，权限 0600）；下次启动生效。
+- backlog 过时条目更正：退出半停、preview stop 清理、手机查看子任务标为已完成。
