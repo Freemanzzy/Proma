@@ -86,7 +86,7 @@ import { createApplicationMenu } from './menu'
 import { registerIpcHandlers } from './ipc'
 import { createTray, destroyTray, getTray, setTrayFlash } from './tray'
 import { initializeRuntime } from './lib/runtime-init'
-import { getConfigDir, seedDefaultSkills } from './lib/config-paths'
+import { getConfigDir, getConfigDirName, seedDefaultSkills } from './lib/config-paths'
 import { getProjectFilesPath, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles, listAgentWorkspaces, upgradeDefaultSkillsInWorkspaces } from './lib/agent-workspace-manager'
 import { hasActiveAgentSessions, stopAllAgents } from './lib/agent-service'
 import { prepareWebRemoteFullUi, startWebRemoteIfEnabled, stopWebRemote } from './lib/web-remote/web-remote-service'
@@ -707,6 +707,10 @@ app.whenReady().then(bootstrap).catch(handleBootstrapFailure)
  * 单点失败不应阻止窗口和托盘的创建（用户至少要能看到界面）。
  */
 async function bootstrap(): Promise<void> {
+  // 启动标记已由 initializePersonalMainLog 写入；仅记录目录名，避免用户路径进入日志。
+  const configDirName = getConfigDirName()
+  recordPersonalInfo('服务诊断', `event=config-dir name=${configDirName} mode=${configDirName === '.proma' ? '正式版本' : '开发模式'}`)
+
   // 初始化 Proma 版本号（供 User-Agent 等全局标识使用）
   setPromaVersion(app.getVersion())
 
@@ -777,6 +781,12 @@ async function bootstrap(): Promise<void> {
   // Web Remote only reads its own configuration/auth data and does not need Keychain secrets.
   // Start it before dock/settings and Bridge initialization, either of which may trigger a Keychain prompt.
   await safeAwait('startWebRemoteIfEnabled', startWebRemoteIfEnabled)
+
+  // 调度器启动只建定时器并读取 automations.json，不解密渠道密钥；到期任务如需密钥会自然等待钥匙串。
+  // 与 Web Remote 一样，必须放在 dock/settings 和 Bridge 初始化等可能触发钥匙串弹窗的步骤之前。
+  safeRun('startScheduler', startScheduler)
+  safeRun('startPersonalHealthCheck', startPersonalHealthCheck)
+
   if (fullUiBridge) {
     const counts = fullUiBridge.getRegistrationCounts()
     console.log(`[Web Remote] full-ui 已登记 invoke=${counts.invoke} event=${counts.event}`)
@@ -884,9 +894,7 @@ async function bootstrap(): Promise<void> {
   await safeAwait('startAllBridges', () => startAllBridges())
   safeRun('startBridgeSelfHealing', startBridgeSelfHealing)
 
-  // 启动定时任务调度器（恢复持久化的 active 任务）
-  safeRun('startScheduler', startScheduler)
-  safeRun('startPersonalHealthCheck', startPersonalHealthCheck)
+  // 启动计划提醒与原生同步协调器。
   safeRun('startPlanningReminderScheduler', startPlanningReminderScheduler)
   safeRun('startPlanningNativeSyncCoordinator', startPlanningNativeSyncCoordinator)
 

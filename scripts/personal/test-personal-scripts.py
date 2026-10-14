@@ -16,6 +16,36 @@ def assert_run(args, expected=0):
     if result.returncode != expected: raise AssertionError(f'{args}: rc={result.returncode}, expected={expected}')
     return result
 
+def check_startup_marker_waiter(root: Path):
+    import datetime, time
+    script = SCRIPTS / 'wait-startup-marker.py'
+    log = root / 'main.log'
+    started = time.time()
+    def run(timeout='0.1'):
+        return subprocess.run(['python3', str(script), str(log), str(started), timeout, '0.05'], text=True, capture_output=True)
+    result = run()
+    assert result.returncode == 1 and '等待启动标记' in result.stderr and str(log) in result.stderr
+    (log).write_text(f'{datetime.datetime.fromtimestamp(started-10, datetime.timezone.utc).isoformat()} [STARTUP] personal main process started\n')
+    assert run().returncode == 1, 'old startup marker must not pass'
+    def stamp(epoch): return datetime.datetime.fromtimestamp(epoch, datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
+    log.write_text(f'{stamp(started-0.1)} [STARTUP] personal main process started\n')
+    assert run().returncode == 1, 'same-second marker before launch must not pass'
+    delayed = subprocess.Popen(['python3', str(script), str(log), str(started), '5', '0.05'], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    time.sleep(3)
+    log.write_text(log.read_text() + f'{stamp(time.time())} [STARTUP] personal main process started\n')
+    stdout, stderr = delayed.communicate(timeout=6)
+    assert delayed.returncode == 0, f'delayed marker failed: {stdout} {stderr}'
+    log.write_text('')
+    (root / 'main.log.1').write_text(f'{stamp(time.time())} [STARTUP] personal main process started\n')
+    rotated = run()
+    assert rotated.returncode == 0 and 'main.log.1' in rotated.stdout, (rotated.stdout, rotated.stderr)
+    (root / 'main.log.1').write_text(f'{stamp(time.time())} [STARTUP] personal main process started\n')
+    log.write_text(f'{stamp(time.time())} [FATAL] fixture in current log after rotated startup\n')
+    fatal = run()
+    assert fatal.returncode == 1 and 'fatal event' in fatal.stderr, (fatal.stdout, fatal.stderr)
+    print('STARTUP MARKER WAIT PASS: no marker/old marker time out; delayed fresh and rotated markers pass; post-marker FATAL fails')
+
+
 def check_mobile_preview_stop(root: Path):
     script = SCRIPTS / 'mobile-preview.sh'
     mock_tailscale = root / 'tailscale-mock'
@@ -136,6 +166,7 @@ def check_draft_compare(data_dir: Path, sessions_before: list[dict], sessions_af
 def main():
     with tempfile.TemporaryDirectory(prefix='proma-personal-script-tests-', dir='/tmp') as td:
         root=Path(td)
+        check_startup_marker_waiter(root)
         check_mobile_preview_stop(root)
         check_fixture_generator(root)
         src=root/'source'; src.mkdir(); (src/'sub').mkdir()
