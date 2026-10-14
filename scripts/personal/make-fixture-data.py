@@ -98,7 +98,8 @@ def load_sources(source_root: Path) -> tuple[dict, dict]:
         fail('dev Web Remote 配置缺少 HTTPS allowedOrigin')
     if not isinstance(logins, list) or not all(isinstance(item, str) for item in logins):
         fail('dev Web Remote 配置缺少 allowedTailscaleLogins 列表')
-    return channels_doc, {'allowedOrigin': origin, 'allowedTailscaleLogins': logins, 'channel': channel}
+    trusted = [str(n) for n in (web_remote.get('trustedTailscaleNodes') or []) if isinstance(n, str)]
+    return channels_doc, {'allowedOrigin': origin, 'allowedTailscaleLogins': logins, 'trustedTailscaleNodes': trusted, 'channel': channel}
 
 
 def synthetic_message(session_id: str, role: str, index: int, text: str, now_ms: int) -> dict:
@@ -246,7 +247,8 @@ def build_dataset(root: Path, sources: dict, secret: dict) -> tuple[int, int]:
         'enabled': True, 'fullUi': True, 'port': 17889,
         'allowedOrigin': secret['allowedOrigin'],
         'allowedTailscaleLogins': secret['allowedTailscaleLogins'],
-        'trustedTailscaleNodes': [],
+        # 沿用 dev 实例的受信 Tailscale 设备（仅设备名，非密钥），用户的测试手机免配对码。
+        'trustedTailscaleNodes': secret['trustedTailscaleNodes'],
         'workspaceScope': 'allowlist', 'allowedWorkspaceIds': ['fixture-a', 'fixture-b'],
     }
     secure_json(root / 'web-remote' / 'config.json', web_config)
@@ -290,7 +292,7 @@ def main() -> None:
         print(f'旧目标已保留：{backup}')
     print(f'工作区：2；会话：{session_count}（普通 11、委派 3、Automation 来源 1、归档 2、置顶 1、草稿 1、大历史 1）；停用 Automation：2；渠道：1（clipproxyapi）')
     print(f'大历史：300 轮；JSONL {large_bytes:,} B')
-    print('Web Remote：17889；允许工作区 2；配对设备/信任设备/推送订阅未复制')
+    print(f"Web Remote：17889；允许工作区 2；受信设备沿用 dev（{len(source_secret['trustedTailscaleNodes'])} 台）；配对设备/推送订阅未复制")
 
 
 if __name__ == '__main__':

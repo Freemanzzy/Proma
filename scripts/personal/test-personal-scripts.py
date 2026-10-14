@@ -72,7 +72,7 @@ def check_fixture_generator(root: Path):
     channel = {'id':'a0c08014-4065-4d2a-8db5-f27f1eb09ab9','name':'clipproxyapi','provider':'anthropic','baseUrl':'https://api.example.invalid','apiKey':encrypted,'models':[],'enabled':True,'createdAt':1,'updatedAt':1}
     other = {'id':'oauth-channel','name':'OAuth must not copy','provider':'openai-codex','apiKey':'OAUTH-SECRET-MUST-NOT-COPY'}
     (source/'channels.json').write_text(json.dumps({'version':7,'channels':[other,channel]}))
-    (source/'web-remote'/'config.json').write_text(json.dumps({'enabled':True,'fullUi':True,'port':17889,'allowedOrigin':'https://fixture-host.invalid:8443','allowedTailscaleLogins':['fixture-user@example.invalid'],'trustedTailscaleNodes':['DEVICE-MUST-NOT-COPY'],'workspaceScope':'allowlist','allowedWorkspaceIds':['old-workspace']}))
+    (source/'web-remote'/'config.json').write_text(json.dumps({'enabled':True,'fullUi':True,'port':17889,'allowedOrigin':'https://fixture-host.invalid:8443','allowedTailscaleLogins':['fixture-user@example.invalid'],'trustedTailscaleNodes':['test-phone-a','test-phone-b'],'workspaceScope':'allowlist','allowedWorkspaceIds':['old-workspace']}))
     target=root/'fixture-data'
     target.mkdir(); (target/'keep.txt').write_text('preserve this previous fixture')
     result=subprocess.run(['python3',str(script),str(target),'--source-dev-data-dir',str(source)],text=True,capture_output=True,errors='replace')
@@ -107,7 +107,7 @@ def check_fixture_generator(root: Path):
     remote=json.loads((target/'web-remote'/'config.json').read_text())
     assert remote['port']==17889 and remote['allowedWorkspaceIds']==['fixture-a','fixture-b']
     assert remote['allowedOrigin']=='https://fixture-host.invalid:8443' and remote['allowedTailscaleLogins']==['fixture-user@example.invalid']
-    assert remote['trustedTailscaleNodes']==[] and not any(k in remote for k in ('devices','pairing','pushSubscriptions'))
+    assert remote['trustedTailscaleNodes']==['test-phone-a','test-phone-b'] and not any(k in remote for k in ('devices','pairing','pushSubscriptions'))
     large_id=str(__import__('uuid').uuid5(__import__('uuid').NAMESPACE_URL,'proma-fixture:large-history'))
     large=target/'agent-sessions'/f'{large_id}.jsonl'
     size=large.stat().st_size

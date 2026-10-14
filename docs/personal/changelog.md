@@ -1632,3 +1632,7 @@
 - `python3 scripts/personal/test-personal-scripts.py` 通过，包含 stop PID 安全清理伪进程与 fixture 生成器演练。`~/.proma-dev` 前后健康快照 `SNAPSHOT MATCH`（829 条会话；既有 `missing:automations.json` 警告保持不变）。
 - 收尾：全仓 typecheck 的 6 个 workspace 全部 Exited 0；全量 `bun test` **760 pass / 0 fail，1,950 expect，118 files**；`build:main`、`build:renderer`、`build:web-preload` 通过。renderer 构建有现存的大 chunk 提示，无构建失败。
 - 已在 backlog 标记“两层测试”实现，并在 `web-remote.md` 补充 fixture 默认流程。全量回归后 dev 预览已按要求清理；供体验的最终 `.proma-dev-fixture` dev 实例将在提交后启动并保持 8443。
+
+## 2026-10-14: fixture 沿用 dev 受信设备（测试手机免配对码）
+
+- 用户要求三台测试手机进入测试页面免输入配对码。`make-fixture-data.py` 改为复制 `~/.proma-dev/web-remote/config.json` 的 `trustedTailscaleNodes`（仅 Tailscale 设备名，非密钥）；配对设备、推送订阅仍不复制。父会话同时在 dev 与 fixture 的受信列表中加入 `iphone-air`（此前 dev 列表为 oppo-find-x8-ultra、iphone-15plus-shadowrocket、oppo-clash）。脚本测试更新为断言受信列表被沿用。
