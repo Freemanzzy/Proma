@@ -1642,6 +1642,7 @@
 - 经用户 17:57 同意，在 `~/.proma/web-remote/config.json` 的 `trustedTailscaleNodes` 加入 `iphone-air`（改前备份 `config.json.bak-20261014-180703`，权限 0600）；下次启动生效。
 - backlog 过时条目更正：退出半停、preview stop 清理、手机查看子任务标为已完成。
 
+
 ## 2026-10-14: 安装 e759bc1c（Claude 5.5 标题 + 抽屉菜单遮挡 + fixture 回归工具）
 
 - **首次安装 22:13 被脚本误判并自动回滚**：`install-update.sh` 启动后只等 `main.log` 非空就立即 grep 启动标记；`main.log` 已于 10-13 15:54 按大小轮换，新文件没有旧标记，新版尚未写出标记即判失败（EXIT=4）。按设计恢复 `ac21c948`、保留失败包；数据 SNAPSHOT MATCH。用户同意后 Claude Code 重开 `ac21c948` 写出启动标记（其草稿清理按预演删除 1 条 `ad28b2c2`，备份 `draft-cleanup-2026-10-14T14-17-57-237Z.json`）、正常退出，22:19 重跑标准脚本成功。
@@ -1649,3 +1650,13 @@
 - **钥匙串弹 1 次，等待约 27 分钟**（22:19:47 → 约 22:46 用户点“始终允许”）。期间 Web Remote 已启动，但 `scheduler-start` 延迟到 22:46:51（调度器在 `await startAllBridges()` 之后启动）；期间无任务到期，未漏跑。
 - 受信名单 `iphone-air` 生效：用户确认 iPhone Air 免配对码进入；抽屉“文件 → 改动”可点；Opus 5.5 带 `&session` 引用的标题正常。
 - 待办（本日修复）：启动标记检查竞态；调度器不应等钥匙串；配置目录写入 main.log。详见 handoff `install-result-2026-10-14.md`。
+
+## 2026-10-15: 修复安装后启动检查竞态与调度器钥匙串延迟
+
+- `install-update.sh` 不再在日志文件非空后立即 grep；现在以微秒精度记录本次启动时间，在 `--timeout` 内轮询 `main.log` 与只读的 `main.log.1`，仅接受时间戳不早于本次启动的标记。超时错误包含等待秒数与日志位置。检查逻辑抽至 `wait-startup-marker.py`，并在健康观察结束时再次核对，覆盖启动标记之后（包括轮换文件之间）的 `[FATAL]`。
+- `/tmp` 启动标记脚本测试覆盖 6 类：无标记超时、旧标记超时、同一秒内但早于启动时刻的标记拒绝、延迟 3 秒新标记通过、标记只在 `.1` 通过、标记后的 `[FATAL]`（含跨当前/轮换日志）失败。`python3 scripts/personal/test-personal-scripts.py` 整套通过，退出码 0；`bash -n` 与 Python 编译检查通过。
+- 静态证据：`startAllBridges()` 启动各自动启用 Bridge，渠道读取及 `channel-manager.ts` 的 `decryptKey()` 路径会调用 `safeStorage.decryptString()`；此前调度器位于 `await startAllBridges()` 之后。调度器现移至 Web Remote 启动后、dock/settings 和 Bridge 初始化前。`startScheduler()` 本身只建 tick 定时器并读取/必要时迁移 `automations.json`，不解密渠道密钥；到期任务按原流程在执行时读取渠道密钥。个人健康检查也提前启动。新增源码顺序测试，1 pass / 0 fail。
+- 主进程启动标记之后记录 `event=config-dir name=<目录名> mode=<正式版本|开发模式>`，只记 `.proma` / `.proma-dev` 等目录名，不写用户路径。
+- dev 验证：`mobile-preview.sh start` 达到 Web Remote 17889 与 full-ui 分级覆盖率 100%；`web-remote-start` 与 `scheduler-start` 日志按此顺序在同一 10 ms 观察批次被捕获，时间记录均为 `2026-10-14T15:59:27.044Z`，满足 1 秒要求。`config-dir` 记录 `.proma-dev`；启动前后 `health-snapshot.py --compare` 为 `SNAPSHOT MATCH`，草稿清理 `removed=0`，会话数 829、渠道 7 不变。开发实例随后使用 `mobile-preview.sh stop` 正常清理，保留既有 443→17888 路由。dev 快照原本就报告缺少 `automations.json`，前后相同；启动器以空任务列表工作，未创建该文件。
+- 文档：`CLAUDE.md` 安装验收清单增加 fresh 启动标记、正式配置目录事件与 scheduler/Web Remote 时间关系；backlog 标记本事项已实现。
+- 收尾验证：全仓 `bun run typecheck` 的 6 个 workspace 全部 Exited 0；全量 `bun test` **761 pass / 0 fail，1,954 expect，119 files**；`apps/electron` `build:main` 通过；个人脚本测试通过。版本保持 `0.19.58`，未运行真实安装、未触碰正式应用或 `~/.proma`、未打包、未推送。

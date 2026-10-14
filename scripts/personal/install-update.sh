@@ -460,7 +460,7 @@ PY
   python3 "$ROOT/scripts/personal/health-snapshot.py" --compare "$BEFORE_SNAPSHOT" "$AFTER_SNAPSHOT" --allow-draft-cleanup-dir "$DATA_DIR/backups" --since "$DRAFT_CLEANUP_SINCE" || { echo 'TEST-MODE 健康快照不匹配；触发安装回滚。' >&2; exit 4; }
 else
   APP_BEFORE_PIDS="$(find_app_pids "$APP_PATH/Contents/MacOS/Proma")"
-  STARTED_AT_EPOCH="$(date -u +%s)"
+  STARTED_AT_EPOCH="$(python3 -c 'import time; print(f"{time.time():.6f}")')"
   open -na "$APP_PATH"
   # Capture only the new process whose executable path is the bundle just installed.
   start_deadline=$((SECONDS + 30))
@@ -476,10 +476,7 @@ else
   START_PID="$(printf '%s\n' "$NEW_PIDS" | head -1)"
   [[ "$START_PID" =~ ^[0-9]+$ ]] || { echo '健康检查失败：无法锁定新版进程 PID。' >&2; exit 4; }
   LOG_FILE="$LOGS_DIR/main.log"
-  LOG_WAIT=0
-  while [[ ! -s "$LOG_FILE" && $LOG_WAIT -lt 15 ]]; do sleep 1; LOG_WAIT=$((LOG_WAIT + 1)); done
-  if [[ ! -s "$LOG_FILE" ]]; then echo "健康检查失败：个人版文件日志未创建，预期位置：$LOG_FILE" >&2; exit 4; fi
-  grep -q 'personal main process started' "$LOG_FILE" || { echo "健康检查失败：个人版启动标记未写入 $LOG_FILE" >&2; exit 4; }
+  python3 "$ROOT/scripts/personal/wait-startup-marker.py" "$LOG_FILE" "$STARTED_AT_EPOCH" "$TIMEOUT" || exit 4
   echo "个人版主进程日志: $LOG_FILE"
   sleep "$HEALTH_SECONDS"
   if [[ -n "$REMOTE_PORT" ]]; then
@@ -505,19 +502,7 @@ else
   if ! process_command_matches "$START_PID" "$APP_PATH/Contents/MacOS/Proma"; then
     echo '健康检查失败：观察期内新版主进程已退出。' >&2; exit 4
   fi
-  python3 - "$LOG_FILE" "$STARTED_AT_EPOCH" <<'PY'
-from datetime import datetime
-from pathlib import Path
-import sys
-started=int(sys.argv[2]); lines=Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace').splitlines(); starts=[]
-for i,line in enumerate(lines):
- if 'personal main process started' not in line: continue
- try: stamp=datetime.fromisoformat(line.split()[0].replace('Z','+00:00')).timestamp()
- except ValueError: continue
- if stamp >= started: starts.append(i)
-if not starts: raise SystemExit('new personal startup marker missing after launch time')
-if any('[FATAL]' in line for line in lines[starts[-1]+1:]): raise SystemExit('fatal event after latest personal startup')
-PY
+  python3 "$ROOT/scripts/personal/wait-startup-marker.py" "$LOG_FILE" "$STARTED_AT_EPOCH" 0 || exit 4
   python3 "$ROOT/scripts/personal/health-snapshot.py" "$DATA_DIR" --output "$AFTER_SNAPSHOT" >/dev/null || { echo '健康检查失败：启动后健康快照不完整。' >&2; exit 4; }
   python3 "$ROOT/scripts/personal/health-snapshot.py" --compare "$BEFORE_SNAPSHOT" "$AFTER_SNAPSHOT" --allow-draft-cleanup-dir "$DATA_DIR/backups" --since "$DRAFT_CLEANUP_SINCE" || { echo '健康检查失败：除本次启动草稿清理外，数据与备份快照不同。' >&2; exit 4; }
   if [[ -n "$REMOTE_PORT" ]]; then
