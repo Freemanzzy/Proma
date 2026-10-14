@@ -4,7 +4,7 @@
 
 ## 待合入分支（已验证、未发布）
 
-- **已合入 personal、尚未打包安装（2026-10-12）**：`fix/title-claude55-adaptive`（Claude 5.5 标题请求改为 adaptive + effort low、max_tokens 256；兜底标题与标题提示清理 `&session`/`@file` 引用标记）。随下一批打包。
+- **已合入 personal（本地，未推送）、尚未打包安装（2026-10-14）**：`fix/title-claude55-adaptive`（Claude 5.5 标题 adaptive low、引用标记清理）+ `fix/batch-20261014`（fixture 回归层与 `mobile-preview.sh fixture`、stop 按进程组安全清理、`PROMA_DEV_DATA_DIR_NAME`、手机抽屉“文件/改动”菜单被省流量胶囊遮挡修复、fixture 沿用 dev 受信设备）。用户 16:32 验证通过，暂不推送。
 
 - 无（`b3a24028` 已于 2026-10-08 20:31 安装）。
 
