@@ -1600,3 +1600,12 @@
 - 上游 `config-paths.ts` 仅增加对新的个人纯逻辑 helper 的调用并确定打包模式；隔离规则集中在新增 `personal-config-dir.ts`。新增 4 个单测覆盖打包版忽略、非法值回退、合法值生效及默认值不变。
 - 验证：定向 `bun test apps/electron/src/main/lib/personal-config-dir.test.ts` **4 pass / 0 fail**；`bash -n` 检查 `dev.sh` 与 `mobile-preview.sh` 通过；`git diff --check` 通过。真实 fixture 构造与启动留在后续步骤。
 - 同步更新 `docs/personal/web-remote.md` 说明隔离变量及安全边界。全仓 `bun run typecheck` 留待收尾；未改版本、未打包、未安装、未 push。
+
+## 2026-10-14: 新增隔离回归 fixture 生成器
+
+- 新增 `scripts/personal/make-fixture-data.py <目标目录>`。目标仅允许 `~/.proma-dev-fixture` 或 `/tmp` 下路径；目标已存在时先原子改名为 `.prev-<时间戳>`，再在新目录生成，绝不覆盖旧目录。
+- 使用 `agent-session-manager.ts` 与现有测试样例确认 JSONL 使用逐行 SDK message 对象；生成 2 个工作区、20 条合成会话（11 普通、1 父 + 2 子委派、1 Automation 来源、2 归档、1 置顶、1 超过 24 小时草稿、1 个 300 轮大历史）、2 个停用 Automation。大历史包含长文本与工具调用/结果块，当前 3,252,423 B。
+- 渠道仅从 `~/.proma-dev/channels.json` 选择唯一 `clipproxyapi` Anthropic 条目；校验 `apiKey` 为带 macOS safeStorage `v10` 标记的 Base64 密文后按原值复制，不解密、不打印。该密文由同一用户的 macOS Keychain/safeStorage 读取；后续 fixture 仍由本机同一开发 Electron 应用运行。若密文格式/来源不符，生成器在改动目标目录前拒绝继续。
+- Web Remote 只取必要的 `allowedOrigin` 与允许账号列表，重设 17889、fixture 工作区 allowlist；不复制 trusted device、配对记录或 Push 订阅。channels.json 权限 0600，fixture 根与数据目录为私有目录。
+- 验证：/tmp 合成源数据测试覆盖 20 条会话、工作区关联、委派关系、归档/置顶/老草稿、大历史尺寸和工具块、只拷单个渠道、敏感来源字段不进入输出、目标旧目录改名保留、拒绝 `~/.proma-dev`。定向 fixture 生成测试通过，Python 编译、两脚本 `bash -n` 与 `git diff --check` 通过。
+- 真实 `~/.proma-dev-fixture` 启动和 harness 回归留待步骤 2.3；全仓 typecheck 与全量测试留待收尾。未改版本、未打包、未安装、未 push。

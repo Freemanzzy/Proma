@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Temporary-file integration checks for personal backup/import/install scripts."""
 from __future__ import annotations
-import importlib.util, json, os, shutil, sqlite3, stat, subprocess, sys, tempfile, zipfile
+import base64, importlib.util, json, os, shutil, sqlite3, stat, subprocess, sys, tempfile, zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -65,6 +65,50 @@ def check_mobile_preview_stop(root: Path):
     assert not process_alive(app_pid), '合成 /Applications 标记进程应自然退出'
     print('MOBILE PREVIEW STOP PASS: dead launcher cleaned safe same-PGID PID only; /Applications and different-group process spared; legacy PID file listed and preserved')
 
+def check_fixture_generator(root: Path):
+    script = SCRIPTS / 'make-fixture-data.py'
+    source = root / 'fixture-source'; (source / 'web-remote').mkdir(parents=True)
+    encrypted = base64.b64encode(b'v10-fixture-encrypted-placeholder').decode('ascii')
+    channel = {'id':'a0c08014-4065-4d2a-8db5-f27f1eb09ab9','name':'clipproxyapi','provider':'anthropic','baseUrl':'https://api.example.invalid','apiKey':encrypted,'models':[],'enabled':True,'createdAt':1,'updatedAt':1}
+    other = {'id':'oauth-channel','name':'OAuth must not copy','provider':'openai-codex','apiKey':'OAUTH-SECRET-MUST-NOT-COPY'}
+    (source/'channels.json').write_text(json.dumps({'version':7,'channels':[other,channel]}))
+    (source/'web-remote'/'config.json').write_text(json.dumps({'enabled':True,'fullUi':True,'port':17889,'allowedOrigin':'https://fixture-host.invalid:8443','allowedTailscaleLogins':['fixture-user@example.invalid'],'trustedTailscaleNodes':['DEVICE-MUST-NOT-COPY'],'workspaceScope':'allowlist','allowedWorkspaceIds':['old-workspace']}))
+    target=root/'fixture-data'
+    target.mkdir(); (target/'keep.txt').write_text('preserve this previous fixture')
+    result=subprocess.run(['python3',str(script),str(target),'--source-dev-data-dir',str(source)],text=True,capture_output=True,errors='replace')
+    print(result.stdout,end='')
+    assert result.returncode==0, f'fixture generator rc={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}'
+    for secret in (encrypted,'OAUTH-SECRET-MUST-NOT-COPY','fixture-host.invalid','fixture-user@example.invalid','DEVICE-MUST-NOT-COPY'):
+        assert secret not in result.stdout and secret not in result.stderr, f'fixture output leaked sensitive source value: {secret}'
+    backups=list(root.glob('fixture-data.prev-*'))
+    assert len(backups)==1 and (backups[0]/'keep.txt').read_text()=='preserve this previous fixture'
+    sessions=json.loads((target/'agent-sessions.json').read_text())['sessions']
+    workspaces=json.loads((target/'agent-workspaces.json').read_text())['workspaces']
+    assert len(sessions)==20 and len(workspaces)==2
+    assert len([s for s in sessions if s.get('parentSessionId')=='fixture-parent' and s.get('sourceDelegationId')])==2
+    assert len([s for s in sessions if s.get('archived')])==2
+    assert len([s for s in sessions if s.get('pinned')])==1
+    draft=next(s for s in sessions if s.get('isDraft'))
+    assert draft['createdAt'] < __import__('time').time()*1000-24*60*60*1000
+    automations=json.loads((target/'automations.json').read_text())['automations']
+    assert len(automations)==2 and all(a['active'] is False for a in automations)
+    channels=json.loads((target/'channels.json').read_text())['channels']
+    assert len(channels)==1 and channels[0]['id']==channel['id'] and channels[0]['apiKey']==encrypted
+    assert stat.S_IMODE((target/'channels.json').stat().st_mode)==0o600
+    remote=json.loads((target/'web-remote'/'config.json').read_text())
+    assert remote['port']==17889 and remote['allowedWorkspaceIds']==['fixture-a','fixture-b']
+    assert remote['allowedOrigin']=='https://fixture-host.invalid:8443' and remote['allowedTailscaleLogins']==['fixture-user@example.invalid']
+    assert remote['trustedTailscaleNodes']==[] and not any(k in remote for k in ('devices','pairing','pushSubscriptions'))
+    large=target/'agent-sessions'/'fixture-large-history.jsonl'
+    size=large.stat().st_size
+    assert 2*1024*1024 <= size <= 5*1024*1024, size
+    rows=[json.loads(line) for line in large.read_text().splitlines()]
+    assert sum(row.get('type')=='user' for row in rows)>=300 and sum(row.get('type')=='assistant' for row in rows)==300
+    assert any(any(block.get('type')=='tool_use' for block in row.get('message',{}).get('content',[])) for row in rows if isinstance(row.get('message'),dict))
+    rejected=subprocess.run(['python3',str(script),str(Path.home()/'.proma-dev'),'--source-dev-data-dir',str(source)],text=True,capture_output=True,errors='replace')
+    assert rejected.returncode!=0 and '目标只允许' in rejected.stderr, 'must reject ~/.proma-dev before writing'
+    print(f'FIXTURE GENERATOR PASS: 2 workspaces, {len(sessions)} sessions, {size}B synthetic history, one encrypted API-key channel; previous target preserved')
+
 def check_draft_compare(data_dir: Path, sessions_before: list[dict], sessions_after: list[dict], backups: list[tuple[str, dict]], enabled: bool = True, expected: int = 0):
     data_dir.mkdir(parents=True, exist_ok=True)
     backup_dir=data_dir/'backups'; backup_dir.mkdir(exist_ok=True)
@@ -83,6 +127,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='proma-personal-script-tests-', dir='/tmp') as td:
         root=Path(td)
         check_mobile_preview_stop(root)
+        check_fixture_generator(root)
         src=root/'source'; src.mkdir(); (src/'sub').mkdir()
         (src/'alpha.txt').write_text('alpha\n'); (src/'sub'/'db.sqlite').write_bytes(b'SQLite fixture bytes')
         (src/'alpha.txt').chmod(0o640); (src/'shortcut').symlink_to('alpha.txt')
