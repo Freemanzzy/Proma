@@ -85,11 +85,18 @@ def check_fixture_generator(root: Path):
     sessions=json.loads((target/'agent-sessions.json').read_text())['sessions']
     workspaces=json.loads((target/'agent-workspaces.json').read_text())['workspaces']
     assert len(sessions)==20 and len(workspaces)==2
-    assert len([s for s in sessions if s.get('parentSessionId')=='fixture-parent' and s.get('sourceDelegationId')])==2
+    assert all((target/'agent-sessions'/f"{session['id']}.jsonl").is_file() for session in sessions)
+    assert all(__import__('uuid').UUID(session['id']) for session in sessions)
+    assert any(workspace['name']=='Fixture A' and workspace['slug']=='default' for workspace in workspaces)
+    assert (target/'agent-workspaces'/'default'/'workspace-files'/'AGENTS.md').is_file()
+    assert (target/'agent-workspaces'/'default'/'skills'/'fixture-skill'/'SKILL.md').is_file()
+    parent_id=str(__import__('uuid').uuid5(__import__('uuid').NAMESPACE_URL,'proma-fixture:parent'))
+    assert len([s for s in sessions if s.get('parentSessionId')==parent_id and s.get('sourceDelegationId')])==2
     assert len([s for s in sessions if s.get('archived')])==2
     assert len([s for s in sessions if s.get('pinned')])==1
     draft=next(s for s in sessions if s.get('isDraft'))
     assert draft['createdAt'] < __import__('time').time()*1000-24*60*60*1000
+    assert (target/'agent-sessions'/f"{draft['id']}.jsonl").is_file() and (target/'agent-sessions'/f"{draft['id']}.jsonl").stat().st_size==0
     automations=json.loads((target/'automations.json').read_text())['automations']
     assert len(automations)==2 and all(a['active'] is False for a in automations)
     channels=json.loads((target/'channels.json').read_text())['channels']
@@ -99,7 +106,8 @@ def check_fixture_generator(root: Path):
     assert remote['port']==17889 and remote['allowedWorkspaceIds']==['fixture-a','fixture-b']
     assert remote['allowedOrigin']=='https://fixture-host.invalid:8443' and remote['allowedTailscaleLogins']==['fixture-user@example.invalid']
     assert remote['trustedTailscaleNodes']==[] and not any(k in remote for k in ('devices','pairing','pushSubscriptions'))
-    large=target/'agent-sessions'/'fixture-large-history.jsonl'
+    large_id=str(__import__('uuid').uuid5(__import__('uuid').NAMESPACE_URL,'proma-fixture:large-history'))
+    large=target/'agent-sessions'/f'{large_id}.jsonl'
     size=large.stat().st_size
     assert 2*1024*1024 <= size <= 5*1024*1024, size
     rows=[json.loads(line) for line in large.read_text().splitlines()]

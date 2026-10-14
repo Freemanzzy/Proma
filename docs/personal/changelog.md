@@ -1609,3 +1609,16 @@
 - Web Remote 只取必要的 `allowedOrigin` 与允许账号列表，重设 17889、fixture 工作区 allowlist；不复制 trusted device、配对记录或 Push 订阅。channels.json 权限 0600，fixture 根与数据目录为私有目录。
 - 验证：/tmp 合成源数据测试覆盖 20 条会话、工作区关联、委派关系、归档/置顶/老草稿、大历史尺寸和工具块、只拷单个渠道、敏感来源字段不进入输出、目标旧目录改名保留、拒绝 `~/.proma-dev`。定向 fixture 生成测试通过，Python 编译、两脚本 `bash -n` 与 `git diff --check` 通过。
 - 真实 `~/.proma-dev-fixture` 启动和 harness 回归留待步骤 2.3；全仓 typecheck 与全量测试留待收尾。未改版本、未打包、未安装、未 push。
+
+## 2026-10-14: 完善 fixture 会话身份与草稿清理条件
+
+- fixture 会话 ID 改为稳定 UUID；草稿仍是空 JSONL，但现在有零字节会话文件且 ID 符合清理器校验。Fixture A 使用默认 `slug=default`，避免应用启动时额外创建第三个默认工作区；两个工作区的 ID/名字保持 Fixture A/B。
+- 每条索引会话均生成对应 JSONL；测试增加 UUID、会话文件、默认工作区、空草稿和大历史尺寸断言。当前 300 轮大历史为 **3,261,873 B**。
+- 验证：合成 `/tmp` 源数据生成测试通过，既有目标目录改名保留；真实 `~/.proma-dev-fixture` 已重新生成并校验为 2 个工作区、20 条会话、唯一 clipproxyapi 渠道，权限与 JSONL 结构合规。旧 fixture 目录保留为 `.prev-*`，未删除。
+
+## 2026-10-14: fixture 回归入口受 Web Remote 目录门禁阻塞
+
+- 按步骤 2.3 尝试在 `PROMA_DEV_DATA_DIR_NAME=.proma-dev-fixture` 下启动；应用没有开放 17889，启动器未达到 full-UI 100% 覆盖率，四个 harness 套件均未执行。
+- 定位到 `apps/electron/src/main/lib/web-remote/web-remote-service.ts` 的 `isWebRemoteConfigDirAllowed()` 只允许 `.proma-dev`，或设置 `PROMA_WEB_REMOTE_ALLOW_PROD=1`；它拒绝 2.1 新增的合法 `.proma-dev-*` 隔离目录。未设置 `ALLOW_PROD`，因为这会扩大 Web Remote 安全边界；等待用户确认是否允许门禁兼容受校验的开发目录名，或指定其他安全方案。
+- 启动超时后，常规 `stop` 因无 17889 监听而按保护逻辑未发信号。随后仅对记录启动器后代中命令白名单匹配、PGID 相符且不含 `/Applications/` 的各 PID 单独核验并发送 TERM；确认进程组无残留，17889/5173 无监听、8443 Serve 已关闭，原有 17888 路由保留。正式版 PID 23663 仍运行。
+- 使用 `--allow-draft-cleanup-dir ~/.proma-dev/backups --since 1791954684` 比较启动前后只读数据，结果 `SNAPSHOT MATCH`；未修改 `~/.proma-dev`。受阻时未运行全仓 typecheck/测试，步骤 2.3 与收尾验收未完成。

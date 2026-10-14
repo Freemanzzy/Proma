@@ -39,6 +39,10 @@ def secure_json(path: Path, value: object) -> None:
     path.chmod(0o600)
 
 
+def fixture_uuid(label: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f'proma-fixture:{label}'))
+
+
 def write_jsonl(path: Path, rows: list[dict]) -> int:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     payload = ''.join(json.dumps(row, ensure_ascii=False, separators=(',', ':')) + '\n' for row in rows)
@@ -150,60 +154,72 @@ def build_dataset(root: Path, sources: dict, secret: dict) -> tuple[int, int]:
     old = now - 48 * 60 * 60 * 1000
     channel = secret['channel']
     workspace_rows = [
-        {'id': 'fixture-a', 'name': 'Fixture A', 'slug': 'fixture-a', 'createdAt': now, 'updatedAt': now},
+        {'id': 'fixture-a', 'name': 'Fixture A', 'slug': 'default', 'createdAt': now, 'updatedAt': now},
         {'id': 'fixture-b', 'name': 'Fixture B', 'slug': 'fixture-b', 'createdAt': now, 'updatedAt': now},
     ]
     secure_json(root / 'agent-workspaces.json', {'version': 2, 'workspaces': workspace_rows})
     workspace_root = root / 'agent-workspaces'
     workspace_root.mkdir(mode=0o700)
     for workspace in workspace_rows:
-        (workspace_root / workspace['slug']).mkdir(mode=0o700)
+        workspace_dir = workspace_root / workspace['slug']
+        workspace_dir.mkdir(mode=0o700)
+        files_dir = workspace_dir / 'workspace-files'
+        files_dir.mkdir(mode=0o700)
+        agents_file = files_dir / 'AGENTS.md'
+        agents_file.write_text(f'# {workspace["name"]} synthetic fixture\n\n仅用于隔离的 Web Remote 界面回归，不包含真实项目资料。\n', encoding='utf-8')
+        agents_file.chmod(0o600)
+    skill_dir = workspace_root / 'default' / 'skills' / 'fixture-skill'
+    skill_dir.mkdir(parents=True, mode=0o700)
+    skill_file = skill_dir / 'SKILL.md'
+    skill_file.write_text('# Fixture Skill\n\n合成技能，仅用于测试技能详情视图。\n', encoding='utf-8')
+    skill_file.chmod(0o600)
 
     sessions: list[dict] = []
     definitions: list[tuple[str, str, str, dict, list[dict], int]] = []
     for i in range(1, 12):
-        sid = f'fixture-regular-{i:02d}'
+        sid = fixture_uuid(f'regular-{i:02d}')
         ws = 'fixture-a' if i <= 6 else 'fixture-b'
         title = f'Fixture {"A" if ws == "fixture-a" else "B"} / 普通会话 {i:02d}'
         definitions.append((sid, title, ws, {}, small_history(sid, title, now), now))
 
-    parent_id = 'fixture-parent'
+    parent_id = fixture_uuid('parent')
     definitions.append((parent_id, 'Fixture A / 父会话', 'fixture-a',
                         {'rootSessionId': parent_id}, small_history(parent_id, '委派父会话', now), now))
     for suffix in ('one', 'two'):
-        sid = f'fixture-child-{suffix}'
+        sid = fixture_uuid(f'child-{suffix}')
         definitions.append((sid, f'Fixture A / 子会话 {suffix}', 'fixture-a',
                             {'parentSessionId': parent_id, 'rootSessionId': parent_id,
                              'sourceDelegationId': f'fixture-delegation-{suffix}', 'delegationStatus': 'completed'},
                             small_history(sid, '委派子会话', now), now))
 
-    automation_session_id = 'fixture-automation-session'
+    automation_session_id = fixture_uuid('automation-session')
     definitions.append((automation_session_id, 'Fixture B / Automation 生成会话', 'fixture-b',
                         {'sourceAutomationId': 'fixture-automation-daily'},
                         small_history(automation_session_id, 'Automation 生成会话', now), now))
     for i in (1, 2):
-        sid = f'fixture-archived-{i}'
+        sid = fixture_uuid(f'archived-{i}')
         definitions.append((sid, f'Fixture B / 已归档会话 {i}', 'fixture-b', {'archived': True},
                             small_history(sid, '已归档会话', now), now))
-    definitions.append(('fixture-pinned', 'Fixture A / 置顶会话', 'fixture-a', {'pinned': True},
-                        small_history('fixture-pinned', '置顶会话', now), now))
-    definitions.append(('fixture-draft', '新 Agent 会话', 'fixture-b', {'isDraft': True},
+    pinned_id = fixture_uuid('pinned')
+    definitions.append((pinned_id, 'Fixture A / 置顶会话', 'fixture-a', {'pinned': True},
+                        small_history(pinned_id, '置顶会话', now), now))
+    draft_id = fixture_uuid('draft')
+    definitions.append((draft_id, '新 Agent 会话', 'fixture-b', {'isDraft': True},
                         [], old))
-    large_id = 'fixture-large-history'
+    large_id = fixture_uuid('large-history')
     definitions.append((large_id, 'Fixture A / 合成大历史（300 轮）', 'fixture-a', {},
                         large_history(large_id, now), now))
 
-    total_jsonl_bytes = 0
+    large_jsonl_bytes = 0
     for sid, title, workspace_id, flags, messages, created_at in definitions:
         updated = created_at if created_at == old else now
         meta = {'id': sid, 'title': title, 'workspaceId': workspace_id,
                 'createdAt': created_at, 'updatedAt': updated, 'channelId': channel['id'], **flags}
         sessions.append(meta)
-        if messages:
-            total_jsonl_bytes += write_jsonl(root / 'agent-sessions' / f'{sid}.jsonl', messages)
-        else:
-            # The aged draft is intentionally empty; startup cleanup should archive it, not invent content.
-            (root / 'agent-sessions').mkdir(parents=True, exist_ok=True, mode=0o700)
+        # Every indexed session has a JSONL file; the old draft is intentionally zero-byte for cleanup eligibility.
+        message_bytes = write_jsonl(root / 'agent-sessions' / f'{sid}.jsonl', messages)
+        if sid == large_id:
+            large_jsonl_bytes = message_bytes
 
     secure_json(root / 'agent-sessions.json', {'version': 2, 'sessions': sessions})
     inactive_automation = {
@@ -233,7 +249,7 @@ def build_dataset(root: Path, sources: dict, secret: dict) -> tuple[int, int]:
         'workspaceScope': 'allowlist', 'allowedWorkspaceIds': ['fixture-a', 'fixture-b'],
     }
     secure_json(root / 'web-remote' / 'config.json', web_config)
-    return len(sessions), total_jsonl_bytes
+    return len(sessions), large_jsonl_bytes
 
 
 def main() -> None:
