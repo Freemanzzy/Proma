@@ -1583,3 +1583,56 @@
 - 验证：定向测试 12 pass / 0 fail；全仓 `bun run typecheck` 所有 6 个 workspace package 均退出 0；全量 `bun test` **754 pass / 0 fail，1,929 expect，117 files**；`apps/electron` 的 `build:main` 通过。
 - Clipproxy 实测：使用同一 adaptive-low / 256-token 请求体，Opus 5.5 与 Sonnet 5.5 各测复现消息及两条普通消息，共 6 次；全部 HTTP 200、`stop_reason=end_turn`，每次均返回可读标题。复现消息两模型均返回“对话卡顿原因排查”；未输出 API Key。
 - 未启动 dev，未打包、安装、推送或改版本；版本仍为 0.19.58。
+
+## 2026-10-14: 修复手机预览 stop 的残留进程清理
+
+- `mobile-preview.sh` PID 记录增加隔离进程组 `DEV_PGID`。macOS 实测启动器 PID 与 `setsid()` 后开发进程组 leader PID 不同；启动时改为从启动器后代中只接受唯一、独立且命令白名单匹配的进程组，不再错误要求 `DEV_PGID == DEV_PID`。进程组识别输出按字符正常换行。
+- `stop` 用记录 PGID 限定候选，对每个 PID 重新核验 PGID、命令白名单与启动身份后逐 PID 发 TERM，并只对仍匹配的进程复核后发 KILL；不向进程组整体发信号。启动器 PID 已退出时仍可按记录 PGID 清理；旧格式 PID 文件只列出候选、改名保留，不发送信号。状态输出显示 PGID 并提示已记录组内残留。
+- 测试在 `/tmp` 合成安全仓库 worker、`/Applications/` 标记进程与不同进程组进程：安全同组 worker 被清理，另外两者保留；旧格式 PID 文件改名保留。`bash -n`、Python 源码编译检查与 `git diff --check` 通过。
+- 真实开发实例演练通过：`start` 记录 PID 57537 / PGID 57539，17889 与 5173 正常监听，日志确认 `已启动: 127.0.0.1:17889` 和 full-ui 分级覆盖率 100%；`status` 正确显示 PGID；`stop` 逐 PID 清理开发进程，关闭 8443，仅保留既有 443→17888 路由。停止后 17889、5173、8443 均无监听，PID 文件已移除，正式版 PID 23663 保持运行。
+- `~/.proma-dev` 启动前后快照比对使用 `--allow-draft-cleanup-dir ~/.proma-dev/backups --since <启动前时间>`，结果 `SNAPSHOT MATCH`；会话数保持父会话裁定的新基准 829（启动自动清理的 832→829 变化已在先前批次确认是备份可查的 10-10 空草稿清理，本次未再变化）。
+- 同步更新 `docs/personal/web-remote.md` 的启动器 PID/PGID 与逐 PID 清理说明。测试仅覆盖步骤 1；全仓测试和 `bun run typecheck` 留待本批收尾。未改版本、未打包、未安装、未 push。
+
+## 2026-10-14: 开发实例支持隔离数据目录
+
+- 新增 `PROMA_DEV_DATA_DIR_NAME`：仅未打包开发实例接受匹配 `^\.proma-dev-[a-z0-9-]+$` 的值；合法值生效，非法值忽略并记录警告，未设置时继续使用 `.proma-dev`。打包版始终使用 `.proma`，即使变量存在也只警告并忽略。
+- `dev.sh` 与 `mobile-preview.sh` 从同一变量解析数据目录名，非法输入均回退 `.proma-dev`；开发数据目录仍拒绝指向正式数据根。
+- 上游 `config-paths.ts` 仅增加对新的个人纯逻辑 helper 的调用并确定打包模式；隔离规则集中在新增 `personal-config-dir.ts`。新增 4 个单测覆盖打包版忽略、非法值回退、合法值生效及默认值不变。
+- 验证：定向 `bun test apps/electron/src/main/lib/personal-config-dir.test.ts` **4 pass / 0 fail**；`bash -n` 检查 `dev.sh` 与 `mobile-preview.sh` 通过；`git diff --check` 通过。真实 fixture 构造与启动留在后续步骤。
+- 同步更新 `docs/personal/web-remote.md` 说明隔离变量及安全边界。全仓 `bun run typecheck` 留待收尾；未改版本、未打包、未安装、未 push。
+
+## 2026-10-14: 新增隔离回归 fixture 生成器
+
+- 新增 `scripts/personal/make-fixture-data.py <目标目录>`。目标仅允许 `~/.proma-dev-fixture` 或 `/tmp` 下路径；目标已存在时先原子改名为 `.prev-<时间戳>`，再在新目录生成，绝不覆盖旧目录。
+- 使用 `agent-session-manager.ts` 与现有测试样例确认 JSONL 使用逐行 SDK message 对象；生成 2 个工作区、20 条合成会话（11 普通、1 父 + 2 子委派、1 Automation 来源、2 归档、1 置顶、1 超过 24 小时草稿、1 个 300 轮大历史）、2 个停用 Automation。大历史包含长文本与工具调用/结果块，当前 3,252,423 B。
+- 渠道仅从 `~/.proma-dev/channels.json` 选择唯一 `clipproxyapi` Anthropic 条目；校验 `apiKey` 为带 macOS safeStorage `v10` 标记的 Base64 密文后按原值复制，不解密、不打印。该密文由同一用户的 macOS Keychain/safeStorage 读取；后续 fixture 仍由本机同一开发 Electron 应用运行。若密文格式/来源不符，生成器在改动目标目录前拒绝继续。
+- Web Remote 只取必要的 `allowedOrigin` 与允许账号列表，重设 17889、fixture 工作区 allowlist；不复制 trusted device、配对记录或 Push 订阅。channels.json 权限 0600，fixture 根与数据目录为私有目录。
+- 验证：/tmp 合成源数据测试覆盖 20 条会话、工作区关联、委派关系、归档/置顶/老草稿、大历史尺寸和工具块、只拷单个渠道、敏感来源字段不进入输出、目标旧目录改名保留、拒绝 `~/.proma-dev`。定向 fixture 生成测试通过，Python 编译、两脚本 `bash -n` 与 `git diff --check` 通过。
+- 真实 `~/.proma-dev-fixture` 启动和 harness 回归留待步骤 2.3；全仓 typecheck 与全量测试留待收尾。未改版本、未打包、未安装、未 push。
+
+## 2026-10-14: 完善 fixture 会话身份与草稿清理条件
+
+- fixture 会话 ID 改为稳定 UUID；草稿仍是空 JSONL，但现在有零字节会话文件且 ID 符合清理器校验。Fixture A 使用默认 `slug=default`，避免应用启动时额外创建第三个默认工作区；两个工作区的 ID/名字保持 Fixture A/B。
+- 每条索引会话均生成对应 JSONL；测试增加 UUID、会话文件、默认工作区、空草稿和大历史尺寸断言。当前 300 轮大历史为 **3,261,873 B**。
+- 验证：合成 `/tmp` 源数据生成测试通过，既有目标目录改名保留；真实 `~/.proma-dev-fixture` 已重新生成并校验为 2 个工作区、20 条会话、唯一 clipproxyapi 渠道，权限与 JSONL 结构合规。旧 fixture 目录保留为 `.prev-*`，未删除。
+
+## 2026-10-14: fixture 回归入口受 Web Remote 目录门禁阻塞
+
+- 按步骤 2.3 尝试在 `PROMA_DEV_DATA_DIR_NAME=.proma-dev-fixture` 下启动；应用没有开放 17889，启动器未达到 full-UI 100% 覆盖率，四个 harness 套件均未执行。
+- 定位到 `apps/electron/src/main/lib/web-remote/web-remote-service.ts` 的 `isWebRemoteConfigDirAllowed()` 只允许 `.proma-dev`，或设置 `PROMA_WEB_REMOTE_ALLOW_PROD=1`；它拒绝 2.1 新增的合法 `.proma-dev-*` 隔离目录。未设置 `ALLOW_PROD`，因为这会扩大 Web Remote 安全边界；等待用户确认是否允许门禁兼容受校验的开发目录名，或指定其他安全方案。
+- 启动超时后，常规 `stop` 因无 17889 监听而按保护逻辑未发信号。随后仅对记录启动器后代中命令白名单匹配、PGID 相符且不含 `/Applications/` 的各 PID 单独核验并发送 TERM；确认进程组无残留，17889/5173 无监听、8443 Serve 已关闭，原有 17888 路由保留。正式版 PID 23663 仍运行。
+- 使用 `--allow-draft-cleanup-dir ~/.proma-dev/backups --since 1791954684` 比较启动前后只读数据，结果 `SNAPSHOT MATCH`；未修改 `~/.proma-dev`。受阻时未运行全仓 typecheck/测试，步骤 2.3 与收尾验收未完成。
+
+## 2026-10-14: 完成隔离 fixture 手机回归并修复菜单遮挡
+
+- Web Remote 开发目录门禁现在只对未打包实例开放默认 `.proma-dev` 与符合 `^\.proma-dev-[a-z0-9-]+$` 的隔离目录，仍要求 `PROMA_WEB_REMOTE=1`；非个人版打包构建即使配置 `.proma-dev-fixture` 也拒绝。服务端、管理 IPC 与 full-ui preload 共用同一门禁。新增打包 fixture 目录拒绝断言。
+- `iphone:layout` 的 412px 触屏/CDP 命中审计复现省流量历史按钮层级高于“文件/改动”菜单的问题：菜单按钮命中错落到历史条，多个导航/内容控件也被遮挡。将移动菜单层级提至 `z-index:2147483001`；harness 在打开文件面板后等待 800ms 动画稳定再审计。修复前后截图：`/tmp/proma-mobile-layout-before-20261014.png`、`/tmp/proma-mobile-layout-after-20261014.png`。真实 `~/.proma-dev` 的首次 layout 通过；隔离 fixture 修复后 `iphone:layout` 11/11 页面通过。
+- Bun 的 Electron package stub 不提供具名 `app` 导出，导致 `web-remote-server.test.ts` 在 `beforeAll` 动态导入失败。测试只增加局部 `mock.module('electron', () => ({ app: { isPackaged: false } }))`，未改生产服务；目标文件 23 pass / 0 fail。
+- `bash scripts/personal/mobile-preview.sh fixture` 完整通过：smoke 7/7 steps；layout 11/11；session-sync 重命名/创建/归档/恢复/删除与重连验证通过；interactions 通过。fixture 20 个合成会话、2 个工作区、2 个停用 Automation、大历史 JSONL 3,261,873 B，保留一条 clipproxyapi 加密 API Key；旧目录改名保留。
+- `python3 scripts/personal/test-personal-scripts.py` 通过，包含 stop PID 安全清理伪进程与 fixture 生成器演练。`~/.proma-dev` 前后健康快照 `SNAPSHOT MATCH`（829 条会话；既有 `missing:automations.json` 警告保持不变）。
+- 收尾：全仓 typecheck 的 6 个 workspace 全部 Exited 0；全量 `bun test` **760 pass / 0 fail，1,950 expect，118 files**；`build:main`、`build:renderer`、`build:web-preload` 通过。renderer 构建有现存的大 chunk 提示，无构建失败。
+- 已在 backlog 标记“两层测试”实现，并在 `web-remote.md` 补充 fixture 默认流程。全量回归后 dev 预览已按要求清理；供体验的最终 `.proma-dev-fixture` dev 实例将在提交后启动并保持 8443。
+
+## 2026-10-14: fixture 沿用 dev 受信设备（测试手机免配对码）
+
+- 用户要求三台测试手机进入测试页面免输入配对码。`make-fixture-data.py` 改为复制 `~/.proma-dev/web-remote/config.json` 的 `trustedTailscaleNodes`（仅 Tailscale 设备名，非密钥）；配对设备、推送订阅仍不复制。父会话同时在 dev 与 fixture 的受信列表中加入 `iphone-air`（此前 dev 列表为 oppo-find-x8-ultra、iphone-15plus-shadowrocket、oppo-clash）。脚本测试更新为断言受信列表被沿用。

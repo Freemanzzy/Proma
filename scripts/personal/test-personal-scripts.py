@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Temporary-file integration checks for personal backup/import/install scripts."""
 from __future__ import annotations
-import importlib.util, json, os, shutil, sqlite3, stat, subprocess, sys, tempfile, zipfile
+import base64, importlib.util, json, os, shutil, sqlite3, stat, subprocess, sys, tempfile, zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -15,6 +15,109 @@ def assert_run(args, expected=0):
     if result.stderr: print(result.stderr, end='', file=sys.stderr)
     if result.returncode != expected: raise AssertionError(f'{args}: rc={result.returncode}, expected={expected}')
     return result
+
+def check_mobile_preview_stop(root: Path):
+    script = SCRIPTS / 'mobile-preview.sh'
+    mock_tailscale = root / 'tailscale-mock'
+    mock_tailscale.write_text('#!/bin/sh\n[ "$1" = serve ] && [ "${2:-}" = status ] && exit 0\nexit 0\n')
+    mock_tailscale.chmod(0o755)
+    pid_file = root / 'mobile-preview.pids'
+    safe_name = str(ROOT / 'node_modules' / 'fixture-safe-worker')
+    app_name = '/Applications/Proma.app/fixture-worker'
+    group_script = f"(exec -a '{safe_name}' /bin/sleep 12) >/dev/null 2>&1 & safe=$!; (exec -a '{app_name}' /bin/sleep 12) >/dev/null 2>&1 & app=$!; printf '%s %s\\n' \"$safe\" \"$app\""
+    leader = subprocess.run(['perl', '-MPOSIX', '-e', 'POSIX::setsid(); exec @ARGV', 'bash', '-c', group_script], text=True, capture_output=True, check=True)
+    safe_pid, app_pid = map(int, leader.stdout.split())
+    group = os.getpgid(safe_pid)
+    assert group == os.getpgid(app_pid)
+    other_name = str(ROOT / 'node_modules' / 'fixture-other-group')
+    other = subprocess.Popen(['perl', '-MPOSIX', '-e', 'POSIX::setsid(); exec @ARGV', 'bash', '-c', f"exec -a '{other_name}' /bin/sleep 12"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    other_pid = other.pid
+    assert os.getpgid(other_pid) != group
+    pid_file.write_text(f'DEV_PID=999999\nDEV_PGID={group}\nLOG_FILE=/tmp/unused\nPID_STARTED_AT=not-running\n')
+    env = os.environ | {'PROMA_MOBILE_PREVIEW_PID_FILE': str(pid_file), 'PROMA_TAILSCALE_CLI': str(mock_tailscale)}
+    stop = subprocess.run(['bash', str(script), 'stop'], text=True, capture_output=True, errors='replace', env=env)
+    print(stop.stdout, end='')
+    assert stop.returncode == 0 and '按记录 PGID' in stop.stdout, f'rc={stop.returncode} stdout={stop.stdout!r} stderr={stop.stderr!r}'
+    def process_alive(pid: int) -> bool:
+        state = subprocess.run(['ps', '-o', 'stat=', '-p', str(pid)], text=True, capture_output=True).stdout.strip()
+        return bool(state and not state.startswith('Z'))
+    assert not process_alive(safe_pid), '同组仓库 worker 应被清理'
+    assert process_alive(app_pid), '同组 /Applications/ 命令不应被结束'
+    assert process_alive(other_pid), '不同组 worker 不应被结束'
+    assert not pid_file.exists()
+    # Legacy file: report candidates and preserve it under a timestamped name, without signaling them.
+    legacy_dir = root / 'legacy'; legacy_dir.mkdir()
+    legacy_pid_file = legacy_dir / 'mobile-preview.pids'
+    legacy_worker_name = str(ROOT / 'node_modules' / 'fixture-legacy-worker')
+    legacy = subprocess.Popen(['perl', '-MPOSIX', '-e', 'POSIX::setsid(); exec @ARGV', 'bash', '-c', f"exec -a '{legacy_worker_name}' /bin/sleep 8"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    legacy_pid_file.write_text(f'DEV_PID={legacy.pid}\nPID_STARTED_AT=old-format\n')
+    legacy_env = env | {'PROMA_MOBILE_PREVIEW_PID_FILE': str(legacy_pid_file)}
+    result = subprocess.run(['bash', str(script), 'stop'], text=True, capture_output=True, errors='replace', env=legacy_env)
+    assert result.returncode == 0 and '旧格式 PID 文件' in result.stdout and '仅列出' in result.stdout, result.stdout
+    stale = list(legacy_dir.glob('mobile-preview.pids.stale-*'))
+    assert len(stale) == 1 and process_alive(legacy.pid), f'stale={stale} legacy_pid={legacy.pid} output={result.stdout!r} error={result.stderr!r}'
+    # Wait for synthetic processes to self-exit; never signal the /Applications/-marked fixture.
+    legacy.wait(timeout=10)
+    other.wait(timeout=10)
+    deadline = __import__('time').monotonic() + 10
+    while process_alive(app_pid) and __import__('time').monotonic() < deadline:
+        __import__('time').sleep(0.1)
+    assert not process_alive(app_pid), '合成 /Applications 标记进程应自然退出'
+    print('MOBILE PREVIEW STOP PASS: dead launcher cleaned safe same-PGID PID only; /Applications and different-group process spared; legacy PID file listed and preserved')
+
+def check_fixture_generator(root: Path):
+    script = SCRIPTS / 'make-fixture-data.py'
+    source = root / 'fixture-source'; (source / 'web-remote').mkdir(parents=True)
+    encrypted = base64.b64encode(b'v10-fixture-encrypted-placeholder').decode('ascii')
+    channel = {'id':'a0c08014-4065-4d2a-8db5-f27f1eb09ab9','name':'clipproxyapi','provider':'anthropic','baseUrl':'https://api.example.invalid','apiKey':encrypted,'models':[],'enabled':True,'createdAt':1,'updatedAt':1}
+    other = {'id':'oauth-channel','name':'OAuth must not copy','provider':'openai-codex','apiKey':'OAUTH-SECRET-MUST-NOT-COPY'}
+    (source/'channels.json').write_text(json.dumps({'version':7,'channels':[other,channel]}))
+    (source/'web-remote'/'config.json').write_text(json.dumps({'enabled':True,'fullUi':True,'port':17889,'allowedOrigin':'https://fixture-host.invalid:8443','allowedTailscaleLogins':['fixture-user@example.invalid'],'trustedTailscaleNodes':['test-phone-a','test-phone-b'],'workspaceScope':'allowlist','allowedWorkspaceIds':['old-workspace']}))
+    target=root/'fixture-data'
+    target.mkdir(); (target/'keep.txt').write_text('preserve this previous fixture')
+    result=subprocess.run(['python3',str(script),str(target),'--source-dev-data-dir',str(source)],text=True,capture_output=True,errors='replace')
+    print(result.stdout,end='')
+    assert result.returncode==0, f'fixture generator rc={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}'
+    for secret in (encrypted,'OAUTH-SECRET-MUST-NOT-COPY','fixture-host.invalid','fixture-user@example.invalid','DEVICE-MUST-NOT-COPY'):
+        assert secret not in result.stdout and secret not in result.stderr, f'fixture output leaked sensitive source value: {secret}'
+    backups=list(root.glob('fixture-data.prev-*'))
+    assert len(backups)==1 and (backups[0]/'keep.txt').read_text()=='preserve this previous fixture'
+    sessions=json.loads((target/'agent-sessions.json').read_text())['sessions']
+    workspaces=json.loads((target/'agent-workspaces.json').read_text())['workspaces']
+    assert len(sessions)==20 and len(workspaces)==2
+    assert all((target/'agent-sessions'/f"{session['id']}.jsonl").is_file() for session in sessions)
+    assert all(__import__('uuid').UUID(session['id']) for session in sessions)
+    assert any(workspace['name']=='Fixture A' and workspace['slug']=='default' for workspace in workspaces)
+    assert (target/'agent-workspaces'/'default'/'workspace-files'/'AGENTS.md').is_file()
+    assert (target/'agent-workspaces'/'default'/'skills'/'fixture-skill'/'SKILL.md').is_file()
+    parent_id=str(__import__('uuid').uuid5(__import__('uuid').NAMESPACE_URL,'proma-fixture:parent'))
+    assert len([s for s in sessions if s.get('parentSessionId')==parent_id and s.get('sourceDelegationId')])==2
+    assert len([s for s in sessions if s.get('archived')])==2
+    assert len([s for s in sessions if s.get('pinned')])==1
+    draft=next(s for s in sessions if s.get('isDraft'))
+    assert draft['createdAt'] < __import__('time').time()*1000-24*60*60*1000
+    assert (target/'agent-sessions'/f"{draft['id']}.jsonl").is_file() and (target/'agent-sessions'/f"{draft['id']}.jsonl").stat().st_size==0
+    automations=json.loads((target/'automations.json').read_text())['automations']
+    assert len(automations)==2 and all(a['active'] is False for a in automations)
+    settings=json.loads((target/'settings.json').read_text())
+    assert settings=={'onboardingCompleted':True,'onboardingVersion':2,'agentWorkspaceId':'fixture-a'}
+    channels=json.loads((target/'channels.json').read_text())['channels']
+    assert len(channels)==1 and channels[0]['id']==channel['id'] and channels[0]['apiKey']==encrypted
+    assert stat.S_IMODE((target/'channels.json').stat().st_mode)==0o600
+    remote=json.loads((target/'web-remote'/'config.json').read_text())
+    assert remote['port']==17889 and remote['allowedWorkspaceIds']==['fixture-a','fixture-b']
+    assert remote['allowedOrigin']=='https://fixture-host.invalid:8443' and remote['allowedTailscaleLogins']==['fixture-user@example.invalid']
+    assert remote['trustedTailscaleNodes']==['test-phone-a','test-phone-b'] and not any(k in remote for k in ('devices','pairing','pushSubscriptions'))
+    large_id=str(__import__('uuid').uuid5(__import__('uuid').NAMESPACE_URL,'proma-fixture:large-history'))
+    large=target/'agent-sessions'/f'{large_id}.jsonl'
+    size=large.stat().st_size
+    assert 2*1024*1024 <= size <= 5*1024*1024, size
+    rows=[json.loads(line) for line in large.read_text().splitlines()]
+    assert sum(row.get('type')=='user' for row in rows)>=300 and sum(row.get('type')=='assistant' for row in rows)==300
+    assert any(any(block.get('type')=='tool_use' for block in row.get('message',{}).get('content',[])) for row in rows if isinstance(row.get('message'),dict))
+    rejected=subprocess.run(['python3',str(script),str(Path.home()/'.proma-dev'),'--source-dev-data-dir',str(source)],text=True,capture_output=True,errors='replace')
+    assert rejected.returncode!=0 and '目标只允许' in rejected.stderr, 'must reject ~/.proma-dev before writing'
+    print(f'FIXTURE GENERATOR PASS: 2 workspaces, {len(sessions)} sessions, {size}B synthetic history, one encrypted API-key channel; previous target preserved')
 
 def check_draft_compare(data_dir: Path, sessions_before: list[dict], sessions_after: list[dict], backups: list[tuple[str, dict]], enabled: bool = True, expected: int = 0):
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -32,7 +135,10 @@ def check_draft_compare(data_dir: Path, sessions_before: list[dict], sessions_af
 
 def main():
     with tempfile.TemporaryDirectory(prefix='proma-personal-script-tests-', dir='/tmp') as td:
-        root=Path(td); src=root/'source'; src.mkdir(); (src/'sub').mkdir()
+        root=Path(td)
+        check_mobile_preview_stop(root)
+        check_fixture_generator(root)
+        src=root/'source'; src.mkdir(); (src/'sub').mkdir()
         (src/'alpha.txt').write_text('alpha\n'); (src/'sub'/'db.sqlite').write_bytes(b'SQLite fixture bytes')
         (src/'alpha.txt').chmod(0o640); (src/'shortcut').symlink_to('alpha.txt')
         (src/'.DS_Store').write_bytes(b'finder metadata'); (src/'session.lock').write_text('lock')

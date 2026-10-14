@@ -3,9 +3,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TAILSCALE="/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+TAILSCALE="${PROMA_TAILSCALE_CLI:-/Applications/Tailscale.app/Contents/MacOS/Tailscale}"
 AXE="$HOME/.local/bin/axe"
-PID_FILE="/tmp/proma-mobile-preview.pids"
+PID_FILE="${PROMA_MOBILE_PREVIEW_PID_FILE:-/tmp/proma-mobile-preview.pids}"
 LOG_FILE="/tmp/proma-mobile-preview.log"
 DEFAULT_DEVICE="iPhone 17 Pro"
 CMD="${1:-status}"
@@ -30,13 +30,76 @@ descendants() {
 }
 
 serve_status() { "$TAILSCALE" serve status 2>&1 || true; }
-process_start_time() { ps -o lstart= -p "$1" 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/[[:space:]][[:space:]]*/ /g'; }
+dev_data_dir_name() {
+  local name="${PROMA_DEV_DATA_DIR_NAME:-.proma-dev}"
+  if [[ "$name" != ".proma-dev" && ! "$name" =~ ^\.proma-dev-[a-z0-9-]+$ ]]; then
+    echo "警告：PROMA_DEV_DATA_DIR_NAME 无效，回退到 .proma-dev" >&2
+    name=".proma-dev"
+  fi
+  printf '%s\n' "$name"
+}
+process_start_time() { ps -o lstart= -p "$1" 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/[[:space:]][[:space:]]*/ /g' || true; }
 close_dev_serve() { "$TAILSCALE" serve --https=8443 off >/dev/null 2>&1 || true; }
+
+process_command() { ps -o command= -p "$1" 2>/dev/null | sed 's/^[[:space:]]*//' || true; }
+process_pgid() { ps -o pgid= -p "$1" 2>/dev/null | tr -d ' ' || true; }
+safe_preview_command() {
+  local command="$1"
+  [[ "$command" != *'/Applications/'* ]] || return 1
+  [[ "$command" == *"$ROOT/node_modules/"* ]] && return 0
+  # The recorded isolated PGID scopes these exact root launchers; all other names require the repository path.
+  case "$command" in
+    'bun run dev'|'bun run dev '*|'bun run dev:vite'|'bun run dev:electron'|'bun run --filter=@proma/electron dev'|'bun run watch:main'|'bun run watch:agent-runtime'|'bun run watch:terminal-runtime'|'bun run watch:preload'|'bun run scripts/dev-bundle-readiness.ts'*) return 0 ;;
+    '/bin/bash -c bun run sync:runtime-deps:dev'*|'bun run rebuild:node-pty'|'bun run build:native-helpers'|'bun run prepare:officecli'|'bun run build:resources'*) return 0 ;;
+    '@proma/electron - electronmon'*|'electronmon .') return 0 ;;
+    'esbuild src/'*) return 0 ;;
+  esac
+  [[ "$command" == *"$ROOT"* ]] && [[ "$command" == *'concurrently'* || "$command" == *'vite'* || "$command" == *'esbuild'* || "$command" == *'electronmon'* || "$command" == *'electron '* ]]
+}
+preview_processes_in_group() {
+  local group="$1"
+  ps -axo pid=,pgid=,command= | awk -v group="$group" '$2 == group { command=substr($0, index($0, $3)); print $1 "|" command }'
+}
+preview_group_for_launcher() {
+  local launcher="$1" pid group command found="" launcher_group
+  launcher_group="$(process_pgid "$launcher")"
+  while IFS= read -r pid; do
+    [[ "$pid" =~ ^[0-9]+$ ]] || continue
+    group="$(process_pgid "$pid")"
+    [[ "$pid" == "$group" && "$group" != "$launcher_group" ]] || continue
+    command="$(process_command "$pid")"
+    safe_preview_command "$command" || continue
+    if [[ -n "$found" && "$found" != "$group" ]]; then
+      echo "发现多个隔离开发进程组，拒绝选择（$found、$group）" >&2
+      return 1
+    fi
+    found="$group"
+  done < <(descendants "$launcher")
+  [[ -n "$found" ]] || return 1
+  printf '%s\n' "$found"
+}
+report_and_signal_preview_pids() {
+  local signal="$1" group="$2" pid start command actual_group
+  shift 2
+  local pids=("$@")
+  for pid in "${pids[@]}"; do
+    actual_group="$(process_pgid "$pid")"
+    command="$(process_command "$pid")"
+    if [[ "$actual_group" == "$group" ]] && safe_preview_command "$command"; then
+      start="$(process_start_time "$pid")"
+      printf '发送 %s：PID=%s 命令=%s\n' "$signal" "$pid" "${command:0:240}"
+      kill -"$signal" "$pid" 2>/dev/null || true
+      if [[ "$signal" == KILL ]]; then continue; fi
+      # Keep the observed start identity for the post-grace-period recheck.
+      printf '%s|%s\n' "$pid" "$start"
+    fi
+  done
+}
 
 start_preview() {
   require lsof
   [[ -x "$TAILSCALE" ]] || fail "Tailscale CLI 不可执行：$TAILSCALE"
-  [[ ! -f "$PID_FILE" ]] || fail "发现 PID 记录 $PID_FILE；先运行 status/stop，避免重复启动"
+  [[ ! -f "$PID_FILE" ]] || fail "发现 PID 记录 ${PID_FILE}；先运行 status/stop，避免重复启动"
   for port in 17889 5173; do
     local pid
     pid="$(port_pid "$port")"
@@ -46,11 +109,12 @@ start_preview() {
   "$TAILSCALE" serve --bg --https=8443 http://127.0.0.1:17889
   cd "$ROOT"
   ( cd "$ROOT" && perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' env PROMA_WEB_REMOTE=1 PROMA_WEB_REMOTE_HEAVY_SESSION_BASELINE="${PROMA_WEB_REMOTE_HEAVY_SESSION_BASELINE:-}" bash scripts/personal/dev.sh ) >"$LOG_FILE" 2>&1 < /dev/null &
-  local dev_pid=$! start_time=$SECONDS pid_started_at
+  local dev_pid=$! start_time=$SECONDS pid_started_at dev_pgid
   sleep 1
   pid_started_at="$(process_start_time "$dev_pid")"
-  [[ -n "$pid_started_at" ]] || fail "无法读取开发进程启动时间（PID=$dev_pid）"
-  printf 'DEV_PID=%q\nLOG_FILE=%q\nPID_STARTED_AT=%q\n' "$dev_pid" "$LOG_FILE" "$pid_started_at" > "$PID_FILE"
+  dev_pgid="$(preview_group_for_launcher "$dev_pid")" || fail "无法从启动器后代中确认唯一隔离开发进程组（PID=${dev_pid}）"
+  [[ -n "$pid_started_at" && "$dev_pgid" =~ ^[0-9]+$ ]] || fail "无法读取开发进程启动身份或进程组（PID=${dev_pid}，PGID=${dev_pgid}）"
+  printf 'DEV_PID=%q\nDEV_PGID=%q\nLOG_FILE=%q\nPID_STARTED_AT=%q\n' "$dev_pid" "$dev_pgid" "$LOG_FILE" "$pid_started_at" > "$PID_FILE"
   chmod 600 "$PID_FILE"
 
   while (( SECONDS - start_time < 180 )); do
@@ -63,7 +127,7 @@ start_preview() {
     fi
     if ! kill -0 "$dev_pid" 2>/dev/null; then
       tail -n 80 "$LOG_FILE" >&2 || true
-      fail "开发实例提前退出（PID=$dev_pid）"
+      fail "开发实例提前退出（PID=${dev_pid}）"
     fi
     sleep 1
   done
@@ -93,7 +157,7 @@ sim_preview() {
   xcrun simctl bootstatus "$udid" -b
   open -a Simulator --args -CurrentDeviceUDID "$udid"
 
-  local config="$HOME/.proma-dev/web-remote/config.json"
+  local config="$HOME/$(dev_data_dir_name)/web-remote/config.json"
   [[ -r "$config" ]] || fail "找不到开发实例 Web Remote 配置：$config"
   origin="$(node -e 'const c=require(process.argv[1]); process.stdout.write(c.allowedOrigin||"")' "$config")"
   [[ "$origin" == https://*:* ]] || fail "allowedOrigin 未含临时 HTTPS 端口（期望 https://host:8443）：$origin"
@@ -163,7 +227,7 @@ NODE
 run_tests() {
   local suites=("$@") suite agent="$(dirname "$0")/mobile-harness.mjs" url config origin chrome_pids failed=0
   if ((${#suites[@]} == 0)); then suites=(iphone:panel-probe iphone:smoke iphone:mobile-polish iphone:layout iphone:dead-socket iphone:heavy-session android:smoke android:attachments android:dead-socket); fi
-  config="$HOME/.proma-dev/web-remote/config.json"
+  config="$HOME/$(dev_data_dir_name)/web-remote/config.json"
   [[ -r "$config" ]] || fail "找不到开发实例配置：$config"
   origin="$(node -e 'const c=require(process.argv[1]); process.stdout.write(c.allowedOrigin||"")' "$config")"
   [[ -n "$origin" ]] || fail "allowedOrigin 为空"
@@ -173,7 +237,7 @@ run_tests() {
     [[ "$ua" != "$suite" ]] || { name="$suite"; ua=iphone; }
     local test_log="/tmp/proma-mobile-preview-${ua}-${name}.log"
     echo "=== ${ua} / ${name} ==="
-    if ! (cd "$ROOT" && perl -e 'alarm 600; exec @ARGV' env -u http_proxy -u https_proxy -u all_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u HTTP_ALL_PROXY -u HTTPS_ALL_PROXY bun "$agent" --url "$origin" --suite "$name" --user-agent "$ua") >"$test_log" 2>&1; then
+    if ! (cd "$ROOT" && perl -e 'alarm 600; exec @ARGV' env -u http_proxy -u https_proxy -u all_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u HTTP_ALL_PROXY -u HTTPS_ALL_PROXY bun "$agent" --url "$origin" --suite "$name" --user-agent "$ua" --expected-workspace-count "${PROMA_WEB_REMOTE_EXPECTED_WORKSPACE_COUNT:-1}") >"$test_log" 2>&1; then
       echo "FAIL ${ua}/${name}（日志：${test_log}）"
       tail -n 16 "$test_log" || true
       failed=1
@@ -183,7 +247,10 @@ run_tests() {
       if [[ -z "$result_json" || ! -r "$result_json" ]]; then
         echo "FAIL ${ua}/${name}（未找到 harness 结果 JSON；日志：${test_log}）" >&2
         failed=1
-      elif ! node - "$result_json" "$ua" "$name" <<'NODE'
+      else
+        echo "结果 JSON：$result_json"
+      fi
+      if [[ -n "$result_json" && -r "$result_json" ]] && ! node - "$result_json" "$ua" "$name" <<'NODE'
 const fs = require('node:fs')
 const [path, ua, suite] = process.argv.slice(2)
 const result = JSON.parse(fs.readFileSync(path, 'utf8'))
@@ -237,6 +304,8 @@ for (const step of skipped) console.log(`SKIP ${step.name}: ${step.skipped}`)
 NODE
       then
         failed=1
+      elif [[ -z "$result_json" || ! -r "$result_json" ]]; then
+        failed=1
       fi
     fi
   done
@@ -250,51 +319,117 @@ NODE
   return "$failed"
 }
 
-stop_preview() {
-  local DEV_PID="" LOG_FILE="" PID_STARTED_AT="" pid current_start
-  [[ -f "$PID_FILE" ]] || fail "找不到 PID 记录 $PID_FILE；为避免误杀，不猜测进程"
-  read_pids
-  [[ "${DEV_PID:-}" =~ ^[0-9]+$ && -n "${PID_STARTED_AT:-}" ]] || fail "PID 记录无效或缺少进程启动时间"
-  current_start="$(process_start_time "$DEV_PID")"
-  if [[ -n "$current_start" && "$current_start" != "$PID_STARTED_AT" ]]; then
-    fail "PID $DEV_PID 启动时间不匹配；拒绝结束进程或修改 Serve 路由"
+fixture_preview() (
+  [[ ! -f "$PID_FILE" ]] || fail "发现 PID 记录 ${PID_FILE}；先运行 status/stop，避免重置或重复启动"
+  for port in 17889 5173; do
+    local pid
+    pid="$(port_pid "$port")"
+    [[ -z "$pid" ]] || fail "端口 $port 已被 PID $pid 占用；拒绝重置 fixture"
+  done
+  export PROMA_DEV_DATA_DIR_NAME=.proma-dev-fixture
+  export PROMA_WEB_REMOTE_EXPECTED_WORKSPACE_COUNT=2
+  python3 "$ROOT/scripts/personal/make-fixture-data.py" "$HOME/.proma-dev-fixture"
+  start_preview
+
+  local test_status=0 stop_status=0
+  if run_tests iphone:smoke iphone:layout iphone:session-sync iphone:interactions; then
+    echo "fixture 回归套件执行完毕。"
+  else
+    test_status=$?
+    echo "fixture 回归存在失败套件；保留各套件日志与 JSON 供检查。" >&2
   fi
-  if [[ -n "$current_start" ]] && [[ -z "$(port_pid 17889)" ]]; then
+  if stop_preview; then echo "fixture 回归后的开发实例已停止。"
+  else stop_status=$?; fi
+  if ((test_status != 0 || stop_status != 0)); then return 1; fi
+)
+
+stop_preview() {
+  local DEV_PID="" DEV_PGID="" LOG_FILE="" PID_STARTED_AT="" pid current_start command group
+  [[ -f "$PID_FILE" ]] || fail "找不到 PID 记录 ${PID_FILE}；为避免误杀，不猜测进程"
+  read_pids
+  if [[ ! "${DEV_PGID:-}" =~ ^[0-9]+$ ]]; then
+    echo "旧格式 PID 文件，请按 PID 手工清理；未发送任何信号。"
+    ps -axo pid=,pgid=,command= | while IFS= read -r line; do
+      command="$(printf '%s\n' "$line" | awk '{$1="";$2="";sub(/^[[:space:]]+/,"");print}')"
+      if safe_preview_command "$command"; then printf '疑似残留（仅列出）：%s\n' "$line"; fi
+    done
+    local stale_file="${PID_FILE}.stale-$(date +%Y%m%d-%H%M%S)"
+    [[ ! -e "$stale_file" ]] || stale_file="${stale_file}-$$"
+    mv "$PID_FILE" "$stale_file"
+    echo "旧 PID 文件已保留为：$stale_file"
+    return 0
+  fi
+  [[ "${DEV_PID:-}" =~ ^[0-9]+$ && -n "${PID_STARTED_AT:-}" ]] || fail "PID 记录无效或缺少进程启动时间"
+  group="$DEV_PGID"
+  current_start="$(process_start_time "$DEV_PID")"
+  if [[ -n "$current_start" && "$current_start" == "$PID_STARTED_AT" ]] && [[ -z "$(port_pid 17889)" ]]; then
     echo "不健康：开发进程仍运行，但 17889 未监听；不结束进程，仅关闭 8443。"
     close_dev_serve
     serve_status
     return 0
   fi
-  # PID identity matches the recorded launcher; only its current descendants are in scope.
-  local tree=()
-  if [[ -n "$current_start" ]]; then
+
+  local candidates=() tree=() start
+  if [[ -n "$current_start" && "$current_start" == "$PID_STARTED_AT" ]]; then
+    echo "启动器身份匹配；仅检查其后代与自身。"
     while IFS= read -r pid; do [[ -n "$pid" ]] && tree+=("$pid"); done < <(descendants "$DEV_PID")
     tree+=("$DEV_PID")
-    for pid in "${tree[@]}"; do kill -TERM "$pid" 2>/dev/null || true; done
-    sleep 2
-    for pid in "${tree[@]}"; do kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true; done
+  else
+    if [[ -z "$current_start" ]]; then echo "启动器 PID 已不存在；按记录 PGID=$group 核验候选进程。"
+    else echo "启动器 PID=$DEV_PID 启动时间不匹配；不信任该 PID，按记录 PGID=$group 核验候选进程。"; fi
+    while IFS= read -r line; do pid="${line%%|*}"; [[ "$pid" =~ ^[0-9]+$ ]] && tree+=("$pid"); done < <(preview_processes_in_group "$group")
   fi
+
+  for pid in "${tree[@]}"; do
+    [[ "$(process_pgid "$pid")" == "$group" ]] || continue
+    command="$(process_command "$pid")"
+    safe_preview_command "$command" || continue
+    start="$(process_start_time "$pid")"
+    [[ -n "$start" ]] || continue
+    candidates+=("$pid|$start")
+    printf '发送 TERM：PID=%s PGID=%s 命令=%s\n' "$pid" "$group" "$command"
+    kill -TERM "$pid" 2>/dev/null || true
+  done
+  if ((${#candidates[@]})); then sleep 3; fi
+  for entry in "${candidates[@]}"; do
+    pid="${entry%%|*}"; start="${entry#*|}"
+    [[ "$(process_start_time "$pid")" == "$start" && "$(process_pgid "$pid")" == "$group" ]] || continue
+    command="$(process_command "$pid")"
+    safe_preview_command "$command" || continue
+    if kill -0 "$pid" 2>/dev/null; then
+      printf '发送 KILL：PID=%s PGID=%s 命令=%s\n' "$pid" "$group" "$command"
+      kill -KILL "$pid" 2>/dev/null || true
+    fi
+  done
+
   "$TAILSCALE" serve --https=8443 off
   local state
   state="$(serve_status)"
   echo "$state"
   if printf '%s\n' "$state" | grep -E 'https://.*:8443|/.*17889' >/dev/null; then fail "Tailscale Serve 仍包含 8443 / 17889 路由"; fi
   rm -f "$PID_FILE"
-  echo "已停止记录的开发实例进程树；PID 文件已移除。"
+  echo "已停止并逐 PID 核验记录进程组 ${group}；PID 文件已移除。"
 }
 
 show_status() {
   local process_state="未记录" current_start="" expected_start=""
   echo "PID 文件：$([[ -f "$PID_FILE" ]] && echo 存在 || echo 不存在)"
   if [[ -f "$PID_FILE" ]]; then
-    local DEV_PID="" LOG_FILE="" PID_STARTED_AT=""
+    local DEV_PID="" DEV_PGID="" LOG_FILE="" PID_STARTED_AT="" line pid command found_group_process=0
     read_pids
     expected_start="$PID_STARTED_AT"
-    echo "开发启动 PID：${DEV_PID:-未知}"
+    echo "开发启动 PID：${DEV_PID:-未知}；PGID：${DEV_PGID:-旧格式/未知}"
     current_start="$(process_start_time "${DEV_PID:-0}")"
-    if [[ -n "$current_start" && "$current_start" != "$expected_start" ]]; then process_state="身份不匹配（拒绝操作）"
+    if [[ -n "$current_start" && "$current_start" != "$expected_start" ]]; then process_state="身份不匹配（stop 将按 PGID 安全核验）"
     elif [[ -n "$current_start" ]]; then process_state="运行"
     else process_state="未运行"; fi
+    if [[ -z "$current_start" && "${DEV_PGID:-}" =~ ^[0-9]+$ ]]; then
+      while IFS= read -r line; do
+        pid="${line%%|*}"; command="${line#*|}"
+        if [[ "$pid" != "$DEV_PID" ]] && safe_preview_command "$command"; then found_group_process=1; echo "同组候选：PID=$pid 命令=$command"; fi
+      done < <(preview_processes_in_group "$DEV_PGID")
+      ((found_group_process)) && process_state="启动器已不在，但同组开发进程仍在"
+    fi
   fi
   echo "进程：$process_state"
   for port in 17889 5173; do local p; p="$(port_pid "$port")"; echo "端口 ${port}：${p:-未监听}"; done
@@ -312,7 +447,8 @@ case "$CMD" in
   start) start_preview ;;
   sim) sim_preview "$@" ;;
   test) run_tests "$@" ;;
+  fixture) fixture_preview ;;
   stop) stop_preview ;;
   status) show_status ;;
-  *) fail "用法：$0 {start|sim [--device <name|udid>]|test [suites...]|stop|status}" ;;
+  *) fail "用法：$0 {start|sim [--device <name|udid>]|test [suites...]|fixture|stop|status}" ;;
 esac

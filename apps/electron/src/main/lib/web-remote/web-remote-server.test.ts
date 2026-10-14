@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { WebRemoteAuth } from './web-remote-auth'
 
 const eventBus = { on: () => () => {}, emit: () => {} }
+mock.module('electron', () => ({ app: { isPackaged: false } }))
 mock.module('../agent-service', () => ({
   agentEventBus: eventBus,
   isAgentSessionActive: () => false,

@@ -49,7 +49,7 @@ export const MOBILE_CSS = String.raw`@media (max-width: 767px) {
   [data-web-remote-panel="right"] [role="tablist"][aria-label="右侧工作区"], [data-web-remote-panel="right"] [data-web-remote-mobile-hide="true"], [data-web-remote-simulator-tab="true"], [data-web-remote-simulator-entry="true"] { display:none!important; }
   [data-web-remote-panel="right"] [data-web-remote-split="memory"] { min-height:0!important; }
   [data-web-remote-mobile-topbar-title] { display:flex; align-items:center; justify-content:center; gap:6px; border:0; background:transparent; cursor:pointer; }
-  [data-web-remote-mobile-tab-menu] { position:fixed; z-index:10010; top:56px; left:12px; right:12px; max-height:65dvh; overflow:auto; padding:6px; border:1px solid hsl(var(--border)); border-radius:14px; background:hsl(var(--background)); box-shadow:0 12px 32px rgba(0,0,0,.28); }
+  [data-web-remote-mobile-tab-menu] { position:fixed; z-index:2147483001; top:56px; left:12px; right:12px; max-height:65dvh; overflow:auto; padding:6px; border:1px solid hsl(var(--border)); border-radius:14px; background:hsl(var(--background)); box-shadow:0 12px 32px rgba(0,0,0,.28); }
   [data-web-remote-mobile-tab-menu] button { display:flex; align-items:center; width:100%; min-height:44px; gap:10px; padding:8px 10px; text-align:left; border-radius:9px; }
   [data-web-remote-mobile-tab-menu] [data-active="true"] { background:hsl(var(--accent)); }
   [data-web-remote-memory-list], [data-web-remote-memory-detail] { min-width:0; }
