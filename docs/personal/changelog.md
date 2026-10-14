@@ -1641,3 +1641,11 @@
 
 - 经用户 17:57 同意，在 `~/.proma/web-remote/config.json` 的 `trustedTailscaleNodes` 加入 `iphone-air`（改前备份 `config.json.bak-20261014-180703`，权限 0600）；下次启动生效。
 - backlog 过时条目更正：退出半停、preview stop 清理、手机查看子任务标为已完成。
+
+## 2026-10-14: 安装 e759bc1c（Claude 5.5 标题 + 抽屉菜单遮挡 + fixture 回归工具）
+
+- **首次安装 22:13 被脚本误判并自动回滚**：`install-update.sh` 启动后只等 `main.log` 非空就立即 grep 启动标记；`main.log` 已于 10-13 15:54 按大小轮换，新文件没有旧标记，新版尚未写出标记即判失败（EXIT=4）。按设计恢复 `ac21c948`、保留失败包；数据 SNAPSHOT MATCH。用户同意后 Claude Code 重开 `ac21c948` 写出启动标记（其草稿清理按预演删除 1 条 `ad28b2c2`，备份 `draft-cleanup-2026-10-14T14-17-57-237Z.json`）、正常退出，22:19 重跑标准脚本成功。
+- 第二次安装：备份 `20261014-221914-26515`，BACKUP VERIFY PASS，启动后 SNAPSHOT MATCH（会话 1125、渠道 8——渠道数在安装前已为 8，与本次无关）；previous = `ac21c948`；两份旧备份归档到外置硬盘。`[FATAL]`/`[ERROR]` 0；配置目录按实际写入核验为 `~/.proma`。
+- **钥匙串弹 1 次，等待约 27 分钟**（22:19:47 → 约 22:46 用户点“始终允许”）。期间 Web Remote 已启动，但 `scheduler-start` 延迟到 22:46:51（调度器在 `await startAllBridges()` 之后启动）；期间无任务到期，未漏跑。
+- 受信名单 `iphone-air` 生效：用户确认 iPhone Air 免配对码进入；抽屉“文件 → 改动”可点；Opus 5.5 带 `&session` 引用的标题正常。
+- 待办（本日修复）：启动标记检查竞态；调度器不应等钥匙串；配置目录写入 main.log。详见 handoff `install-result-2026-10-14.md`。
