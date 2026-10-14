@@ -1583,3 +1583,12 @@
 - 验证：定向测试 12 pass / 0 fail；全仓 `bun run typecheck` 所有 6 个 workspace package 均退出 0；全量 `bun test` **754 pass / 0 fail，1,929 expect，117 files**；`apps/electron` 的 `build:main` 通过。
 - Clipproxy 实测：使用同一 adaptive-low / 256-token 请求体，Opus 5.5 与 Sonnet 5.5 各测复现消息及两条普通消息，共 6 次；全部 HTTP 200、`stop_reason=end_turn`，每次均返回可读标题。复现消息两模型均返回“对话卡顿原因排查”；未输出 API Key。
 - 未启动 dev，未打包、安装、推送或改版本；版本仍为 0.19.58。
+
+## 2026-10-14: 修复手机预览 stop 的残留进程清理
+
+- `mobile-preview.sh` PID 记录增加隔离进程组 `DEV_PGID`。macOS 实测启动器 PID 与 `setsid()` 后开发进程组 leader PID 不同；启动时改为从启动器后代中只接受唯一、独立且命令白名单匹配的进程组，不再错误要求 `DEV_PGID == DEV_PID`。进程组识别输出按字符正常换行。
+- `stop` 用记录 PGID 限定候选，对每个 PID 重新核验 PGID、命令白名单与启动身份后逐 PID 发 TERM，并只对仍匹配的进程复核后发 KILL；不向进程组整体发信号。启动器 PID 已退出时仍可按记录 PGID 清理；旧格式 PID 文件只列出候选、改名保留，不发送信号。状态输出显示 PGID 并提示已记录组内残留。
+- 测试在 `/tmp` 合成安全仓库 worker、`/Applications/` 标记进程与不同进程组进程：安全同组 worker 被清理，另外两者保留；旧格式 PID 文件改名保留。`bash -n`、Python 源码编译检查与 `git diff --check` 通过。
+- 真实开发实例演练通过：`start` 记录 PID 57537 / PGID 57539，17889 与 5173 正常监听，日志确认 `已启动: 127.0.0.1:17889` 和 full-ui 分级覆盖率 100%；`status` 正确显示 PGID；`stop` 逐 PID 清理开发进程，关闭 8443，仅保留既有 443→17888 路由。停止后 17889、5173、8443 均无监听，PID 文件已移除，正式版 PID 23663 保持运行。
+- `~/.proma-dev` 启动前后快照比对使用 `--allow-draft-cleanup-dir ~/.proma-dev/backups --since <启动前时间>`，结果 `SNAPSHOT MATCH`；会话数保持父会话裁定的新基准 829（启动自动清理的 832→829 变化已在先前批次确认是备份可查的 10-10 空草稿清理，本次未再变化）。
+- 同步更新 `docs/personal/web-remote.md` 的启动器 PID/PGID 与逐 PID 清理说明。测试仅覆盖步骤 1；全仓测试和 `bun run typecheck` 留待本批收尾。未改版本、未打包、未安装、未 push。

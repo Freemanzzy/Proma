@@ -16,6 +16,55 @@ def assert_run(args, expected=0):
     if result.returncode != expected: raise AssertionError(f'{args}: rc={result.returncode}, expected={expected}')
     return result
 
+def check_mobile_preview_stop(root: Path):
+    script = SCRIPTS / 'mobile-preview.sh'
+    mock_tailscale = root / 'tailscale-mock'
+    mock_tailscale.write_text('#!/bin/sh\n[ "$1" = serve ] && [ "${2:-}" = status ] && exit 0\nexit 0\n')
+    mock_tailscale.chmod(0o755)
+    pid_file = root / 'mobile-preview.pids'
+    safe_name = str(ROOT / 'node_modules' / 'fixture-safe-worker')
+    app_name = '/Applications/Proma.app/fixture-worker'
+    group_script = f"(exec -a '{safe_name}' /bin/sleep 12) >/dev/null 2>&1 & safe=$!; (exec -a '{app_name}' /bin/sleep 12) >/dev/null 2>&1 & app=$!; printf '%s %s\\n' \"$safe\" \"$app\""
+    leader = subprocess.run(['perl', '-MPOSIX', '-e', 'POSIX::setsid(); exec @ARGV', 'bash', '-c', group_script], text=True, capture_output=True, check=True)
+    safe_pid, app_pid = map(int, leader.stdout.split())
+    group = os.getpgid(safe_pid)
+    assert group == os.getpgid(app_pid)
+    other_name = str(ROOT / 'node_modules' / 'fixture-other-group')
+    other = subprocess.Popen(['perl', '-MPOSIX', '-e', 'POSIX::setsid(); exec @ARGV', 'bash', '-c', f"exec -a '{other_name}' /bin/sleep 12"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    other_pid = other.pid
+    assert os.getpgid(other_pid) != group
+    pid_file.write_text(f'DEV_PID=999999\nDEV_PGID={group}\nLOG_FILE=/tmp/unused\nPID_STARTED_AT=not-running\n')
+    env = os.environ | {'PROMA_MOBILE_PREVIEW_PID_FILE': str(pid_file), 'PROMA_TAILSCALE_CLI': str(mock_tailscale)}
+    stop = subprocess.run(['bash', str(script), 'stop'], text=True, capture_output=True, errors='replace', env=env)
+    print(stop.stdout, end='')
+    assert stop.returncode == 0 and '按记录 PGID' in stop.stdout, f'rc={stop.returncode} stdout={stop.stdout!r} stderr={stop.stderr!r}'
+    def process_alive(pid: int) -> bool:
+        state = subprocess.run(['ps', '-o', 'stat=', '-p', str(pid)], text=True, capture_output=True).stdout.strip()
+        return bool(state and not state.startswith('Z'))
+    assert not process_alive(safe_pid), '同组仓库 worker 应被清理'
+    assert process_alive(app_pid), '同组 /Applications/ 命令不应被结束'
+    assert process_alive(other_pid), '不同组 worker 不应被结束'
+    assert not pid_file.exists()
+    # Legacy file: report candidates and preserve it under a timestamped name, without signaling them.
+    legacy_dir = root / 'legacy'; legacy_dir.mkdir()
+    legacy_pid_file = legacy_dir / 'mobile-preview.pids'
+    legacy_worker_name = str(ROOT / 'node_modules' / 'fixture-legacy-worker')
+    legacy = subprocess.Popen(['perl', '-MPOSIX', '-e', 'POSIX::setsid(); exec @ARGV', 'bash', '-c', f"exec -a '{legacy_worker_name}' /bin/sleep 8"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    legacy_pid_file.write_text(f'DEV_PID={legacy.pid}\nPID_STARTED_AT=old-format\n')
+    legacy_env = env | {'PROMA_MOBILE_PREVIEW_PID_FILE': str(legacy_pid_file)}
+    result = subprocess.run(['bash', str(script), 'stop'], text=True, capture_output=True, errors='replace', env=legacy_env)
+    assert result.returncode == 0 and '旧格式 PID 文件' in result.stdout and '仅列出' in result.stdout, result.stdout
+    stale = list(legacy_dir.glob('mobile-preview.pids.stale-*'))
+    assert len(stale) == 1 and process_alive(legacy.pid), f'stale={stale} legacy_pid={legacy.pid} output={result.stdout!r} error={result.stderr!r}'
+    # Wait for synthetic processes to self-exit; never signal the /Applications/-marked fixture.
+    legacy.wait(timeout=10)
+    other.wait(timeout=10)
+    deadline = __import__('time').monotonic() + 10
+    while process_alive(app_pid) and __import__('time').monotonic() < deadline:
+        __import__('time').sleep(0.1)
+    assert not process_alive(app_pid), '合成 /Applications 标记进程应自然退出'
+    print('MOBILE PREVIEW STOP PASS: dead launcher cleaned safe same-PGID PID only; /Applications and different-group process spared; legacy PID file listed and preserved')
+
 def check_draft_compare(data_dir: Path, sessions_before: list[dict], sessions_after: list[dict], backups: list[tuple[str, dict]], enabled: bool = True, expected: int = 0):
     data_dir.mkdir(parents=True, exist_ok=True)
     backup_dir=data_dir/'backups'; backup_dir.mkdir(exist_ok=True)
@@ -32,7 +81,9 @@ def check_draft_compare(data_dir: Path, sessions_before: list[dict], sessions_af
 
 def main():
     with tempfile.TemporaryDirectory(prefix='proma-personal-script-tests-', dir='/tmp') as td:
-        root=Path(td); src=root/'source'; src.mkdir(); (src/'sub').mkdir()
+        root=Path(td)
+        check_mobile_preview_stop(root)
+        src=root/'source'; src.mkdir(); (src/'sub').mkdir()
         (src/'alpha.txt').write_text('alpha\n'); (src/'sub'/'db.sqlite').write_bytes(b'SQLite fixture bytes')
         (src/'alpha.txt').chmod(0o640); (src/'shortcut').symlink_to('alpha.txt')
         (src/'.DS_Store').write_bytes(b'finder metadata'); (src/'session.lock').write_text('lock')
