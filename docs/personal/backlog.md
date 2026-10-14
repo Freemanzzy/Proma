@@ -4,6 +4,8 @@
 
 ## 待合入分支（已验证、未发布）
 
+- **已合入 personal、尚未打包安装（2026-10-15）**：`fix/install-followups-20261014`（调度器与自检提前到可能触发钥匙串的步骤之前；`event=config-dir` 入日志；`install-update.sh` 轮询等待启动后新标记——脚本改动下次安装即生效，无需打包）。
+
 - **已合入 personal（本地，未推送）、尚未打包安装（2026-10-14）**：`fix/title-claude55-adaptive`（Claude 5.5 标题 adaptive low、引用标记清理）+ `fix/batch-20261014`（fixture 回归层与 `mobile-preview.sh fixture`、stop 按进程组安全清理、`PROMA_DEV_DATA_DIR_NAME`、手机抽屉“文件/改动”菜单被省流量胶囊遮挡修复、fixture 沿用 dev 受信设备）。用户 16:32 验证通过；17:57 决定打包。
 
 - 无（`b3a24028` 已于 2026-10-08 20:31 安装）。
