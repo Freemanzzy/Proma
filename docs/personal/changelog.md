@@ -1592,3 +1592,11 @@
 - 真实开发实例演练通过：`start` 记录 PID 57537 / PGID 57539，17889 与 5173 正常监听，日志确认 `已启动: 127.0.0.1:17889` 和 full-ui 分级覆盖率 100%；`status` 正确显示 PGID；`stop` 逐 PID 清理开发进程，关闭 8443，仅保留既有 443→17888 路由。停止后 17889、5173、8443 均无监听，PID 文件已移除，正式版 PID 23663 保持运行。
 - `~/.proma-dev` 启动前后快照比对使用 `--allow-draft-cleanup-dir ~/.proma-dev/backups --since <启动前时间>`，结果 `SNAPSHOT MATCH`；会话数保持父会话裁定的新基准 829（启动自动清理的 832→829 变化已在先前批次确认是备份可查的 10-10 空草稿清理，本次未再变化）。
 - 同步更新 `docs/personal/web-remote.md` 的启动器 PID/PGID 与逐 PID 清理说明。测试仅覆盖步骤 1；全仓测试和 `bun run typecheck` 留待本批收尾。未改版本、未打包、未安装、未 push。
+
+## 2026-10-14: 开发实例支持隔离数据目录
+
+- 新增 `PROMA_DEV_DATA_DIR_NAME`：仅未打包开发实例接受匹配 `^\.proma-dev-[a-z0-9-]+$` 的值；合法值生效，非法值忽略并记录警告，未设置时继续使用 `.proma-dev`。打包版始终使用 `.proma`，即使变量存在也只警告并忽略。
+- `dev.sh` 与 `mobile-preview.sh` 从同一变量解析数据目录名，非法输入均回退 `.proma-dev`；开发数据目录仍拒绝指向正式数据根。
+- 上游 `config-paths.ts` 仅增加对新的个人纯逻辑 helper 的调用并确定打包模式；隔离规则集中在新增 `personal-config-dir.ts`。新增 4 个单测覆盖打包版忽略、非法值回退、合法值生效及默认值不变。
+- 验证：定向 `bun test apps/electron/src/main/lib/personal-config-dir.test.ts` **4 pass / 0 fail**；`bash -n` 检查 `dev.sh` 与 `mobile-preview.sh` 通过；`git diff --check` 通过。真实 fixture 构造与启动留在后续步骤。
+- 同步更新 `docs/personal/web-remote.md` 说明隔离变量及安全边界。全仓 `bun run typecheck` 留待收尾；未改版本、未打包、未安装、未 push。

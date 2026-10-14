@@ -24,6 +24,8 @@
 PROMA_WEB_REMOTE=1 bash scripts/personal/dev.sh
 ```
 
+开发实例默认使用 `~/.proma-dev`。需要隔离合成回归数据时，可在未打包开发实例启动前设置 `PROMA_DEV_DATA_DIR_NAME=.proma-dev-fixture`；仅允许匹配 `^\.proma-dev-[a-z0-9-]+$` 的目录名。非法值会警告并回退默认目录；打包版始终使用 `~/.proma`，忽略该变量。
+
 开发启动器通过 Perl `POSIX::setsid()` 创建独立进程组，再启动 `dev.sh`；PID 文件记录启动器 PID、启动时间和隔离进程组 PGID（它们可能不同）。`status`/`stop` 会对照启动时间；身份不匹配时不信任原 PID，而按记录 PGID 逐 PID 核验命令行后处理。健康的 `stop` 只对隔离组内经白名单确认的仓库开发进程逐 PID 发送信号，不按进程组整体发信号；旧格式 PID 文件仅列出候选并改名保留。进程仍在但 17889 未监听时报告“不健康”、只关闭开发用 8443 Serve，不结束进程。`apps/electron/scripts/dev-kill.ts` 仅报告疑似 Electron dev 进程 PID，从不发送信号。开发预览测试不得退出或结束正式版。
 
 暴露给 tailnet（安装版，只需一次，可随时撤销）：

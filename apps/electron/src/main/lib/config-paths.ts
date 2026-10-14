@@ -11,32 +11,32 @@ import { mkdirSync, existsSync, cpSync, rmSync, readdirSync, readFileSync, copyF
 import { homedir } from 'node:os'
 import { rmSyncWithRetry } from './fs-retry'
 import { readJsonFileSafe, writeJsonFileAtomic } from './safe-file'
+import { resolvePersonalConfigDirName } from './personal-config-dir'
 
 /**
  * 获取配置目录名称
  *
  * 开发模式下返回 '.proma-dev'，正式版本返回 '.proma'。
  *
- * 检测优先级：
- * 1. PROMA_DEV=1 环境变量（显式覆盖）
- * 2. Electron app.isPackaged（未打包 = 开发模式）
- * 3. 兜底 '.proma'
+ * 打包版固定使用 '.proma'。未打包时默认 '.proma-dev'；
+ * 仅接受符合命名约束的 PROMA_DEV_DATA_DIR_NAME 开发数据目录覆盖。
  */
 let _configDirName: string | undefined
 
 export function getConfigDirName(): string {
   if (_configDirName === undefined) {
-    if (process.env.PROMA_DEV === '1') {
-      _configDirName = '.proma-dev'
-    } else {
-      try {
-        const { app } = require('electron')
-        _configDirName = app.isPackaged ? '.proma' : '.proma-dev'
-      } catch {
-        _configDirName = '.proma'
-      }
+    let isPackaged = true
+    try {
+      const { app } = require('electron')
+      isPackaged = app.isPackaged
+    } catch {
+      // CLI/test contexts without Electron may still explicitly mark themselves as dev.
+      isPackaged = process.env.PROMA_DEV !== '1'
     }
-    const mode = _configDirName === '.proma-dev' ? '开发模式' : '正式版本'
+    const resolution = resolvePersonalConfigDirName(isPackaged, process.env.PROMA_DEV_DATA_DIR_NAME)
+    _configDirName = resolution.name
+    if (resolution.warning) console.warn(`[配置] ${resolution.warning}`)
+    const mode = _configDirName === '.proma' ? '正式版本' : '开发模式'
     console.log(`[配置] 配置目录: ~/${_configDirName}/（${mode}）`)
   }
   return _configDirName

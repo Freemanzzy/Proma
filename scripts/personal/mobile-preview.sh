@@ -30,6 +30,14 @@ descendants() {
 }
 
 serve_status() { "$TAILSCALE" serve status 2>&1 || true; }
+dev_data_dir_name() {
+  local name="${PROMA_DEV_DATA_DIR_NAME:-.proma-dev}"
+  if [[ "$name" != ".proma-dev" && ! "$name" =~ ^\.proma-dev-[a-z0-9-]+$ ]]; then
+    echo "警告：PROMA_DEV_DATA_DIR_NAME 无效，回退到 .proma-dev" >&2
+    name=".proma-dev"
+  fi
+  printf '%s\n' "$name"
+}
 process_start_time() { ps -o lstart= -p "$1" 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/[[:space:]][[:space:]]*/ /g' || true; }
 close_dev_serve() { "$TAILSCALE" serve --https=8443 off >/dev/null 2>&1 || true; }
 
@@ -149,7 +157,7 @@ sim_preview() {
   xcrun simctl bootstatus "$udid" -b
   open -a Simulator --args -CurrentDeviceUDID "$udid"
 
-  local config="$HOME/.proma-dev/web-remote/config.json"
+  local config="$HOME/$(dev_data_dir_name)/web-remote/config.json"
   [[ -r "$config" ]] || fail "找不到开发实例 Web Remote 配置：$config"
   origin="$(node -e 'const c=require(process.argv[1]); process.stdout.write(c.allowedOrigin||"")' "$config")"
   [[ "$origin" == https://*:* ]] || fail "allowedOrigin 未含临时 HTTPS 端口（期望 https://host:8443）：$origin"
@@ -219,7 +227,7 @@ NODE
 run_tests() {
   local suites=("$@") suite agent="$(dirname "$0")/mobile-harness.mjs" url config origin chrome_pids failed=0
   if ((${#suites[@]} == 0)); then suites=(iphone:panel-probe iphone:smoke iphone:mobile-polish iphone:layout iphone:dead-socket iphone:heavy-session android:smoke android:attachments android:dead-socket); fi
-  config="$HOME/.proma-dev/web-remote/config.json"
+  config="$HOME/$(dev_data_dir_name)/web-remote/config.json"
   [[ -r "$config" ]] || fail "找不到开发实例配置：$config"
   origin="$(node -e 'const c=require(process.argv[1]); process.stdout.write(c.allowedOrigin||"")' "$config")"
   [[ -n "$origin" ]] || fail "allowedOrigin 为空"

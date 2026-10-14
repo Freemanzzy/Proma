@@ -5,7 +5,12 @@ set -euo pipefail
 
 export PATH="$HOME/.bun/bin:$PATH"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-DEV_DATA="$HOME/.proma-dev"
+DEV_DATA_DIR_NAME="${PROMA_DEV_DATA_DIR_NAME:-.proma-dev}"
+if [[ "$DEV_DATA_DIR_NAME" != ".proma-dev" && ! "$DEV_DATA_DIR_NAME" =~ ^\.proma-dev-[a-z0-9-]+$ ]]; then
+  echo "警告：PROMA_DEV_DATA_DIR_NAME 无效，回退到 .proma-dev" >&2
+  DEV_DATA_DIR_NAME=".proma-dev"
+fi
+DEV_DATA="$HOME/$DEV_DATA_DIR_NAME"
 OFFICIAL_DATA="$HOME/.proma"
 
 if [[ "$DEV_DATA" == "$OFFICIAL_DATA" || "$DEV_DATA" == "$OFFICIAL_DATA"/* ]]; then
