@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { evaluateHarnessExceptionWindow, isHttp429Signal, measureHarnessExceptionWindow, resolveHarnessNetworkProfile, waitForHarnessExceptionQuietPeriod, waitForHarnessWebSocketQuietPeriod } from './mobile-harness.mjs'
+import { evaluateHarnessExceptionWindow, isHttp429Signal, measureHarnessExceptionWindow, resolveExpectedWorkspaceCount, resolveHarnessNetworkProfile, waitForHarnessExceptionQuietPeriod, waitForHarnessWebSocketQuietPeriod } from './mobile-harness.mjs'
 
 test('only the pre-action prefix is baseline; later CSP and other exceptions remain failures', () => {
   const wasmCsp = {
@@ -54,6 +54,12 @@ test('429 detection only accepts HTTP status fields or explicit status/error phr
   expect(isHttp429Signal('429 Too Many Requests')).toBe(true)
   expect(isHttp429Signal('test session id 1381ced4-7e4f-4291-abcd')).toBe(false)
   expect(isHttp429Signal(429)).toBe(false)
+})
+
+test('workspace-count assertion defaults to a single workspace and accepts a fixture count', () => {
+  expect(resolveExpectedWorkspaceCount()).toBe(1)
+  expect(resolveExpectedWorkspaceCount('2')).toBe(2)
+  expect(() => resolveExpectedWorkspaceCount('0')).toThrow('positive integer')
 })
 
 test('network profile defaults to 3/1 Mbps at 50 ms and allows an explicit 0.5 Mbps pressure run', () => {

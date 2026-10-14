@@ -41,6 +41,7 @@
 | 2026-10-10 | `mobile-preview.sh stop` 在启动器 DEV_PID 已不存在时拒绝清理残余的 electronmon/vite/Electron 进程树 | 开发 | 10-10 退出半停取证中由父会话按 PID 手工清理。方案：DEV_PID 不在时按记录的进程组/命令行路径（仓库 node_modules、非 /Applications）核对后清理 |
 | 2026-10-10 | Agent 标题请求对 Claude Opus 5.5 发送 `thinking.type=disabled` 后 HTTP 400，标题退回首行 | Mac | ✅ 已实现：Claude 5.5+ 的标题请求省略 `thinking`；仅网络错误/超时/429/5xx 重试，其他 4xx 直接本地兜底。dev 两个 clipproxyapi / Claude Opus 5.5 会话均记录 HTTP 200 并生成非首行语义标题。错误日志已含状态码/正文，详见 changelog 2026-10-10「Claude 5.5 标题请求参数兼容性修复」 |
 | 2026-10-12 | Claude 5.5 标题偶发为空标题回退；本地兜底标题包含会话引用 ID 与 URL 编码文本 | Mac | ✅ 已实现：Claude 5.5+ 标题请求改用 adaptive + low、`max_tokens=256`；提示词与兜底先清理 session/file 等 UI 引用标记。Opus 5.5 / Sonnet 5.5 各以复现消息和两条普通消息请求一次，6/6 HTTP 200、`end_turn` 且有可读标题；全仓 typecheck、全量测试、`build:main` 通过。详见 changelog 2026-10-12「Claude 5.5 标题请求改用 adaptive low，兜底标题清理引用标记」 |
+| 2026-10-14 | iPhone 空/有历史会话切换“文件/改动”菜单时，省流量按钮可能盖住菜单选项并截获触摸 | Web Remote | ✅ 已修复：移动端 tab menu 的层级提升到高于会话历史条，fixture `iphone:layout` 触屏/CDP 命中审计 11/11 页面通过；旧层级复现截图与修复后截图分别为 `/tmp/proma-mobile-layout-before-20261014.png`、`/tmp/proma-mobile-layout-after-20261014.png`。`mobile-preview.sh fixture` 的 smoke/layout/session-sync/interactions 全部通过。另在 harness 等待面板切换稳定后再执行布局审计，避免动画期间误判。详见 changelog 2026-10-14「完成隔离 fixture 手机回归并修复菜单遮挡」 |
 | 2026-10-10 | 正式版退出半停期间，main.log 每分钟一条 `子任务唤醒 queued … suppressed=59`（同一 parentSessionId） | Mac | 仅观察；退出半停修复后若仍出现再查子任务唤醒在调度器停止后的排队逻辑 |
 | 2026-10-10 | 开着 iOS 模拟器预览时退出 Proma 的清理路径（detached serve-sim 停流 + 结束子进程）尚未实测 | Mac | 下次用到模拟器侧栏时顺带验证：开预览 → Cmd+Q → 日志 `will-quit`、无 `quit-stalled`、`ps` 无 serve-sim 残留 |
 
@@ -49,7 +50,7 @@
 1. **观察项（部分确认）**：双连接自 2026-10-02 dedupe 分支后未再出现，标记已确认；iPhone 首次加载约 4.2 MB `get-sdk-messages` 单次/多次构成仍保留观察。
 2. **开发启动小修复**：✅ 已完成（2026-10-07），只读 dev 进程诊断、独立 session 启动、PID 启动时间核对及异常健康状态处理均已实现；真实 start → stop 与伪造启动时间拒绝验证见 changelog。
 3. **正式版后台服务诊断**：✅ 已实现（2026-10-07），Web Remote/调度器/子进程/退出阶段事件日志与定时自检详见 `docs/personal/web-remote.md`。
-4. **两层测试**：小测试集功能回归（约 20 条会话，含父子任务、自动化、归档、两个工作区和一条合成大历史，脚本生成、每次重置）；真实负载测试按下方“真实负载测试触发条件”执行，只测量不作功能判定。
+4. **两层测试**：✅ 已实现。功能回归默认用 `bash scripts/personal/mobile-preview.sh fixture` 重置并运行合成 fixture（2 个工作区、20 条会话、父子委派、Automation、归档、合成大历史）；真实负载层仍按下方触发条件执行，只测量、不作功能判定。2026-10-14 已跑 smoke/layout/session-sync/interactions 全套通过。
 5. **手机查看子任务**：点子任务时自动打开右侧抽屉并在窄屏正常显示（只改 mobile-patch，约半天）。
 6. **`restoreQueuedMessages()` 合并为一次请求**（目前 Web Remote 已限定范围，约 10 次）。
 7. **发送的可见确认标记**（可选，用户未要求）。

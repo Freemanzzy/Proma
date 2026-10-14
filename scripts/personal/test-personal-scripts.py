@@ -99,6 +99,8 @@ def check_fixture_generator(root: Path):
     assert (target/'agent-sessions'/f"{draft['id']}.jsonl").is_file() and (target/'agent-sessions'/f"{draft['id']}.jsonl").stat().st_size==0
     automations=json.loads((target/'automations.json').read_text())['automations']
     assert len(automations)==2 and all(a['active'] is False for a in automations)
+    settings=json.loads((target/'settings.json').read_text())
+    assert settings=={'onboardingCompleted':True,'onboardingVersion':2,'agentWorkspaceId':'fixture-a'}
     channels=json.loads((target/'channels.json').read_text())['channels']
     assert len(channels)==1 and channels[0]['id']==channel['id'] and channels[0]['apiKey']==encrypted
     assert stat.S_IMODE((target/'channels.json').stat().st_mode)==0o600

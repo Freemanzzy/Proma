@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { getConfigDirName } from '../config-paths'
 import { isPersonalBuild } from '../personal-build'
-import { isWebRemoteActivationAllowed, resolveWebRemoteIconDir } from './web-remote-policy'
+import { isWebRemoteActivationAllowed, isWebRemoteConfigDirAllowed as isWebRemoteConfigDirNameAllowed, resolveWebRemoteIconDir } from './web-remote-policy'
 export { isWebRemoteActivationAllowed } from './web-remote-policy'
 import { getEffectiveProxyUrl } from '../proxy-settings-service'
 import { readWebRemoteConfig, getWebRemoteConfigPath, getWebRemoteDataDir, WebRemoteAuth, type WebRemoteConfig } from './web-remote-auth'
@@ -26,7 +26,7 @@ export function isWebRemoteEnabled(config: WebRemoteConfig): boolean {
 
 // prepareWebRemoteFullUi lives in full-ui/prepare.ts to keep service tests Electron-free.
 export function isWebRemoteConfigDirAllowed(configDirName: string, allowProd = process.env.PROMA_WEB_REMOTE_ALLOW_PROD === '1'): boolean {
-  return configDirName === '.proma-dev' || allowProd
+  return isWebRemoteConfigDirNameAllowed(configDirName, allowProd)
 }
 
 export function isWebRemoteRuntimeAllowed(): boolean {

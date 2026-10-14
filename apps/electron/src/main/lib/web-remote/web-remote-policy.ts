@@ -10,12 +10,18 @@ export function resolveWebRemoteIconDir(input: { packaged: boolean; resourcesPat
   return input.packaged ? join(input.resourcesPath, 'web-remote') : resolve(input.moduleDir, '../resources/web-remote')
 }
 
+export function isWebRemoteConfigDirAllowed(configDirName: string, allowProd = false): boolean {
+  return configDirName === '.proma-dev'
+    || /^\.proma-dev-[a-z0-9-]+$/.test(configDirName)
+    || allowProd
+}
+
 export function isDesktopAdminAllowed(input: { personalPackaged: boolean; configDirName: string; packaged: boolean; url?: string }): boolean {
   const url = input.url
   const desktopUrl = !!url && (url.startsWith('file://') || (!input.packaged && (() => {
     try { return new URL(url).origin === 'http://127.0.0.1:5173' } catch { return false }
   })()))
-  return desktopUrl && (input.personalPackaged || input.configDirName === '.proma-dev')
+  return desktopUrl && (input.personalPackaged || (!input.packaged && isWebRemoteConfigDirAllowed(input.configDirName)))
 }
 
 export function isWebRemoteActivationAllowed(input: {
@@ -28,7 +34,7 @@ export function isWebRemoteActivationAllowed(input: {
 }): boolean {
   if (!input.enabled) return false
   if (input.packaged) return input.personalBuild
-  return input.configDirName === '.proma-dev' || input.allowProd
+  return isWebRemoteConfigDirAllowed(input.configDirName, input.allowProd)
     ? input.envEnabled
     : false
 }

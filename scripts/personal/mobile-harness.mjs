@@ -110,6 +110,12 @@ export function isHttp429Signal(value) {
 }
 
 /** Network profile is parameterized in decimal bits/s; default matches the current 3 Mbps relay. */
+export function resolveExpectedWorkspaceCount(value = 1) {
+  const count = Number(value)
+  if (!Number.isInteger(count) || count < 1) throw new Error('expected workspace count must be a positive integer')
+  return count
+}
+
 export function resolveHarnessNetworkProfile(options = {}) {
   const downloadMbps = Number(options.downloadMbps ?? 3)
   const uploadMbps = Number(options.uploadMbps ?? 1)
@@ -132,13 +138,14 @@ export function resolveHarnessNetworkProfile(options = {}) {
 }
 
 function parseArgs(argv) {
-  const result = { url: process.env.PROMA_WEB_REMOTE_URL ?? '', suite: 'smoke', session: process.env.PROMA_WEB_REMOTE_SESSION ?? '独立站/test', width: 412, height: 915, deviceScaleFactor: 3, userAgent: 'android', outputDir: DEFAULT_OUTPUT_DIR, chromePath: process.env.CHROME_PATH ?? '', pairScript: join(REPO_ROOT, 'scripts/personal/web-remote.sh'), downloadMbps: Number(process.env.PROMA_WEB_REMOTE_DOWNLOAD_MBPS ?? 3), uploadMbps: Number(process.env.PROMA_WEB_REMOTE_UPLOAD_MBPS ?? 1), latencyMs: Number(process.env.PROMA_WEB_REMOTE_LATENCY_MS ?? 50) }
+  const result = { url: process.env.PROMA_WEB_REMOTE_URL ?? '', suite: 'smoke', session: process.env.PROMA_WEB_REMOTE_SESSION ?? '独立站/test', expectedWorkspaceCount: resolveExpectedWorkspaceCount(process.env.PROMA_WEB_REMOTE_EXPECTED_WORKSPACE_COUNT ?? 1), width: 412, height: 915, deviceScaleFactor: 3, userAgent: 'android', outputDir: DEFAULT_OUTPUT_DIR, chromePath: process.env.CHROME_PATH ?? '', pairScript: join(REPO_ROOT, 'scripts/personal/web-remote.sh'), downloadMbps: Number(process.env.PROMA_WEB_REMOTE_DOWNLOAD_MBPS ?? 3), uploadMbps: Number(process.env.PROMA_WEB_REMOTE_UPLOAD_MBPS ?? 1), latencyMs: Number(process.env.PROMA_WEB_REMOTE_LATENCY_MS ?? 50) }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     const value = () => argv[++i]
     if (arg === '--url') result.url = value()
     else if (arg === '--suite') result.suite = value()
     else if (arg === '--session') result.session = value()
+    else if (arg === '--expected-workspace-count') result.expectedWorkspaceCount = resolveExpectedWorkspaceCount(value())
     else if (arg === '--width') result.width = Number(value())
     else if (arg === '--height') result.height = Number(value())
     else if (arg === '--device-scale-factor') result.deviceScaleFactor = Number(value())
@@ -151,7 +158,7 @@ function parseArgs(argv) {
     else if (arg === '--chrome-path') result.chromePath = value()
     else if (arg === '--pair-script') result.pairScript = resolve(value())
     else if (arg === '--help' || arg === '-h') {
-      console.log('用法: mobile-harness.mjs --url <https://host> [--suite smoke] [--session <session>] [--download-mbps 3] [--upload-mbps 1] [--latency-ms 50] [--output-dir /tmp/out]')
+      console.log('用法: mobile-harness.mjs --url <https://host> [--suite smoke] [--session <session>] [--expected-workspace-count 1] [--download-mbps 3] [--upload-mbps 1] [--latency-ms 50] [--output-dir /tmp/out]')
       process.exit(0)
     } else throw new Error(`未知参数: ${arg}`)
   }
@@ -482,7 +489,12 @@ async function createHarness(options) {
     if (path === '/app/' || path.startsWith('/app/')) {
       // readyState is reached before the heavy renderer has mounted React. Wait for actual
       // sidebar/mode controls and the authorized session index, not an arbitrary 2-second sleep.
-      await waitUntil(client, `Boolean(document.querySelector('[data-web-remote-sidebar="left"]') && document.querySelector('.mode-btn') && window.electronAPI?.listAgentSessions)`, 45_000)
+      try {
+        await waitUntil(client, `Boolean(document.querySelector('[data-web-remote-sidebar="left"]') && document.querySelector('.mode-btn') && window.electronAPI?.listAgentSessions)`, 45_000)
+      } catch (error) {
+        const pageDiagnostic = await client.evaluate(`(() => ({url:location.href,title:document.title,bodyText:(document.body?.innerText||'').slice(0,800),electronApiType:typeof window.electronAPI,scriptCount:document.scripts.length,scriptSources:[...document.scripts].map(script=>script.src).filter(Boolean)}))()`).catch(() => null)
+        throw new Error(`${error instanceof Error ? error.message : String(error)}; page=${JSON.stringify(pageDiagnostic)}`)
+      }
       await waitUntil(client, `window.electronAPI.listAgentSessions().then(items=>Array.isArray(items)&&items.length>0)`, 30_000)
       await delay(300)
     } else {
@@ -1144,7 +1156,7 @@ async function runLayout(harness, options, result) {
   }
   result.layout = { pages: [] }
   const toggle = async () => { const p=await findElement(harness.client,'文件','[data-web-remote-panel-toggle]'); await touchAt(harness.client,p.x,p.y); await waitUntil(harness.client,`document.body.dataset.webRemoteRightOpen==='true'`) }
-  await toggle(); await checkPage('files')
+  await toggle(); await delay(800); await checkPage('files')
   // Proxy the existing hidden Add-tab actions; these callbacks remain the state owner.
   const openRightTab = async (label) => {
     const opened = await harness.client.evaluate(`(() => {const b=document.querySelector('button[aria-label="添加右侧工作区标签"]');if(!b)return false;b.click();return true})()`)
@@ -1467,7 +1479,7 @@ async function runSessionSync(harness, options, result) {
   const exceptionWindow = evaluateHarnessExceptionWindow(harness.exceptions, exceptionsBeforeSessionSync)
   result.sessionSync = { ...steps, network: { latencyMs: networkProfile.latencyMs, downloadBitsPerSecond: networkProfile.downloadBitsPerSecond, uploadBitsPerSecond: networkProfile.uploadBitsPerSecond }, exceptions: exceptionWindow.newActionExceptions, newActionExceptions: exceptionWindow.newActionExceptions, newActionExceptionCategories: exceptionWindow.actionCategories, exceptionsBeforeSessionSync: exceptionWindow.baselineCount }
   steps.listCallsDuringSuite = (await harness.client.evaluate("fetch('/api/dev/metrics',{credentials:'include'}).then(r=>r.ok?r.json():null)"))?.ipc?.devices ? 'see-metrics' : 'n/a'
-  const failed = !steps.draftHiddenBeforePromotion || !steps.promotedToVisible || steps.renameVisibleMs === null || steps.liveRenameVisibleMs === null || steps.liveCreateVisibleMs === null || steps.liveDeleteGoneMs === null || steps.archiveRemovedMs === null || steps.restoreVisibleMs === null || !steps.afterReconnectRenameVisible || !steps.afterReconnectCreateVisible || (external?.id && !steps.afterReconnectDeleteGone) || !steps.archivedRemovedFromActiveList || !steps.entryBindingsReadable || steps.visibleWorkspaceCount !== 1 || !steps.unauthorizedWorkspaceCreateDenied || !exceptionWindow.passed
+  const failed = !steps.draftHiddenBeforePromotion || !steps.promotedToVisible || steps.renameVisibleMs === null || steps.liveRenameVisibleMs === null || steps.liveCreateVisibleMs === null || steps.liveDeleteGoneMs === null || steps.archiveRemovedMs === null || steps.restoreVisibleMs === null || !steps.afterReconnectRenameVisible || !steps.afterReconnectCreateVisible || (external?.id && !steps.afterReconnectDeleteGone) || !steps.archivedRemovedFromActiveList || !steps.entryBindingsReadable || steps.visibleWorkspaceCount !== options.expectedWorkspaceCount || !steps.unauthorizedWorkspaceCreateDenied || !exceptionWindow.passed
   if (failed) throw new Error(`会话列表同步验收失败：${JSON.stringify(result.sessionSync)}`)
 }
 
@@ -1824,7 +1836,7 @@ async function runSmoke(harness, options, result) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2))
-  const result = { startedAt: new Date().toISOString(), options: { url: options.url, suite: options.suite, session: options.session, width: options.width, height: options.height, deviceScaleFactor: options.deviceScaleFactor, userAgent: options.userAgent, outputDir: options.outputDir, network: options.networkProfile }, steps: [], screenshots: [], consoleErrors: [], exceptions: [], pairedDeviceId: null, revoked: false, chromeExited: false, profileRemoved: false }
+  const result = { startedAt: new Date().toISOString(), options: { url: options.url, suite: options.suite, session: options.session, expectedWorkspaceCount: options.expectedWorkspaceCount, width: options.width, height: options.height, deviceScaleFactor: options.deviceScaleFactor, userAgent: options.userAgent, outputDir: options.outputDir, network: options.networkProfile }, steps: [], screenshots: [], consoleErrors: [], exceptions: [], pairedDeviceId: null, revoked: false, chromeExited: false, profileRemoved: false }
   let harness
   try {
     harness = await createHarness(options)

@@ -1622,3 +1622,13 @@
 - 定位到 `apps/electron/src/main/lib/web-remote/web-remote-service.ts` 的 `isWebRemoteConfigDirAllowed()` 只允许 `.proma-dev`，或设置 `PROMA_WEB_REMOTE_ALLOW_PROD=1`；它拒绝 2.1 新增的合法 `.proma-dev-*` 隔离目录。未设置 `ALLOW_PROD`，因为这会扩大 Web Remote 安全边界；等待用户确认是否允许门禁兼容受校验的开发目录名，或指定其他安全方案。
 - 启动超时后，常规 `stop` 因无 17889 监听而按保护逻辑未发信号。随后仅对记录启动器后代中命令白名单匹配、PGID 相符且不含 `/Applications/` 的各 PID 单独核验并发送 TERM；确认进程组无残留，17889/5173 无监听、8443 Serve 已关闭，原有 17888 路由保留。正式版 PID 23663 仍运行。
 - 使用 `--allow-draft-cleanup-dir ~/.proma-dev/backups --since 1791954684` 比较启动前后只读数据，结果 `SNAPSHOT MATCH`；未修改 `~/.proma-dev`。受阻时未运行全仓 typecheck/测试，步骤 2.3 与收尾验收未完成。
+
+## 2026-10-14: 完成隔离 fixture 手机回归并修复菜单遮挡
+
+- Web Remote 开发目录门禁现在只对未打包实例开放默认 `.proma-dev` 与符合 `^\.proma-dev-[a-z0-9-]+$` 的隔离目录，仍要求 `PROMA_WEB_REMOTE=1`；非个人版打包构建即使配置 `.proma-dev-fixture` 也拒绝。服务端、管理 IPC 与 full-ui preload 共用同一门禁。新增打包 fixture 目录拒绝断言。
+- `iphone:layout` 的 412px 触屏/CDP 命中审计复现省流量历史按钮层级高于“文件/改动”菜单的问题：菜单按钮命中错落到历史条，多个导航/内容控件也被遮挡。将移动菜单层级提至 `z-index:2147483001`；harness 在打开文件面板后等待 800ms 动画稳定再审计。修复前后截图：`/tmp/proma-mobile-layout-before-20261014.png`、`/tmp/proma-mobile-layout-after-20261014.png`。真实 `~/.proma-dev` 的首次 layout 通过；隔离 fixture 修复后 `iphone:layout` 11/11 页面通过。
+- Bun 的 Electron package stub 不提供具名 `app` 导出，导致 `web-remote-server.test.ts` 在 `beforeAll` 动态导入失败。测试只增加局部 `mock.module('electron', () => ({ app: { isPackaged: false } }))`，未改生产服务；目标文件 23 pass / 0 fail。
+- `bash scripts/personal/mobile-preview.sh fixture` 完整通过：smoke 7/7 steps；layout 11/11；session-sync 重命名/创建/归档/恢复/删除与重连验证通过；interactions 通过。fixture 20 个合成会话、2 个工作区、2 个停用 Automation、大历史 JSONL 3,261,873 B，保留一条 clipproxyapi 加密 API Key；旧目录改名保留。
+- `python3 scripts/personal/test-personal-scripts.py` 通过，包含 stop PID 安全清理伪进程与 fixture 生成器演练。`~/.proma-dev` 前后健康快照 `SNAPSHOT MATCH`（829 条会话；既有 `missing:automations.json` 警告保持不变）。
+- 收尾：全仓 typecheck 的 6 个 workspace 全部 Exited 0；全量 `bun test` **760 pass / 0 fail，1,950 expect，118 files**；`build:main`、`build:renderer`、`build:web-preload` 通过。renderer 构建有现存的大 chunk 提示，无构建失败。
+- 已在 backlog 标记“两层测试”实现，并在 `web-remote.md` 补充 fixture 默认流程。全量回归后 dev 预览已按要求清理；供体验的最终 `.proma-dev-fixture` dev 实例将在提交后启动并保持 8443。

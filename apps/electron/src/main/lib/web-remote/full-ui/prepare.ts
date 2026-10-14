@@ -1,10 +1,11 @@
 import { getConfigDirName } from '../../config-paths'
 import { isPersonalBuild } from '../../personal-build'
 import { readWebRemoteConfig, type WebRemoteConfig } from '../web-remote-auth'
+import { isWebRemoteConfigDirAllowed } from '../web-remote-policy'
 import { getWebRemoteIpcBridge, installWebRemoteIpcCapture, type IpcMainCaptureTarget, type WebRemoteIpcBridge, type WebRemoteScopeResolvers } from './web-remote-ipc'
 
 function isAllowedRuntime(): boolean {
-  return getConfigDirName() === '.proma-dev'
+  return isWebRemoteConfigDirAllowed(getConfigDirName())
 }
 
 export function prepareWebRemoteFullUi(

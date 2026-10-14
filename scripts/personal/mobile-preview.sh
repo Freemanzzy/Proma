@@ -237,7 +237,7 @@ run_tests() {
     [[ "$ua" != "$suite" ]] || { name="$suite"; ua=iphone; }
     local test_log="/tmp/proma-mobile-preview-${ua}-${name}.log"
     echo "=== ${ua} / ${name} ==="
-    if ! (cd "$ROOT" && perl -e 'alarm 600; exec @ARGV' env -u http_proxy -u https_proxy -u all_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u HTTP_ALL_PROXY -u HTTPS_ALL_PROXY bun "$agent" --url "$origin" --suite "$name" --user-agent "$ua") >"$test_log" 2>&1; then
+    if ! (cd "$ROOT" && perl -e 'alarm 600; exec @ARGV' env -u http_proxy -u https_proxy -u all_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u HTTP_ALL_PROXY -u HTTPS_ALL_PROXY bun "$agent" --url "$origin" --suite "$name" --user-agent "$ua" --expected-workspace-count "${PROMA_WEB_REMOTE_EXPECTED_WORKSPACE_COUNT:-1}") >"$test_log" 2>&1; then
       echo "FAIL ${ua}/${name}（日志：${test_log}）"
       tail -n 16 "$test_log" || true
       failed=1
@@ -247,7 +247,10 @@ run_tests() {
       if [[ -z "$result_json" || ! -r "$result_json" ]]; then
         echo "FAIL ${ua}/${name}（未找到 harness 结果 JSON；日志：${test_log}）" >&2
         failed=1
-      elif ! node - "$result_json" "$ua" "$name" <<'NODE'
+      else
+        echo "结果 JSON：$result_json"
+      fi
+      if [[ -n "$result_json" && -r "$result_json" ]] && ! node - "$result_json" "$ua" "$name" <<'NODE'
 const fs = require('node:fs')
 const [path, ua, suite] = process.argv.slice(2)
 const result = JSON.parse(fs.readFileSync(path, 'utf8'))
@@ -301,6 +304,8 @@ for (const step of skipped) console.log(`SKIP ${step.name}: ${step.skipped}`)
 NODE
       then
         failed=1
+      elif [[ -z "$result_json" || ! -r "$result_json" ]]; then
+        failed=1
       fi
     fi
   done
@@ -313,6 +318,30 @@ NODE
   fi
   return "$failed"
 }
+
+fixture_preview() (
+  [[ ! -f "$PID_FILE" ]] || fail "发现 PID 记录 ${PID_FILE}；先运行 status/stop，避免重置或重复启动"
+  for port in 17889 5173; do
+    local pid
+    pid="$(port_pid "$port")"
+    [[ -z "$pid" ]] || fail "端口 $port 已被 PID $pid 占用；拒绝重置 fixture"
+  done
+  export PROMA_DEV_DATA_DIR_NAME=.proma-dev-fixture
+  export PROMA_WEB_REMOTE_EXPECTED_WORKSPACE_COUNT=2
+  python3 "$ROOT/scripts/personal/make-fixture-data.py" "$HOME/.proma-dev-fixture"
+  start_preview
+
+  local test_status=0 stop_status=0
+  if run_tests iphone:smoke iphone:layout iphone:session-sync iphone:interactions; then
+    echo "fixture 回归套件执行完毕。"
+  else
+    test_status=$?
+    echo "fixture 回归存在失败套件；保留各套件日志与 JSON 供检查。" >&2
+  fi
+  if stop_preview; then echo "fixture 回归后的开发实例已停止。"
+  else stop_status=$?; fi
+  if ((test_status != 0 || stop_status != 0)); then return 1; fi
+)
 
 stop_preview() {
   local DEV_PID="" DEV_PGID="" LOG_FILE="" PID_STARTED_AT="" pid current_start command group
@@ -418,7 +447,8 @@ case "$CMD" in
   start) start_preview ;;
   sim) sim_preview "$@" ;;
   test) run_tests "$@" ;;
+  fixture) fixture_preview ;;
   stop) stop_preview ;;
   status) show_status ;;
-  *) fail "用法：$0 {start|sim [--device <name|udid>]|test [suites...]|stop|status}" ;;
+  *) fail "用法：$0 {start|sim [--device <name|udid>]|test [suites...]|fixture|stop|status}" ;;
 esac

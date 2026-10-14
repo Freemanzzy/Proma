@@ -233,7 +233,8 @@ def build_dataset(root: Path, sources: dict, secret: dict) -> tuple[int, int]:
                          'name': 'Fixture：停用的每周任务', 'scheduleType': 'weekly',
                          'dayOfWeek': 1, 'workspaceId': 'fixture-b'}
     secure_json(root / 'automations.json', {'version': 4, 'automations': [inactive_automation, paused_automation]})
-    secure_json(root / 'settings.json', {})
+    # Skip first-run onboarding so the fixture opens the product surface tested by mobile-harness.
+    secure_json(root / 'settings.json', {'onboardingCompleted': True, 'onboardingVersion': 2, 'agentWorkspaceId': 'fixture-a'})
 
     source_channels = sources
     fixture_channels = {'version': source_channels.get('version', 1), 'channels': [channel]}
