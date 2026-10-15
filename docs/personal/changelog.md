@@ -1660,3 +1660,12 @@
 - dev 验证：`mobile-preview.sh start` 达到 Web Remote 17889 与 full-ui 分级覆盖率 100%；`web-remote-start` 与 `scheduler-start` 日志按此顺序在同一 10 ms 观察批次被捕获，时间记录均为 `2026-10-14T15:59:27.044Z`，满足 1 秒要求。`config-dir` 记录 `.proma-dev`；启动前后 `health-snapshot.py --compare` 为 `SNAPSHOT MATCH`，草稿清理 `removed=0`，会话数 829、渠道 7 不变。开发实例随后使用 `mobile-preview.sh stop` 正常清理，保留既有 443→17888 路由。dev 快照原本就报告缺少 `automations.json`，前后相同；启动器以空任务列表工作，未创建该文件。
 - 文档：`CLAUDE.md` 安装验收清单增加 fresh 启动标记、正式配置目录事件与 scheduler/Web Remote 时间关系；backlog 标记本事项已实现。
 - 收尾验证：全仓 `bun run typecheck` 的 6 个 workspace 全部 Exited 0；全量 `bun test` **761 pass / 0 fail，1,954 expect，119 files**；`apps/electron` `build:main` 通过；个人脚本测试通过。版本保持 `0.19.58`，未运行真实安装、未触碰正式应用或 `~/.proma`、未打包、未推送。
+
+## 2026-10-15: 修复 DeepSeek 携带 REA 工具时的悬空 schema 引用
+
+- 用户报错：DeepSeek 返回 HTTP 400，`mcp__rea__annotate_native_function` 的 `/$defs/__schema2` 不存在。真实握手获取 REA 6.4.0 的 170 个工具，确认原始 schema 的 `$defs` 完整，且 `__schema2` 继续引用 `__schema3`；Proma MCP 桥接 `Type.Unsafe` 未删字段。根因位于 Pi AI 0.87.1 `dist/api/anthropic-messages.js` 的 `convertTools()`：非 strict 分支只复制 `type`、`properties`、`required`，丢弃顶层 `$defs`，导致属性中的 `$ref` 悬空。这不是模型名称、认证或 REA 服务握手故障。
+- 在已有 `patches/@earendil-works%2Fpi-ai@0.87.1.patch` 追加最小补丁：非 strict 分支也保留完整 `parameters`，继续补齐既有 `type/properties/required` 默认值。strict 转换与 require/prefer 规则不变，原有重试补丁不变；没有展开递归引用、删除约束或停用 MCP。该修复同时保护使用相同 Anthropic 请求转换路径的渠道，不限定 DeepSeek 模型名。
+- 新增 `pi-anthropic-tool-schema.test.ts`，直接调用真实 Pi provider 和 Anthropic SDK HTTP 序列化，fetch 由本地 SSE fixture 替代，绝不访问模型供应商。8 个用例覆盖 REA 多级 `$ref`、顶层组合与对象限制、Draft-07 `definitions` 和转义 Pointer、递归引用、普通空参数工具、strict 正常转换、prefer 回退及 require 拒绝。修复前 **3 pass / 5 fail**；修复后 **8 pass / 0 fail**。
+- 现场 REA 全量验证：170 个实际工具一并经过相同 provider 的本地 HTTP fixture，**170/170 schema 完整保留，1,571 处本地引用全部可解析，悬空引用 0**。未调用 REA 分析工具或真实付费模型；没有读取渠道凭据或更改 MCP/模型配置。
+- 收尾：`bun install --offline --frozen-lockfile --ignore-scripts` 可重放补丁；`node --check` 通过；全仓 `bun run typecheck` 6 个 workspace 全部退出 0；全量 `bun test` **769 pass / 0 fail / 0 error，1,988 expect，120 files**；完整 `bun run electron:build` 通过（main/agent-runtime/terminal-runtime/preload/renderer/web-preload/CLI/native helpers/resources）。renderer 保留既有大 chunk 提示。独立 worktree 初次因跳过安装脚本缺少 Electron `path.txt` 导致规划数据库测试失败；复用相同 43.2.0 版本的本机 Electron 二进制后全量通过，未修改测试来绕过错误。
+- 同步更新本 changelog 与 `docs/personal/backlog.md` 的未发布状态。维护规则未变化，无需更新 maintenance；这是项目依赖转换缺陷，证据留在项目文档，不新增协作偏好记忆。依赖版本、锁文件、应用版本均未变化（仍为 `0.19.58`），未打包、安装、退出正式应用、推送或修改正式数据。正式安装版仍为 `e759bc1c`；需后续打包并交由 Claude Code 安装后，再做真实 DeepSeek 请求验收，不能将本地 schema 回归等同于服务端验收。
