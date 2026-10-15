@@ -1,3 +1,25 @@
+diff --git a/dist/api/anthropic-messages.js b/dist/api/anthropic-messages.js
+index 5dd85f19db51b73dcd0c5c4cd8c28ad99e09ee6f..f5007a8965ff51d87e5a43fa3df151adbf6741a2 100644
+--- a/dist/api/anthropic-messages.js
++++ b/dist/api/anthropic-messages.js
+@@ -1162,12 +1162,11 @@ function convertTools(tools, isOAuthToken, supportsEagerToolInputStreaming, supp
+             properties: schema.properties ?? {},
+             required: schema.required ?? [],
+         };
+-        const inputSchema = strict === true
+-            ? {
+-                ...parameters,
+-                ...legacyInputSchema,
+-            }
+-            : legacyInputSchema;
++        // 非 strict 工具同样保留 $defs/definitions 与顶层约束，避免产生悬空 $ref。
++        const inputSchema = {
++            ...parameters,
++            ...legacyInputSchema,
++        };
+         return {
+             name: isOAuthToken ? toClaudeCodeName(tool.name) : tool.name,
+             description: tool.description,
 diff --git a/dist/utils/retry.js b/dist/utils/retry.js
 --- a/dist/utils/retry.js
 +++ b/dist/utils/retry.js
