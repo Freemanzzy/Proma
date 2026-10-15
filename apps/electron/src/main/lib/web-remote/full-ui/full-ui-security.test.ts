@@ -164,6 +164,7 @@ describe('Web Remote full-ui security policy', () => {
     const ws = client(bridge)
     expect((await invoke(ws, 'not-registered')).error.denied).toBe(true)
     expect((await invoke(ws, 'channel:decrypt-key', ['x'])).error.denied).toBe(true)
+    expect((await invoke(ws, 'chat:read-attachment', ['/tmp/private.png'])).error.denied).toBe(true)
     expect((await invoke(ws, 'agent:get-sdk-messages', ['s-2'])).error.denied).toBe(true)
     expect((await invoke(ws, 'agent:get-skills', [{ workspaceId: 'ws-2' }])).error.denied).toBe(true)
   })
@@ -541,7 +542,7 @@ describe('Web Remote full-ui security policy', () => {
   })
   test('显式表覆盖登记表/导出常量，runtime file 通道也已登记', () => {
     const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
-    const runtimeChannels = ['file:exists-batch', 'file:office-to-html', 'file:prepare-pdf-preview', 'file:read-binary-base64', 'file:resolve-and-read', 'file:resolve-html-preview-path', 'file:resolve-markdown-media', 'file:resolve-path', 'file:write-text', 'migration:open-data-folder']
+    const runtimeChannels = ['agent:list-directory', 'file:exists-batch', 'file:office-to-html', 'file:prepare-pdf-preview', 'file:read-binary-base64', 'file:resolve-and-read', 'file:resolve-html-preview-path', 'file:resolve-markdown-media', 'file:resolve-path', 'file:write-text', 'migration:open-data-folder']
     for (const channel of runtimeChannels) bridge.registerInvoke(channel, async () => null)
     expect(bridge.getUnclassifiedRegisteredChannels()).toEqual([])
     expect(Object.keys(WEB_REMOTE_CHANNEL_POLICY).every((channel) => getDeclaredWebRemoteChannels().includes(channel))).toBe(true)
@@ -561,6 +562,20 @@ describe('Web Remote full-ui security policy', () => {
     expect((await invoke(ws, 'file:resolve-and-read', ['/tmp/outside-secret.md'])).error.denied).toBe(true)
     expect((await invoke(ws, 'agent:get-mcp-config', [{ workspaceId: 'ws-1' }])).value).toEqual({ env: { TOKEN: '[REDACTED]' }, headers: { Authorization: '[REDACTED]' }, name: 'demo' })
     expect((await invoke(ws, 'agent:get-mcp-config', ['one'])).ok).toBe(true)
+  })
+
+  test('agent:list-directory 仅允许已授权 workspace/session 内的绝对路径', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'web-remote-directory-root-'))
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, { ...resolvers, getPathRoots: () => [{ path: root }] })
+    let calls = 0
+    bridge.registerInvoke('agent:list-directory', async () => { calls++; return [{ name: 'fixture.txt' }] })
+    const ws = client(bridge)
+    const access = { sessionId: 's-1', unrestricted: true }
+    expect((await invoke(ws, 'agent:list-directory', [root, access])).value).toEqual([{ name: 'fixture.txt' }])
+    expect((await invoke(ws, 'agent:list-directory', ['/tmp/outside', access])).error.denied).toBe(true)
+    expect((await invoke(ws, 'agent:list-directory', ['relative', access])).error.denied).toBe(true)
+    expect((await invoke(ws, 'agent:list-directory', [root, { sessionId: 's-2', unrestricted: true }])).error.denied).toBe(true)
+    expect(calls).toBe(1)
   })
 
   test('planning write 级无需确认，删除仍需确认，denied workspace-window 通道始终拒绝', async () => {

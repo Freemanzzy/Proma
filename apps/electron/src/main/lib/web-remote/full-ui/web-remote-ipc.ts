@@ -242,7 +242,7 @@ function redactMcpConfig(value: unknown, parentKey?: string): unknown {
 }
 
 const FILE_SCOPE_CHANNELS = new Set([
-  'file:exists-batch', 'file:office-to-html', 'file:prepare-pdf-preview', 'file:read-binary-base64',
+  'agent:list-directory', 'file:exists-batch', 'file:office-to-html', 'file:prepare-pdf-preview', 'file:read-binary-base64',
   'file:resolve-and-read', 'file:resolve-html-preview-path', 'file:resolve-markdown-media', 'file:resolve-path', 'file:write-text',
 ])
 
@@ -267,7 +267,10 @@ async function pathScopeAllowed(channel: string, args: unknown[], resolvers: Web
   const targets = fileTargets(channel, args)
   if (targets.length === 0) return false
   for (const rawTarget of targets) {
-    if (!isAbsolute(rawTarget)) continue
+    if (!isAbsolute(rawTarget)) {
+      if (channel === 'agent:list-directory') return false
+      continue
+    }
     let target: string
     try { target = await realpath(rawTarget) } catch {
       try { target = await realpath(dirname(rawTarget)) } catch { return false }
