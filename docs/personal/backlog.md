@@ -6,7 +6,7 @@
 
 - **修复已验证、尚未打包安装（2026-10-15）**：`fix/deepseek-mcp-schema-20261015` 修复 Pi AI 非 strict Anthropic 工具转换丢失 `$defs` / `definitions` 与根级约束的问题，避免 DeepSeek 携带 REA 工具时 HTTP 400。REA 170/170 schema 无损传输、1,571 处本地引用完整；全仓 769 pass / 0 fail，typecheck 与完整 Electron 构建通过。尚未进行真实 DeepSeek 付费请求或安装版验收；详见 changelog 同日记录。
 
-- **已修复、分支待提交/打包（2026-10-15）**：`fix/batch-20261015` 修复手机对话图片附件读取、Web Remote 文件列表授权、PDF.js canvas 预览与 50 MiB 下载入口；Android/iPhone 触屏 CDP 验证 YAML/TXT/PNG/PDF 及 Blob 下载，iPhone UA 环境额外验证 `navigator.share({files})` 回退分支。PDF worker 由 Vite `?worker` 打包，未放宽 CSP；桌面附件仍使用 `readAttachment`。证据及验证范围见 changelog 同日“Web Remote 手机文件预览、下载与 iOS 分享回退”。尚未推送、打包或安装。
+- **已修复并提交（本地，未推送/打包；2026-10-15）**：`fix/batch-20261015` 修复手机对话图片附件读取、Web Remote 文件列表授权、PDF.js canvas 预览与 50 MiB 下载入口；Android/iPhone 触屏 CDP 验证 YAML/TXT/PNG/PDF 及 Blob 下载，iPhone UA 环境额外验证 `navigator.share({files})` 回退分支。PDF worker 由 Vite `?worker` 打包，未放宽 CSP；桌面附件仍使用 `readAttachment`。证据及验证范围见 changelog 同日“Web Remote 手机文件预览、下载与 iOS 分享回退”。
 
 - **已合入 personal、尚未打包安装（2026-10-15）**：`fix/install-followups-20261014`（调度器与自检提前到可能触发钥匙串的步骤之前；`event=config-dir` 入日志；`install-update.sh` 轮询等待启动后新标记——脚本改动下次安装即生效，无需打包）。
 
