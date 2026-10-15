@@ -43,6 +43,7 @@ import { LiveMarkdownEditor, type LiveMarkdownEditorHandle, type LiveMarkdownTex
 import { createLiveMarkdownImageResolver } from '@/components/markdown/live-markdown-media'
 import { getPreviewCandidateBasePaths, isAbsoluteFilePath } from './preview-open-path'
 import { DefaultAppOpenButton } from './DefaultAppOpenButton'
+import { WebRemoteFileDownloadButton } from './WebRemoteFileDownloadButton'
 import { UnsupportedFilePreview } from './UnsupportedFilePreview'
 import { PreviewFindBar } from './PreviewFindBar'
 import { MarkdownToc, MarkdownTocScrollTail } from './MarkdownToc'
@@ -83,6 +84,7 @@ const MD_EXTS = new Set(['.md', '.markdown'])
 const HTML_EXTS = new Set(['.html', '.htm'])
 const PLAIN_TEXT_EDIT_EXTS = new Set(['.txt', '.text', '.log'])
 const PDF_EXTS = new Set(['.pdf'])
+const LazyWebRemotePdfPreview = React.lazy(() => import('./WebRemotePdfPreview').then((module) => ({ default: module.WebRemotePdfPreview })))
 const OFFICE_PREVIEW_EXTS = new Set(['.docx', '.xlsx', '.pptx'])
 const LEGACY_OFFICE_EXTS = new Set(['.doc', '.xls', '.ppt'])
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico'])
@@ -260,6 +262,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   const isPlainTextEditable = previewOnly && PLAIN_TEXT_EDIT_EXTS.has(ext)
   const isEditableText = isMarkdown || isPlainTextEditable
   const isPdf = previewOnly && PDF_EXTS.has(ext)
+  const isWebRemote = (window as Window & { __PROMA_WEB_REMOTE__?: boolean }).__PROMA_WEB_REMOTE__ === true
   // DOCX/XLSX/PPTX 没有可读的文本 diff；无论从文件区还是改动区打开都走 Office 预览。
   const isOfficePreview = OFFICE_PREVIEW_EXTS.has(ext)
   const isLegacyOffice = previewOnly && LEGACY_OFFICE_EXTS.has(ext)
@@ -876,6 +879,13 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
             recordResolvedPreviewPath(resolvedPreview?.resolvedPath)
 
             if (isPdf) {
+              if (isWebRemote) {
+                // Web Remote runs under HTTP(S) CSP and cannot load the desktop proma-file:// iframe.
+                // Its PDF.js canvas viewer reads the authorized file bytes directly instead.
+                setPdfSrc('')
+                setPreviewContentCache(cacheKey, { oldContent: '', newContent: '', pdfSrc: '' })
+                return
+              }
               const result = await window.electronAPI.preparePdfPreview(filePath, fileAccess)
               if (cancelled) return
               const src = result?.tmpHtmlUrl ?? ''
@@ -1011,7 +1021,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     let message: string | null = null
     if (isLegacyOffice) {
       message = `暂不支持 ${ext.toUpperCase().slice(1)} 格式内联预览`
-    } else if (isPdf && !pdfSrc) {
+    } else if (isPdf && !isWebRemote && !pdfSrc) {
       message = 'PDF 文件过大，无法在此预览'
     } else if (isOfficePreview && !officeHtml && !officeHtmlUrl) {
       message = `无法加载 ${ext === '.pptx' ? 'PPTX' : ext === '.docx' ? 'DOCX' : 'Excel'} 预览`
@@ -1022,7 +1032,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
       toastedPreviewFailRef.current = key
       toast.warning(message)
     }
-  }, [previewOnly, isOfficePreview, loading, filePath, ext, isLegacyOffice, isPdf, pdfSrc, officeHtml, officeHtmlUrl, isImage, imageDataUrl])
+  }, [previewOnly, isOfficePreview, loading, filePath, ext, isLegacyOffice, isPdf, isWebRemote, pdfSrc, officeHtml, officeHtmlUrl, isImage, imageDataUrl])
 
   // scrollPosition persistent: module-level Map scoped by session, file path, and resolution context
   // content changes (refreshVersion bump) → delete stored position;
@@ -1816,6 +1826,10 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
           </Tooltip>
         )}
 
+        {isWebRemote && previewOnly && (
+          <WebRemoteFileDownloadButton filePath={filePath} fileAccess={fileAccess} disabled={loading} />
+        )}
+
         {toolbarActions}
       </div>
 
@@ -1871,7 +1885,11 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
                 metadata={previewMetadata}
               />
             ) : isPdf ? (
-              pdfSrc ? (
+              isWebRemote ? (
+                <React.Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-muted-foreground" role="status">正在加载 PDF 预览…</div>}>
+                  <LazyWebRemotePdfPreview filePath={filePath} fileAccess={fileAccess} />
+                </React.Suspense>
+              ) : pdfSrc ? (
                 <div className="relative h-full">
                 <div className="absolute top-2 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 px-2 py-1 rounded-lg bg-background/80 backdrop-filter backdrop-blur-sm border border-border/30 shadow-sm">
                   <button

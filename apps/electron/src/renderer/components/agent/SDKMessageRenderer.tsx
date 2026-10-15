@@ -17,6 +17,7 @@ import { useAtomValue, useSetAtom } from 'jotai'
 import { cn } from '@/lib/utils'
 import { ImageLightbox, type LightboxImage } from '@/components/ui/image-lightbox'
 import { ContentBlock } from './ContentBlock'
+import { readAttachedImageBase64 } from './attached-image-read'
 import { TurnFileChangesSummary, buildTurnFileNameMap } from './TurnFileChangesSummary'
 import { TurnSkillUsageSummary } from './TurnSkillUsageSummary'
 import { ProcessBlockGroup, buildAssistantTurnRenderItems } from './ProcessBlockGroup'
@@ -802,8 +803,8 @@ function AttachedImageThumb({ file, index, sessionId, onOpen, onLoaded }: {
 
     setImageSrc(null)
     setImageLoadFailed(false)
-    window.electronAPI
-      .readBinaryBase64(file.path, { sessionId: sessionId || undefined })
+    const isWebRemote = (window as Window & { __PROMA_WEB_REMOTE__?: boolean }).__PROMA_WEB_REMOTE__ === true
+    readAttachedImageBase64(window.electronAPI, file.path, sessionId, isWebRemote)
       .then((base64) => {
         if (typeof base64 !== 'string' || base64.length === 0) {
           setImageLoadFailed(true)
