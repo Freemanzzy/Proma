@@ -6,6 +6,8 @@
 
 - **修复已验证、尚未打包安装（2026-10-15）**：`fix/deepseek-mcp-schema-20261015` 修复 Pi AI 非 strict Anthropic 工具转换丢失 `$defs` / `definitions` 与根级约束的问题，避免 DeepSeek 携带 REA 工具时 HTTP 400。REA 170/170 schema 无损传输、1,571 处本地引用完整；全仓 769 pass / 0 fail，typecheck 与完整 Electron 构建通过。尚未进行真实 DeepSeek 付费请求或安装版验收；详见 changelog 同日记录。
 
+- **已修复并提交（本地，未推送/打包；2026-10-15）**：`fix/batch-20261015` 修复手机对话图片附件读取、Web Remote 文件列表授权、PDF.js canvas 预览与 50 MiB 下载入口；Android/iPhone 触屏 CDP 验证 YAML/TXT/PNG/PDF 及 Blob 下载，iPhone UA 环境额外验证 `navigator.share({files})` 回退分支。PDF worker 由 Vite `?worker` 打包，未放宽 CSP；桌面附件仍使用 `readAttachment`。证据及验证范围见 changelog 同日“Web Remote 手机文件预览、下载与 iOS 分享回退”。
+
 - **已合入 personal、尚未打包安装（2026-10-15）**：`fix/install-followups-20261014`（调度器与自检提前到可能触发钥匙串的步骤之前；`event=config-dir` 入日志；`install-update.sh` 轮询等待启动后新标记——脚本改动下次安装即生效，无需打包）。
 
 - **已合入 personal（本地，未推送）、尚未打包安装（2026-10-14）**：`fix/title-claude55-adaptive`（Claude 5.5 标题 adaptive low、引用标记清理）+ `fix/batch-20261014`（fixture 回归层与 `mobile-preview.sh fixture`、stop 按进程组安全清理、`PROMA_DEV_DATA_DIR_NAME`、手机抽屉“文件/改动”菜单被省流量胶囊遮挡修复、fixture 沿用 dev 受信设备）。用户 16:32 验证通过；17:57 决定打包。
@@ -47,6 +49,7 @@
 | 2026-10-10 | Agent 标题请求对 Claude Opus 5.5 发送 `thinking.type=disabled` 后 HTTP 400，标题退回首行 | Mac | ✅ 已实现：Claude 5.5+ 的标题请求省略 `thinking`；仅网络错误/超时/429/5xx 重试，其他 4xx 直接本地兜底。dev 两个 clipproxyapi / Claude Opus 5.5 会话均记录 HTTP 200 并生成非首行语义标题。错误日志已含状态码/正文，详见 changelog 2026-10-10「Claude 5.5 标题请求参数兼容性修复」 |
 | 2026-10-12 | Claude 5.5 标题偶发为空标题回退；本地兜底标题包含会话引用 ID 与 URL 编码文本 | Mac | ✅ 已实现：Claude 5.5+ 标题请求改用 adaptive + low、`max_tokens=256`；提示词与兜底先清理 session/file 等 UI 引用标记。Opus 5.5 / Sonnet 5.5 各以复现消息和两条普通消息请求一次，6/6 HTTP 200、`end_turn` 且有可读标题；全仓 typecheck、全量测试、`build:main` 通过。详见 changelog 2026-10-12「Claude 5.5 标题请求改用 adaptive low，兜底标题清理引用标记」 |
 | 2026-10-14 | iPhone 空/有历史会话切换“文件/改动”菜单时，省流量按钮可能盖住菜单选项并截获触摸 | Web Remote | ✅ 已修复：移动端 tab menu 的层级提升到高于会话历史条，fixture `iphone:layout` 触屏/CDP 命中审计 11/11 页面通过；旧层级复现截图与修复后截图分别为 `/tmp/proma-mobile-layout-before-20261014.png`、`/tmp/proma-mobile-layout-after-20261014.png`。`mobile-preview.sh fixture` 的 smoke/layout/session-sync/interactions 全部通过。另在 harness 等待面板切换稳定后再执行布局审计，避免动画期间误判。详见 changelog 2026-10-14「完成隔离 fixture 手机回归并修复菜单遮挡」 |
+| 2026-10-15 | 手机端对话里的图片附件损坏、文件抽屉列表为空，并反馈文件无法打开/下载 | Android、iPhone | ✅ 已修复：图片附件复用 session-scoped `file:read-binary-base64`；文件列表限 workspace 并强制 realpath 根校验；YAML/TXT/PNG/PDF 均能预览，PDF 由 Vite 打包的 PDF.js worker 渲染 canvas；手机下载读取上限 50 MiB，Blob 下载可用时点按下载，iPhone share API 可用且不支持 `download` 时传 File 给分享回退。截图分目录：`/tmp/webremote-file-preview-iphone/`、`/tmp/webremote-file-preview-android/`。全量测试 **776/776**、全仓 typecheck、build:main/renderer/web-preload 通过；桌面 `readAttachment` IPC 保持并有单测。分支尚未推送、打包或安装，详见 changelog 同日对应记录。 |
 | 2026-10-10 | 正式版退出半停期间，main.log 每分钟一条 `子任务唤醒 queued … suppressed=59`（同一 parentSessionId） | Mac | 仅观察；退出半停修复后若仍出现再查子任务唤醒在调度器停止后的排队逻辑 |
 | 2026-10-10 | 开着 iOS 模拟器预览时退出 Proma 的清理路径（detached serve-sim 停流 + 结束子进程）尚未实测 | Mac | 下次用到模拟器侧栏时顺带验证：开预览 → Cmd+Q → 日志 `will-quit`、无 `quit-stalled`、`ps` 无 serve-sim 残留 |
 

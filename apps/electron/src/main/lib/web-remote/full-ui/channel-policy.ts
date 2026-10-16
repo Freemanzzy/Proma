@@ -104,7 +104,7 @@ export const WEB_REMOTE_CHANNEL_POLICY: Readonly<Record<string, WebRemoteChannel
   "agent:list-archived-sessions": { level: "read", scope: "none", rationale: "只读结果或状态事件；列表和设置结果在返回前按允许范围/敏感字段过滤。" },
   "agent:list-attached-directory": { level: "denied", scope: "none", rationale: "已登记但尚未完成人工复核，按最小权限默认拒绝。" },
   "agent:list-browser-tabs": { level: "denied", scope: "none", rationale: "原生窗口、终端、凭据、设置写入或外部副作用，不向手机 renderer 暴露。" },
-  "agent:list-directory": { level: "denied", scope: "none", rationale: "已登记但尚未完成人工复核，按最小权限默认拒绝。" },
+  "agent:list-directory": { level: "workspace", scope: "workspace", rationale: "只读浅层目录清单；Web Remote 仅允许请求位于已授权工作区或会话目录的路径。" },
   "agent:list-sessions": { level: "read", scope: "none", rationale: "只读结果或状态事件；列表和设置结果在返回前按允许范围/敏感字段过滤。" },
   "agent:list-skill-files": { level: "read", scope: "workspace", rationale: "只读结果或状态事件；列表和设置结果在返回前按允许范围/敏感字段过滤。" },
   "agent:list-workspace-auto-memory-files": { level: "workspace", scope: "workspace", rationale: "参数必须能解析出 sessionId 或 workspaceId/slug，并校验其在远程允许范围内。" },

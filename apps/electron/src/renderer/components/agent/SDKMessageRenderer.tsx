@@ -17,6 +17,7 @@ import { useAtomValue, useSetAtom } from 'jotai'
 import { cn } from '@/lib/utils'
 import { ImageLightbox, type LightboxImage } from '@/components/ui/image-lightbox'
 import { ContentBlock } from './ContentBlock'
+import { readAttachedImageBase64 } from './attached-image-read'
 import { TurnFileChangesSummary, buildTurnFileNameMap } from './TurnFileChangesSummary'
 import { TurnSkillUsageSummary } from './TurnSkillUsageSummary'
 import { ProcessBlockGroup, buildAssistantTurnRenderItems } from './ProcessBlockGroup'
@@ -779,8 +780,9 @@ export function isImageFile(filename: string): boolean {
 }
 
 /** 图片附件缩略图，点击可预览大图 */
-function AttachedImageThumb({ file, index, onOpen, onLoaded }: {
+function AttachedImageThumb({ file, index, sessionId, onOpen, onLoaded }: {
   file: AttachedFileRef
+  sessionId: string | null
   /** 该图在同批图片中的索引 */
   index: number
   /** 点击缩略图打开大图预览（第 index 张） */
@@ -789,6 +791,7 @@ function AttachedImageThumb({ file, index, onOpen, onLoaded }: {
   onLoaded: (path: string, src: string) => void
 }): React.ReactElement {
   const [imageSrc, setImageSrc] = React.useState<string | null>(null)
+  const [imageLoadFailed, setImageLoadFailed] = React.useState(false)
 
   React.useEffect(() => {
     const ext = file.filename.split('.').pop()?.toLowerCase() ?? 'png'
@@ -798,22 +801,33 @@ function AttachedImageThumb({ file, index, onOpen, onLoaded }: {
     }
     const mediaType = mimeMap[ext] ?? 'image/png'
 
-    window.electronAPI
-      .readAttachment(file.path)
+    setImageSrc(null)
+    setImageLoadFailed(false)
+    const isWebRemote = (window as Window & { __PROMA_WEB_REMOTE__?: boolean }).__PROMA_WEB_REMOTE__ === true
+    readAttachedImageBase64(window.electronAPI, file.path, sessionId, isWebRemote)
       .then((base64) => {
+        if (typeof base64 !== 'string' || base64.length === 0) {
+          setImageLoadFailed(true)
+          return
+        }
         const src = `data:${mediaType};base64,${base64}`
         setImageSrc(src)
         onLoaded(file.path, src)
       })
-      .catch((err) => console.error('[AttachedImageThumb] 读取附件失败:', err))
-  }, [file.path, file.filename, onLoaded])
+      .catch((err) => {
+        console.error('[AttachedImageThumb] 读取附件失败:', err)
+        setImageLoadFailed(true)
+      })
+  }, [file.path, file.filename, sessionId, onLoaded])
 
   const handleSave = React.useCallback((): void => {
     window.electronAPI.saveImageAs(file.path, file.filename)
   }, [file.path, file.filename])
 
   if (!imageSrc) {
-    return <div className="w-[200px] h-[140px] rounded-lg bg-muted/30 animate-pulse shrink-0" />
+    return imageLoadFailed
+      ? <div className="flex w-[200px] h-[140px] items-center justify-center rounded-lg bg-muted/30 text-xs text-muted-foreground" role="img" aria-label={`${file.filename} 图片无法读取`}>图片无法读取</div>
+      : <div className="w-[200px] h-[140px] rounded-lg bg-muted/30 animate-pulse shrink-0" />
   }
 
   return (
@@ -1030,6 +1044,7 @@ function UserInputMessage({ message, onAgentHistoryQuoteClick }: {
                 key={file.path}
                 file={file}
                 index={index}
+                sessionId={activeSessionId}
                 onOpen={openLightbox}
                 onLoaded={handleImageLoaded}
               />

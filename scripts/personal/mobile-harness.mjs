@@ -1203,6 +1203,90 @@ async function runLayout(harness, options, result) {
   if(!result.layout.passed)throw new Error(`layout 审计失败: ${JSON.stringify(overflowOrMiss.map(page=>({name:page.name,viewport:page.audit?.viewport,panelOverflow:page.audit?.panelOverflow,misses:page.audit?.misses})))}`)
 }
 
+async function runFilePreview(harness, options, result) {
+  const toggle = await findElement(harness.client, '文件', '[data-web-remote-panel-toggle]')
+  await touchAt(harness.client, toggle.x, toggle.y)
+  await waitUntil(harness.client, "document.body.dataset.webRemoteRightOpen==='true'")
+  const files = ['B-test-preview.yaml', 'B-test-preview.txt', 'B-test-preview.png', 'B-test-preview.pdf']
+  result.filePreview = { files: [], screenshots: [], downloads: [] }
+
+  for (const fileName of files) {
+    await waitUntil(harness.client, `([...document.querySelectorAll('.file-tree-row')].some((row)=>{const rect=row.getBoundingClientRect();return (row.innerText||'').includes(${quoteJs(fileName)})&&rect.width>0&&rect.height>0&&rect.right>0&&rect.left<innerWidth&&rect.bottom>0&&rect.top<innerHeight}))`, 8_000)
+    const row = await harness.client.evaluate(`(() => {const node=[...document.querySelectorAll('.file-tree-row')].find((item)=>{const rect=item.getBoundingClientRect();return (item.innerText||'').includes(${quoteJs(fileName)})&&rect.width>0&&rect.height>0&&rect.right>0&&rect.left<innerWidth&&rect.bottom>0&&rect.top<innerHeight});if(!node)return null;const rect=node.getBoundingClientRect();return {x:rect.left+rect.width/2,y:rect.top+rect.height/2,text:(node.innerText||'').trim(),left:rect.left,right:rect.right}})()`)
+    if (!row) throw new Error(`文件列表中没有 ${fileName}`)
+    const touchTarget = await harness.client.evaluate(`(() => {const x=${row.x},y=${row.y},node=document.elementFromPoint(x,y);window.__filePreviewTapAudit={clicks:[],opened:false};document.addEventListener('click',(event)=>window.__filePreviewTapAudit.clicks.push({target:event.target?.tagName,text:(event.target?.innerText||event.target?.textContent||'').trim().slice(0,80)}),true);window.addEventListener('proma-web-remote-open-preview',()=>window.__filePreviewTapAudit.opened=true);return {x,y,target:node?.tagName,text:(node?.innerText||node?.textContent||'').trim().slice(0,80),className:String(node?.className||'')}})()`)
+    await touchAt(harness.client, row.x, row.y)
+    await delay(250)
+    const tapAudit = await harness.client.evaluate('window.__filePreviewTapAudit')
+    try {
+      await waitUntil(harness.client, `Boolean(document.querySelector('button[data-testid="web-remote-file-download"]'))`, 8_000)
+    } catch (error) {
+      const diagnostic = await harness.client.evaluate(`JSON.stringify((() => ({url:location.href,viewport:{innerWidth,innerHeight,devicePixelRatio,visualWidth:visualViewport?.width,visualScale:visualViewport?.scale,scrollWidth:document.documentElement.scrollWidth},body:document.body.innerText.slice(-1600),panel:document.querySelector('[data-web-remote-panel="right"]')?.innerText.slice(-800),rows:[...document.querySelectorAll('.file-tree-row')].slice(0,12).map((n)=>{const r=n.getBoundingClientRect();return {text:(n.innerText||'').trim(),left:r.left,right:r.right,top:r.top,bottom:r.bottom}}),buttons:[...document.querySelectorAll('button')].filter((n)=>{const r=n.getBoundingClientRect();return r.width>0&&r.height>0}).map((n)=>({text:(n.innerText||'').trim(),aria:n.getAttribute('aria-label'),title:n.title,testid:n.dataset.testid})).slice(-24)}))())`)
+      const screenshotPath = await harness.screenshot(`file-preview-${fileName}-open-failed`)
+      result.screenshots.push(screenshotPath)
+      throw new Error(`${error instanceof Error ? error.message : String(error)}; tap=${JSON.stringify({ touchTarget, tapAudit })}; preview diagnostic=${JSON.stringify(diagnostic)}; screenshot=${screenshotPath}`)
+    }
+
+    const initialPreviewScreenshot = await harness.screenshot(`file-preview-${fileName.replace(/\\.[^.]+$/, '')}-open`)
+    result.screenshots.push(initialPreviewScreenshot)
+    result.filePreview.screenshots.push(initialPreviewScreenshot)
+    let previewEvidence
+    if (fileName.endsWith('.pdf')) {
+      try {
+        await waitUntil(harness.client, `Boolean(document.querySelector('[data-testid="web-remote-pdf-preview"] canvas'))`, 20_000)
+      } catch (error) {
+        const diagnostic = await harness.client.evaluate(`(async()=>{const resources=performance.getEntriesByType('resource').filter((item)=>/pdf\\.worker|WebRemotePdf/i.test(item.name)).map((item)=>({name:item.name,duration:item.duration,transferSize:item.transferSize})).slice(-10);const worker=resources.find((item)=>/pdf\\.worker/i.test(item.name));let workerResponse=null;if(worker){try{const response=await fetch(worker.name,{cache:'no-store'});const text=await response.text();workerResponse={status:response.status,type:response.headers.get('content-type'),bytes:text.length,head:text.slice(0,80)}}catch(error){workerResponse={error:String(error)}}}return JSON.stringify({sectionCount:document.querySelectorAll('[data-testid="web-remote-pdf-preview"]').length,body:document.body.innerText.slice(-700),resources,workerResponse,alerts:[...document.querySelectorAll('[role="alert"],[role="status"]')].map((node)=>node.innerText)})})()`)
+        const screenshotPath = await harness.screenshot('file-preview-pdf-load-failed')
+        result.screenshots.push(screenshotPath)
+        result.filePreview.screenshots.push(screenshotPath)
+        throw new Error(`${error instanceof Error ? error.message : String(error)}; pdf diagnostic=${diagnostic}; screenshot=${screenshotPath}`)
+      }
+      previewEvidence = await harness.client.evaluate(`(() => {const canvases=[...document.querySelectorAll('[data-testid="web-remote-pdf-preview"] canvas')];return {kind:'pdf',canvasCount:canvases.length,firstPage:{width:canvases[0]?.width??0,height:canvases[0]?.height??0},downloadButton:!!document.querySelector('button[data-testid="web-remote-file-download"]')}})()`)
+      if (previewEvidence.canvasCount < 1 || previewEvidence.firstPage.width < 1 || previewEvidence.firstPage.height < 1) throw new Error(`PDF 未生成有效画布: ${JSON.stringify(previewEvidence)}`)
+    } else if (fileName.endsWith('.png')) {
+      await waitUntil(harness.client, `([...document.querySelectorAll('img')].some((img)=>img.naturalWidth===32))`, 8_000)
+      previewEvidence = await harness.client.evaluate(`(() => {const img=[...document.querySelectorAll('img')].find((item)=>item.naturalWidth===32);return {kind:'png',naturalWidth:img?.naturalWidth??0,naturalHeight:img?.naturalHeight??0,downloadButton:!!document.querySelector('button[data-testid="web-remote-file-download"]')}})()`)
+      if (previewEvidence.naturalWidth !== 32) throw new Error(`PNG 未正常解码: ${JSON.stringify(previewEvidence)}`)
+    } else {
+      await waitUntil(harness.client, `document.body.innerText.includes(${quoteJs(fileName)}) && Boolean(document.querySelector('button[data-testid="web-remote-file-download"]'))`, 8_000)
+      await delay(350)
+      previewEvidence = await harness.client.evaluate(`({kind:${quoteJs(fileName.endsWith('.yaml') ? 'yaml' : 'txt')},titleVisible:document.body.innerText.includes(${quoteJs(fileName)}),downloadButton:!!document.querySelector('button[data-testid="web-remote-file-download"]'),renderedCanvasCount:document.querySelectorAll('canvas').length,previewTextNodes:document.querySelector('[data-web-remote-panel="right"]')?.querySelectorAll('pre,code,textarea').length??0})`)
+      if (!previewEvidence.titleVisible || !previewEvidence.downloadButton) throw new Error(`${fileName} 未显示预览容器或下载入口: ${JSON.stringify(previewEvidence)}`)
+    }
+    const screenshotPath = await harness.screenshot(`file-preview-${fileName.replace(/\\.[^.]+$/, '')}`)
+    result.screenshots.push(screenshotPath)
+    result.filePreview.screenshots.push(screenshotPath)
+
+    let simulatedShareFallback = false
+    if (options.userAgent === 'iphone' && fileName.endsWith('.pdf')) {
+      await harness.client.evaluate(`(() => {window.__webRemoteShareCall=null;const nativeCreateElement=Document.prototype.createElement;document.createElement=function(name,options){const element=nativeCreateElement.call(this,name,options);if(String(name).toLowerCase()==='a')Object.setPrototypeOf(element,HTMLElement.prototype);return element};Object.defineProperty(navigator,'canShare',{configurable:true,value:(data)=>Array.isArray(data?.files)&&data.files.length===1});Object.defineProperty(navigator,'share',{configurable:true,value:async(data)=>{window.__webRemoteShareCall={title:data.title,fileName:data.files?.[0]?.name??null,type:data.files?.[0]?.type??null};return undefined}});return true})()`)
+      simulatedShareFallback = true
+    }
+    await harness.client.evaluate(`(() => {window.__webRemoteFileDownloadEvidence=null;window.addEventListener('proma-web-remote-file-download',(event)=>{window.__webRemoteFileDownloadEvidence=event.detail},{once:true});return true})()`)
+    const downloadButton = await findElement(harness.client, `下载 ${fileName}`, 'button[data-testid="web-remote-file-download"]')
+    await touchAt(harness.client, downloadButton.x, downloadButton.y)
+    await waitUntil(harness.client, `window.__webRemoteFileDownloadEvidence!==null`, 8_000)
+    const downloadEvidence = await harness.client.evaluate(`(async()=>{if(${simulatedShareFallback}){for(let i=0;i<100&&!window.__webRemoteShareCall;i++)await new Promise(resolve=>setTimeout(resolve,20))}return {...window.__webRemoteFileDownloadEvidence,simulatedShareCall:window.__webRemoteShareCall??null}})()`)
+    if (downloadEvidence.fileName !== fileName || !(downloadEvidence.mode === 'share' || (downloadEvidence.blobUrlCreated && downloadEvidence.downloadAttribute)) || (simulatedShareFallback && (!downloadEvidence.simulatedShareCall || downloadEvidence.simulatedShareCall.fileName !== fileName))) {
+      throw new Error(`下载触发证据不完整: ${JSON.stringify(downloadEvidence)}`)
+    }
+    result.filePreview.files.push({ fileName, preview: previewEvidence })
+    result.filePreview.downloads.push(downloadEvidence)
+    const titleButton = await findElement(harness.client, fileName, 'button')
+    await touchAt(harness.client, titleButton.x, titleButton.y)
+    await delay(250)
+    if (fileName === files[0]) {
+      const switchScreenshot = await harness.screenshot('file-preview-switch-menu')
+      result.screenshots.push(switchScreenshot)
+      result.filePreview.screenshots.push(switchScreenshot)
+    }
+    const filesMenu = await findElement(harness.client, '文件', 'button,[role="menuitem"],[role="button"]')
+    await touchAt(harness.client, filesMenu.x, filesMenu.y)
+    const nextFileName = files[files.indexOf(fileName) + 1]
+    if (nextFileName) await waitUntil(harness.client, `([...document.querySelectorAll('.file-tree-row')].some((row)=>(row.innerText||'').includes(${quoteJs(nextFileName)})))`, 8_000)
+  }
+}
+
 async function runPanelProbe(harness, options, result) {
   const toggle = await findElement(harness.client, '文件', '[data-web-remote-panel-toggle]')
   await touchAt(harness.client, toggle.x, toggle.y)
@@ -1886,6 +1970,7 @@ async function main() {
     else if (options.suite === 'abort') await runAbort(harness, options, result)
     else if (options.suite === 'extra') await runExtra(harness, options, result)
     else if (options.suite === 'attachments') await runAttachments(harness, options, result)
+    else if (options.suite === 'file-preview') await runFilePreview(harness, options, result)
     else if (options.suite === 'preload-recovery') await runPreloadRecovery(harness, options, result)
     else if (options.suite === 'keyboard') {
       if (options.userAgent === 'desktop') throw new Error('keyboard 套件要求 android 或 iphone UA')
