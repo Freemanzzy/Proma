@@ -8,7 +8,8 @@
 
 - **已修复并提交（本地，未推送/打包；2026-10-15）**：`fix/batch-20261015` 修复手机对话图片附件读取、Web Remote 文件列表授权、PDF.js canvas 预览与 50 MiB 下载入口；Android/iPhone 触屏 CDP 验证 YAML/TXT/PNG/PDF 及 Blob 下载，iPhone UA 环境额外验证 `navigator.share({files})` 回退分支。PDF worker 由 Vite `?worker` 打包，未放宽 CSP；桌面附件仍使用 `readAttachment`。证据及验证范围见 changelog 同日“Web Remote 手机文件预览、下载与 iOS 分享回退”。
 
-- **已合入 personal、尚未打包安装（2026-10-15）**：`fix/install-followups-20261014`（调度器与自检提前到可能触发钥匙串的步骤之前；`event=config-dir` 入日志；`install-update.sh` 轮询等待启动后新标记——脚本改动下次安装即生效，无需打包）。
+- **已合入 personal、打包中（2026-10-16）**：`fix/install-followups-20261014`（调度器先于钥匙串步骤启动、`event=config-dir`）+ `fix/deepseek-mcp-schema-20261015`（Anthropic 协议非 strict 工具保留 `$defs`，修 DeepSeek+REA 400；三渠道真实请求验收通过）+ `fix/batch-20261015`（手机端图片附件读取、文件页列表授权、PDF.js 预览、下载/分享按钮；用户 10-16 11:22 验证通过）。
+- 观察：手机 PDF 预览页“省流量”胶囊压住缩放控件，待用户决定是否处理。
 
 - **已合入 personal（本地，未推送）、尚未打包安装（2026-10-14）**：`fix/title-claude55-adaptive`（Claude 5.5 标题 adaptive low、引用标记清理）+ `fix/batch-20261014`（fixture 回归层与 `mobile-preview.sh fixture`、stop 按进程组安全清理、`PROMA_DEV_DATA_DIR_NAME`、手机抽屉“文件/改动”菜单被省流量胶囊遮挡修复、fixture 沿用 dev 受信设备）。用户 16:32 验证通过；17:57 决定打包。
 
