@@ -1688,3 +1688,13 @@
 - **尚未解决**：PDF 仍显示浏览器损坏文件图标。返回值是 `proma-file:` iframe URL；Web Remote CSP 使用 `default-src 'self'`，该 scheme 不能作为页面预览资源。手机预览 toolbar 也没有浏览器下载/分享入口；只看见“系统默认应用打开”“在文件夹中显示”等桌面动作，没有安全触发手机下载。没有放宽 CSP 或 IPC 默认拒绝，也未点击任何系统外部打开动作。两项记入 backlog，不能宣称附件下载问题全部解决。
 - **验证**：`full-ui-security.test.ts` 32 pass / 0 fail；全仓 `bun run typecheck` 6 个 workspace 全部退出 0；`build:main`、`build:renderer`、`build:web-preload` 全部退出 0；全量 `bun test` 在隔离临时 HOME、未继承 fixture 数据目录名后为 **770 pass / 0 fail，1,994 expect，120 files**。首次全量运行继承 `.proma-dev-fixture` 导致 `planning-manager.test.ts` 子进程使用不同迁移目录并报 `calendar_group_id` 缺失（769/1）；单测在自身临时 HOME 下通过，随后用全新的 `/tmp` HOME 重跑全量全部通过。renderer 构建保留已有 large chunk 提示。
 - 所有 dev / harness 操作显式使用并核对 `PROMA_DEV_DATA_DIR_NAME=.proma-dev-fixture`；最终 `mobile-preview.sh status` 显示 17889、5173 正常，Tailscale Serve 的 8443 继续转发至 17889，同时既有 443→17888 路由保持。未触碰 `~/.proma-dev`、`~/.proma` 或 `/Applications/Proma.app`；未打包、安装、推送或关闭 dev。
+
+## 2026-10-16: 安装 7b0e4a07（调度器与钥匙串解耦、DeepSeek+REA、手机附件）
+
+- 由 Claude Code 按 `install-request-2026-10-16.md` 用标准 `install-update.sh` 安装，一次通过，未回滚。`/Applications/Proma.app` = `7b0e4a07`，previous = `e759bc1c`。备份校验通过（35,078 条目，无缺失/多余/不一致）；上一份备份已归档到外置硬盘，归档快照一致。
+- **启动标记轮询首次实装通过**：`wait-startup-marker.py` 在 `main.log`（并检查 `main.log.1`）中找到晚于启动时刻的标记，之后无 `[FATAL]`、`[ERROR]`。
+- **调度器与钥匙串解耦已实证**：`web-remote-start` 后 2 ms 即记录 `scheduler-start enabledTasks=17`，与钥匙串弹窗出现在同一秒；钥匙串弹窗 1 次，持续 34 秒（10-14 安装时调度器等了约 27 分钟）。`event=config-dir name=.proma mode=正式版本` 已记录。
+- **草稿清理**：删除 1 条（`isDraft=true`，无 JSONL、工作目录为空，与安装前预演一致），备份 `draft-cleanup-2026-10-16T03-28-17-127Z.json`（0600）。会话数 1147 → 1146，渠道 7；定时任务启用 17 个，ID 与 `nextRunAt` 未变。
+- 用户确认：DeepSeek 新会话正常回复，无 400；手机端图片附件可显示，“文件”页能列出并预览 YAML/PDF，下载可用。
+- 安装审阅备注：`agent:list-directory` 只读，允许根由请求中的会话/工作区 ID 推出；项目模式工作区的允许范围包含项目根目录，这是设计如此。若以后把允许根扩展到这些根之外，需要同步更新 `full-ui-security.test.ts`。
+
