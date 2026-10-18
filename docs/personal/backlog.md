@@ -4,16 +4,8 @@
 
 ## 待合入分支（已验证、未发布）
 
-- **修复已验证、尚未打包安装（2026-10-15）**：`fix/deepseek-mcp-schema-20261015` 修复 Pi AI 非 strict Anthropic 工具转换丢失 `$defs` / `definitions` 与根级约束的问题，避免 DeepSeek 携带 REA 工具时 HTTP 400。REA 170/170 schema 无损传输、1,571 处本地引用完整；全仓 769 pass / 0 fail，typecheck 与完整 Electron 构建通过。尚未进行真实 DeepSeek 付费请求或安装版验收；详见 changelog 同日记录。
-
-- **已修复并提交（本地，未推送/打包；2026-10-15）**：`fix/batch-20261015` 修复手机对话图片附件读取、Web Remote 文件列表授权、PDF.js canvas 预览与 50 MiB 下载入口；Android/iPhone 触屏 CDP 验证 YAML/TXT/PNG/PDF 及 Blob 下载，iPhone UA 环境额外验证 `navigator.share({files})` 回退分支。PDF worker 由 Vite `?worker` 打包，未放宽 CSP；桌面附件仍使用 `readAttachment`。证据及验证范围见 changelog 同日“Web Remote 手机文件预览、下载与 iOS 分享回退”。
-
-- **已安装（2026-10-16，`7b0e4a07`）**：调度器与钥匙串解耦、DeepSeek+REA 400 修复、手机附件（图片/文件页/PDF/下载）。见 changelog 2026-10-16。
+- 无。最近一次安装 `7b0e4a07`（2026-10-16）已包含此前全部已合入分支（10-14 标题/fixture 批次、10-15 DeepSeek+REA 与手机附件批次）。
 - 观察：手机 PDF 预览页“省流量”胶囊压住缩放控件，待用户决定是否处理。
-
-- **已合入 personal（本地，未推送）、尚未打包安装（2026-10-14）**：`fix/title-claude55-adaptive`（Claude 5.5 标题 adaptive low、引用标记清理）+ `fix/batch-20261014`（fixture 回归层与 `mobile-preview.sh fixture`、stop 按进程组安全清理、`PROMA_DEV_DATA_DIR_NAME`、手机抽屉“文件/改动”菜单被省流量胶囊遮挡修复、fixture 沿用 dev 受信设备）。用户 16:32 验证通过；17:57 决定打包。
-
-- 无（`b3a24028` 已于 2026-10-08 20:31 安装）。
 
 | 分支 | 基于 | 内容 | 验证 | 状态 |
 |---|---|---|---|---|
@@ -34,7 +26,7 @@
 | 2026-10-02 | 回答已结束，手机仍显示“Agent Running 6m31s”，刷新页面后恢复 | OPPO | 正式版计量：连接 e1d195af 流式输出到 12:07:51 后以 `1006` 异常断开，所有连接都没有收到完成事件（各窗口 `scN=0`），12:11:07 页面内自动重连。代码确认 `restoreActiveSnapshots()` 只把主进程“仍在运行”的快照合并进本地状态，**不会清除本地标记为运行中、但已不在快照里的会话**，因此断线期间错过的完成永远不会被纠正。已实现于 2026-10-02：仅 Web Remote 恢复路径将 running/retrying/background-waiting 且不在活跃快照中的会话结束，并逐会话触发一次历史刷新；仍运行的快照状态保留，桌面初始化路径不变。`web-remote-recovery.test.ts` 与 `useGlobalAgentListeners.recovery.test.ts` 覆盖恢复筛选、结束态及一次刷新。✅ 已解决（4a2b6dac / 2026-10-02） |
 | 2026-10-02 | 手机端对话内本地图片超过 8 MiB 时只显示“图片无法读取”，希望可以点击加载原图 | 手机 | 现状（fix/mobile-batch-20261002）：shim 以 8 MiB 上限调用 `file:read-binary-base64`，超限返回 null。已实现：超限显示“图片较大（>8 MB），点按加载原图”，点按后以 50 MiB 上限读取并缓存；蜂窝/省流量模式同样需点按。✅ 已解决（2026-10-07） |
 | 2026-10-02 | 观察：正式版 13:28:45 `[WARN] 消息截断后仍超限 (1471K / 3046K chars)` | Mac | 上游 `agent-session-manager.ts` `serializeSDKMessageForStorage` 对超大 SDK 消息截断后仍 >上限，消息照常写入。可能来自 Read 图片/大工具输出的 base64。手机历史已有瘦身与按需加载，暂不处理；若相关会话在手机打开变慢再查 |
-| 2026-10-05 | 手机点附件按钮，iPhone 直接打开相机，无法选文件/相册；安卓会弹出选择（相机/文件/相册） | iPhone | `web-electron-shim.ts` `openBrowserFileDialog()` 给 `<input type=file>` 设了 `capture="environment"`，iOS Safari 遵守该属性直接调起后置相机，Android Chrome 仍给选择器。方案：去掉 `capture`（两端都出现系统选择菜单，含“拍照”）；如需一键拍照另加入口。1 行 + 单测 |
+| 2026-10-05 | 手机点附件按钮，iPhone 直接打开相机，无法选文件/相册；安卓会弹出选择（相机/文件/相册） | iPhone | `web-electron-shim.ts` `openBrowserFileDialog()` 给 `<input type=file>` 设了 `capture="environment"`，iOS Safari 遵守该属性直接调起后置相机，Android Chrome 仍给选择器。方案：去掉 `capture`（两端都出现系统选择菜单，含“拍照”）；如需一键拍照另加入口。1 行 + 单测。✅ 已修复（`f6dc0041`，2026-10-07，已随后续版本安装） |
 | 2026-10-05 | 回归项：Agent 提问 / 计划审批 / 权限确认在手机端自 09-26 真机验收后未完整回归 | 手机 | 下次开 dev 时跑 harness `interactions` 套件（真实渠道，少量额度）；提问卡片自由输入框被程序聚焦时键盘不自动弹出属设计 |
 | 2026-10-07 | 桌面新建 Agent 会话后，左侧栏同一工作区出现重复“新 Agent 会话”条目；发首条消息后其一自动命名，旧条目仍在 | Mac 桌面 | 2026-10-08 dev full-ui 复现：API 会话索引每个测试 ID 仅一条，但同一 `data-session-switch-id` 在侧栏 DOM 中可出现 5 次；新建第二会话并自动命名后，旧未命名条目仍显示。所有 LeftSidebar Agent 列表 memo 均过滤 `isDraft`/`draftSessionIds`，归档分组也过滤 `isDraft`；测试时 `settings.tabState` 只引用原会话，非来源。定位为侧栏可见项目会话投影未保证 root ID 唯一，加上创建 IPC 响应直接 prepend 可能与主进程 metadata upsert 重复。修复：投影输出按会话 ID 去重；所有 Agent 会话创建响应使用 `upsertAgentSession`。新增事件先于 IPC 响应的竞态单测与可见行 ID 去重单测；定向测试 12 pass，typecheck 和 renderer build 通过。dev full-ui 回归：修复后新建会话 ID 在侧栏 DOM 中恰好 1 行；截图存于当次会话工作台。测试会话已通过应用 API 删除，索引回到 831。
 | 2026-10-08 | **子 Agent 跨渠道委派**：clipproxyapi 链路不稳时，子 Agent 改走其他已启用渠道 | Mac | 已实现：`delegate_agent(s)` 增加可选 `channelId`（省略时保留父渠道行为）；`list_available_agent_models` 返回分组渠道列表并排除 `provider=proma`；显式目标渠道/模型校验，省略模型时取目标渠道首个启用模型；子会话记录及 continue/恢复使用子会话的渠道。单测 6 pass，Electron typecheck 通过。真实 dev 已触发跨渠道委派及同一子会话 continue，确认子会话 channelId/modelId 为指定 Codex/gpt-5.5；两轮回复均因 ChatGPT 登录凭据无法刷新而失败，故内容级真实验收待凭据恢复后重跑。
