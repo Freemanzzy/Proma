@@ -4,14 +4,14 @@
 
 ## 待合入分支（已验证、未发布）
 
-- `fix/batch-20261019`（当前分支，待提交）：Web Remote 手机消息布局、队列恢复顺序、重命名菜单输入焦点与顶栏同步；iPhone/Android rename CDP touch、全量测试/typecheck/三项构建已通过。未推送、合并、打包或安装。
+- `fix/batch-20261019`（当前分支，commit `9cc8b14b`）：Web Remote 手机消息布局、队列恢复顺序、重命名菜单输入焦点与顶栏同步；iPhone/Android rename CDP touch、全量测试/typecheck/三项构建已通过。未推送、合并、打包或安装。
 - 最近一次安装 `7b0e4a07`（2026-10-16）已包含此前全部已合入分支（10-14 标题/fixture 批次、10-15 DeepSeek+REA 与手机附件批次）。
 - 观察：手机 PDF 预览页“省流量”胶囊压住缩放控件，待用户决定是否处理。
 
 | 分支 | 基于 | 内容 | 验证 | 状态 |
 |---|---|---|---|---|
 | `fix/mobile-dedupe-20261001`（已合入） | `personal` efc420c1 | P：手机端 `agent:list-active-sessions` / `count-archived-sessions` 并发合并 + 3 秒复用，元数据变更事件使缓存失效（同组操作 13 次 / 825 KB → 6 次 / 382 KB）。Q：IPC WebSocket 带 `src` 与随机 `page` 参数，v2 `open` 行记录来源，用于区分同页双连接与多页面实例。R：非省流量模式首屏历史预算 2 MiB → 1 MiB（41.9 MB 历史弱网首屏 11.3 s → 7.7 s），“加载更早”仍 2 MiB/页 | 原分支 678 pass / 0 fail；合入后本批全量 685 pass / 0 fail；typecheck 与 main/renderer/web-preload 构建通过 | 2026-10-02 以 `--no-ff` 合入 `fix/mobile-batch-20261002`（未推送、未发布）；冲突仅在 changelog，双方记录均保留并按时间顺序排列 |
-| `fix/batch-20261019`（当前分支） | `personal` 47daaaae | Web Remote 手机正文/表格布局与占位文案、队列恢复批量 IPC 和快照顺序；新增移动端重命名显式回调、输入框焦点守卫与顶栏标题同步。桌面布局和单会话队列恢复路径不变。 | **785 pass / 0 fail**、六 workspace typecheck 通过；iPhone/Android CDP touch 验证 rename 输入/保存/取消与标题同步；build:main/renderer/web-preload 通过。Android 表格横向触摸仍未验收；OS 虚拟键盘未在 headless CDP 中观察。 | 当前分支提交后仍待后续发布流程；未推送、合并、打包或安装。详见 changelog 2026-10-19 两条记录。 |
+| `fix/batch-20261019`（当前分支） | `personal` 47daaaae | Web Remote 手机正文/表格布局与占位文案、队列恢复批量 IPC 和快照顺序；新增移动端重命名显式回调、输入框焦点守卫与顶栏标题同步。桌面布局和单会话队列恢复路径不变。 | **785 pass / 0 fail**、六 workspace typecheck 通过；iPhone/Android CDP touch 验证 rename 输入/保存/取消与标题同步；build:main/renderer/web-preload 通过。Android 表格横向触摸仍未验收；OS 虚拟键盘未在 headless CDP 中观察。 | 已提交 `9cc8b14b`；仍待后续发布流程，未推送、合并、打包或安装。详见 changelog 2026-10-19 两条记录。 |
 
 已归档、不合入：开发进程安全完整方案（原 `fix/dev-process-safety-20260930`，约 2,000 行 launchd 托管），以 git bundle 存档于本机会话工作台 `archive/dev-process-safety-20260930.bundle`；评估结论为过重，改走下方“开发启动小修复”。
 
