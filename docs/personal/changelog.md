@@ -1716,3 +1716,11 @@
 - **Android 触摸边界**：Android 412×915 after 截图与页面量测显示表格 `scrollWidth=937/clientWidth=388`；先前仅通过脚本赋值观察到 `scrollLeft=250`，不作为触摸证据。补做的一次触摸手势选中的表格虽然 `scrollWidth=937`，但其 bounding rect `top=-2251.75, bottom=-2105.25`，不在 viewport 内；手势前后 `scrollLeft=0`，故 Android 横向触摸滚动仍**未验收**，停止重试并保留记录 `/tmp/fmt-android-after/table-touch-final.json`。iPhone 横向触摸实测仍为 `scrollLeft=256`；不得把 iPhone 结果外推至 Android。
 - **验证**：定向相关测试 **29 pass / 0 fail / 119 expect**；全量 `bun test`（临时 HOME，未继承 fixture 目录变量）**781 pass / 0 fail / 2,025 expect / 123 files**；全仓 `bun run typecheck` 六个 workspace 全通过；`build:main`、`build:renderer`、`build:web-preload` 通过。renderer 保留既有大 chunk 提示。Android touch 仅保留为明确未完成项。
 - 未触碰 `/Applications/Proma.app`、`~/.proma`、`~/.proma-dev` 或真实用户数据；所有 dev/harness 使用 `PROMA_DEV_DATA_DIR_NAME=.proma-dev-fixture`。未推送、合并、打包或安装；fixture dev 与 8443 forwarding 保持运行。
+
+## 2026-10-19: 修复 Web Remote 手机端会话重命名
+
+- **根因与改动**：移动端“重命名会话”菜单原先尝试点击 `AgentHeader` 中被 CSS 隐藏的 Radix `DropdownMenuTrigger`，触发回调不等于输入框获得焦点。现在由 `AgentHeader` 显式注册编辑回调，Web Remote 菜单直接调用它，不再点击隐藏触发器；编辑输入框在切换编辑态时保持挂载，避免 Radix 菜单收起导致输入框卸载/焦点丢失。手机端只有在用户真实触摸并聚焦输入框后才允许 blur 保存；桌面路径保持原行为。
+- **顶栏同步**：React 原位更新会话标题时可能只改已有文本节点的 `nodeValue`，旧观察器没有监听 `characterData`，导致侧栏/AgentHeader 已更新而 Web Remote 顶栏仍显示旧标题。扩展 mobile patch 的 observer 后，顶栏会随会话标题变化同步。新增 DOM 单测覆盖文本节点更新。
+- **iPhone 与 Android CDP 触屏验收**：两端均从“重命名会话”菜单进入可见的 inline editor；触摸输入框后焦点落在输入框，并通过 CDP 输入新标题、Enter 保存。保存后会话 API、AgentHeader、移动顶栏和侧栏名称一致；再通过移动菜单恢复合成 fixture 会话原标题。两端均验证 Escape 取消和空白标题 Enter 取消不改变已保存标题。截图与结构化记录分别位于 `/tmp/rename-iphone-final/`、`/tmp/rename-android-final/`。Headless mobile CDP 没有呈现 OS 虚拟键盘，因此本次证据证明输入框真实可聚焦且接受文本，不声称观察到键盘 UI 弹出。
+- **验证**：新增 `agent-session-rename.test.ts` 与 mobile patch 观察器测试；定向测试 **17 pass / 0 fail / 75 expect**。全仓 `bun run typecheck` 六个 workspace 全通过；全量 `bun test`（独立临时 HOME，未继承 fixture 目录变量）**785 pass / 0 fail / 2,037 expect / 124 files**；`build:main`、`build:renderer`、`build:web-preload` 通过，renderer 保留既有 large-chunk 提示。
+- Android 横向表格触摸滚动仍未验收（目标表格在 viewport 外，详见同日上一条），不将本轮 Android 重命名成功外推为该布局项已通过。所有浏览器与构建验证均显式使用 fixture dev 环境；未触碰正式应用/数据，未推送、合并、打包或安装，fixture dev 与 8443 forwarding 保持运行。

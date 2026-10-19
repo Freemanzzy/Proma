@@ -4,12 +4,14 @@
 
 ## 待合入分支（已验证、未发布）
 
-- 无。最近一次安装 `7b0e4a07`（2026-10-16）已包含此前全部已合入分支（10-14 标题/fixture 批次、10-15 DeepSeek+REA 与手机附件批次）。
+- `fix/batch-20261019`（当前分支，待提交）：Web Remote 手机消息布局、队列恢复顺序、重命名菜单输入焦点与顶栏同步；iPhone/Android rename CDP touch、全量测试/typecheck/三项构建已通过。未推送、合并、打包或安装。
+- 最近一次安装 `7b0e4a07`（2026-10-16）已包含此前全部已合入分支（10-14 标题/fixture 批次、10-15 DeepSeek+REA 与手机附件批次）。
 - 观察：手机 PDF 预览页“省流量”胶囊压住缩放控件，待用户决定是否处理。
 
 | 分支 | 基于 | 内容 | 验证 | 状态 |
 |---|---|---|---|---|
 | `fix/mobile-dedupe-20261001`（已合入） | `personal` efc420c1 | P：手机端 `agent:list-active-sessions` / `count-archived-sessions` 并发合并 + 3 秒复用，元数据变更事件使缓存失效（同组操作 13 次 / 825 KB → 6 次 / 382 KB）。Q：IPC WebSocket 带 `src` 与随机 `page` 参数，v2 `open` 行记录来源，用于区分同页双连接与多页面实例。R：非省流量模式首屏历史预算 2 MiB → 1 MiB（41.9 MB 历史弱网首屏 11.3 s → 7.7 s），“加载更早”仍 2 MiB/页 | 原分支 678 pass / 0 fail；合入后本批全量 685 pass / 0 fail；typecheck 与 main/renderer/web-preload 构建通过 | 2026-10-02 以 `--no-ff` 合入 `fix/mobile-batch-20261002`（未推送、未发布）；冲突仅在 changelog，双方记录均保留并按时间顺序排列 |
+| `fix/batch-20261019`（当前分支） | `personal` 47daaaae | Web Remote 手机正文/表格布局与占位文案、队列恢复批量 IPC 和快照顺序；新增移动端重命名显式回调、输入框焦点守卫与顶栏标题同步。桌面布局和单会话队列恢复路径不变。 | **785 pass / 0 fail**、六 workspace typecheck 通过；iPhone/Android CDP touch 验证 rename 输入/保存/取消与标题同步；build:main/renderer/web-preload 通过。Android 表格横向触摸仍未验收；OS 虚拟键盘未在 headless CDP 中观察。 | 当前分支提交后仍待后续发布流程；未推送、合并、打包或安装。详见 changelog 2026-10-19 两条记录。 |
 
 已归档、不合入：开发进程安全完整方案（原 `fix/dev-process-safety-20260930`，约 2,000 行 launchd 托管），以 git bundle 存档于本机会话工作台 `archive/dev-process-safety-20260930.bundle`；评估结论为过重，改走下方“开发启动小修复”。
 
@@ -44,6 +46,7 @@
 | 2026-10-14 | iPhone 空/有历史会话切换“文件/改动”菜单时，省流量按钮可能盖住菜单选项并截获触摸 | Web Remote | ✅ 已修复：移动端 tab menu 的层级提升到高于会话历史条，fixture `iphone:layout` 触屏/CDP 命中审计 11/11 页面通过；旧层级复现截图与修复后截图分别为 `/tmp/proma-mobile-layout-before-20261014.png`、`/tmp/proma-mobile-layout-after-20261014.png`。`mobile-preview.sh fixture` 的 smoke/layout/session-sync/interactions 全部通过。另在 harness 等待面板切换稳定后再执行布局审计，避免动画期间误判。详见 changelog 2026-10-14「完成隔离 fixture 手机回归并修复菜单遮挡」 |
 | 2026-10-15 | 手机端对话里的图片附件损坏、文件抽屉列表为空，并反馈文件无法打开/下载 | Android、iPhone | ✅ 已修复：图片附件复用 session-scoped `file:read-binary-base64`；文件列表限 workspace 并强制 realpath 根校验；YAML/TXT/PNG/PDF 均能预览，PDF 由 Vite 打包的 PDF.js worker 渲染 canvas；手机下载读取上限 50 MiB，Blob 下载可用时点按下载，iPhone share API 可用且不支持 `download` 时传 File 给分享回退。截图分目录：`/tmp/webremote-file-preview-iphone/`、`/tmp/webremote-file-preview-android/`。全量测试 **776/776**、全仓 typecheck、build:main/renderer/web-preload 通过；桌面 `readAttachment` IPC 保持并有单测。分支尚未推送、打包或安装，详见 changelog 同日对应记录。 |
 | 2026-10-19 | 手机端消息排版问题（iPhone 竖屏截图，会话“周度回顾TK性能与文档同步”）：正文左留白、宽表格挤压/无法横滑、标题重复、composer 提示过长 | iPhone、Android | 🟡 已修复并部分验收：仅 Web Remote 手机端收窄正文，表格横向滚动，隐藏重复正文标题（顶栏重命名保留）；TipTap 占位改为渲染期显示“输入消息…”，桌面及无模型提示不变。iPhone CDP touch `scrollLeft=256`、table `937/366`，正文 x=88→42px。Android after 截图 `/tmp/fmt-android-after/format-after-touch.png`；量测 `937/388`，占位可见；一次有明确触点的 touch 仍未滚动：目标表格已在 viewport 外（rect top=-2251.75px），前后 `scrollLeft=0`，详见 `/tmp/fmt-android-after/table-touch-final.json`，因此 Android 横向触摸仅保持待验收。详见 changelog 2026-10-19 follow-up。 |
+| 2026-10-19 | Web Remote 手机端从“重命名会话”菜单后输入框不可用，标题顶栏/侧栏不同步 | iPhone、Android | ✅ 已修复：菜单直接调用 `AgentHeader` inline editor，用户触摸输入框后获得焦点；Enter 保存后会话、AgentHeader、移动顶栏与侧栏同步；Escape 与空白标题取消均保持已保存标题。两端 CDP touch 与 fixture flow 记录在 `/tmp/rename-iphone-final/`、`/tmp/rename-android-final/`。Headless CDP 未显示 OS 虚拟键盘。详见 changelog 2026-10-19「修复 Web Remote 手机端会话重命名」。 |
 | 2026-10-10 | 正式版退出半停期间，main.log 每分钟一条 `子任务唤醒 queued … suppressed=59`（同一 parentSessionId） | Mac | 仅观察；退出半停修复后若仍出现再查子任务唤醒在调度器停止后的排队逻辑 |
 | 2026-10-10 | 开着 iOS 模拟器预览时退出 Proma 的清理路径（detached serve-sim 停流 + 结束子进程）尚未实测 | Mac | 下次用到模拟器侧栏时顺带验证：开预览 → Cmd+Q → 日志 `will-quit`、无 `quit-stalled`、`ps` 无 serve-sim 残留 |
 

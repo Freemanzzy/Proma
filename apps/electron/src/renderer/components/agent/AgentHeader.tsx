@@ -5,11 +5,13 @@
  */
 
 import * as React from 'react'
+import { flushSync } from 'react-dom'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { Check, ChevronDown, PanelRight, Pencil, Split, X } from 'lucide-react'
 import { agentSessionsAtom, agentSideTemporaryAgentMapAtom, agentDiffPanelTabAtom, currentSessionSidePanelOpenAtom, getExplorationSidePanelTab } from '@/atoms/agent-atoms'
 import { tabsAtom, updateTabTitle } from '@/atoms/tab-atoms'
 import { replaceAgentSessionInFreshnessOrder } from '@/lib/agent-session-list'
+import { attachWebRemoteAgentRenameHandler } from '@/lib/agent-session-rename'
 import { cn } from '@/lib/utils'
 import {
   DropdownMenu,
@@ -34,6 +36,13 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
   const [editing, setEditing] = React.useState(false)
   const [editTitle, setEditTitle] = React.useState('')
   const inputRef = React.useRef<HTMLInputElement>(null)
+  const sessionMenuTriggerRef = React.useRef<HTMLButtonElement>(null)
+  const isWebRemoteMobile = Boolean((window as Window & { __PROMA_WEB_REMOTE__?: boolean }).__PROMA_WEB_REMOTE__)
+    && (window.matchMedia?.('(max-width: 767px)').matches ?? false)
+  const cancelEditRef = React.useRef(false)
+  const inputFocusReadyRef = React.useRef(false)
+  const focusAttemptPendingRef = React.useRef(false)
+  const saveInProgressRef = React.useRef(false)
 
   const explorationBranches = React.useMemo(() => sessions
     .filter((item) => item.explorationParentSessionId === sessionId && item.explorationSourceMessageId)
@@ -57,23 +66,47 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
     setSidePanelTabMap((prev) => new Map(prev).set(sessionId, getExplorationSidePanelTab(branch.id)))
   }, [sessionId, setRightPanelOpen, setSidePanelTabMap, setSideTemporaryAgentMap])
 
-  if (!session) return null
-
   /** 进入编辑模式 */
-  const startEdit = (): void => {
-    setEditTitle(session.title)
-    setEditing(true)
-    requestAnimationFrame(() => inputRef.current?.focus())
-  }
+  const startEdit = React.useCallback((): void => {
+    if (!session) return
+    cancelEditRef.current = false
+    inputFocusReadyRef.current = false
+    focusAttemptPendingRef.current = true
+    flushSync(() => {
+      setEditTitle(session.title)
+      setEditing(true)
+    })
+    inputRef.current?.focus()
+    requestAnimationFrame(() => {
+      inputRef.current?.focus()
+      focusAttemptPendingRef.current = false
+      inputFocusReadyRef.current = document.activeElement === inputRef.current
+    })
+  }, [session?.id, session?.title])
+
+  React.useEffect(() => {
+    if (!isWebRemoteMobile) return
+    return attachWebRemoteAgentRenameHandler(sessionMenuTriggerRef.current, startEdit)
+  }, [isWebRemoteMobile, startEdit])
+
+  if (!session) return null
 
   /** 保存标题 */
   const saveTitle = async (): Promise<void> => {
+    if (saveInProgressRef.current) return
+    if (cancelEditRef.current) {
+      cancelEditRef.current = false
+      setEditing(false)
+      return
+    }
+
     const trimmed = editTitle.trim()
     if (!trimmed || trimmed === session.title) {
       setEditing(false)
       return
     }
 
+    saveInProgressRef.current = true
     try {
       const updated = await window.electronAPI.updateAgentSessionTitle(session.id, trimmed)
       // 同步更新标签页标题
@@ -82,8 +115,18 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
       setAgentSessions((prev) => replaceAgentSessionInFreshnessOrder(prev, updated))
     } catch (error) {
       console.error('[AgentHeader] 更新标题失败:', error)
+    } finally {
+      saveInProgressRef.current = false
+      setEditing(false)
     }
-    setEditing(false)
+  }
+
+  const handleInputBlur = (): void => {
+    if (isWebRemoteMobile && !inputFocusReadyRef.current) return
+    requestAnimationFrame(() => {
+      if (document.activeElement === inputRef.current) return
+      void saveTitle()
+    })
   }
 
   /** 键盘事件 */
@@ -92,6 +135,9 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
       e.preventDefault()
       saveTitle()
     } else if (e.key === 'Escape') {
+      cancelEditRef.current = true
+      inputFocusReadyRef.current = false
+      focusAttemptPendingRef.current = false
       setEditing(false)
     }
   }
@@ -100,14 +146,14 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
     <div className="relative z-[51] flex items-center gap-2 px-3 h-[48px]">
       {/* 页面标题栏仍可拖动；系统控制按钮由窗口顶部的统一标题栏承载。 */}
       <div className="absolute inset-0 titlebar-drag-region pointer-events-none" />
-      {editing ? (
-        <div className="flex items-center gap-1.5 flex-1 min-w-0 titlebar-no-drag">
+      <div className={editing ? 'flex items-center gap-1.5 flex-1 min-w-0 titlebar-no-drag' : 'hidden'}>
           <input
             ref={inputRef}
             value={editTitle}
+            onFocus={() => { if (!focusAttemptPendingRef.current) inputFocusReadyRef.current = true }}
             onChange={(e) => setEditTitle(e.target.value)}
             onKeyDown={handleKeyDown}
-            onBlur={saveTitle}
+            onBlur={handleInputBlur}
             className="flex-1 bg-transparent text-[15px] font-normal border-b border-primary/50 outline-none px-0 py-0.5 min-w-0"
             maxLength={100}
           />
@@ -122,17 +168,19 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
           <button
             type="button"
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => setEditing(false)}
+            onClick={() => { cancelEditRef.current = true; inputFocusReadyRef.current = false; focusAttemptPendingRef.current = false; setEditing(false) }}
             className="p-1 text-muted-foreground hover:text-foreground transition-colors"
           >
             <X className="size-3.5" />
           </button>
-        </div>
-      ) : (
+      </div>
+      <div className={editing ? 'hidden' : 'contents'}>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
+              ref={sessionMenuTriggerRef}
               type="button"
+              data-web-remote-session-id={session.id}
               className="titlebar-no-drag group flex min-w-0 items-center gap-1.5 rounded-lg px-2 py-1 text-left transition-colors hover:bg-muted/60"
               aria-label={`会话菜单：${session.title}`}
             >
@@ -147,7 +195,7 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      )}
+      </div>
       {explorationBranches.length > 0 && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

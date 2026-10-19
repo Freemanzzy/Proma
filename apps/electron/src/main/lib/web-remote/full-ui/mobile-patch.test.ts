@@ -7,11 +7,12 @@ type ObserverCallback = (records: unknown[], observer: MutationObserver) => void
 class ManualMutationObserver {
   static instances: ManualMutationObserver[] = []
   callback: ObserverCallback
+  observedOptions?: MutationObserverInit
   constructor(callback: ObserverCallback) {
     this.callback = callback
     ManualMutationObserver.instances.push(this)
   }
-  observe() {}
+  observe(_target: Node, options?: MutationObserverInit) { this.observedOptions = options }
   disconnect() {}
   takeRecords() { return [] }
   trigger() { this.callback([], this as unknown as MutationObserver) }
@@ -133,6 +134,25 @@ function createMobilePatchHarness(
 }
 
 describe('renderWebRemoteMobilePatch DOM write convergence', () => {
+  test('手机端会话菜单变化会同步到顶部标题，包括 React 原位更新的文本节点', () => {
+    const { document, observers } = createMobilePatchHarness()
+    const sessionButton = document.createElement('button')
+    sessionButton.setAttribute('aria-label', '会话菜单：旧标题')
+    const label = document.createElement('span')
+    label.appendChild(document.createTextNode('旧标题'))
+    sessionButton.appendChild(label)
+    document.body.appendChild(sessionButton)
+    observers[0]!.trigger()
+    const topbarTitle = document.querySelector<HTMLElement>('[data-web-remote-mobile-topbar-title]')!
+    expect(topbarTitle.textContent?.trim()).toBe('旧标题')
+    const sessionTitleObserver = ManualMutationObserver.instances.find((observer) => observer.observedOptions?.characterData === true)
+    expect(sessionTitleObserver).toBeDefined()
+
+    label.firstChild!.nodeValue = '新标题'
+    sessionTitleObserver!.trigger()
+    expect(topbarTitle.textContent?.trim()).toBe('新标题')
+  })
+
   test('手机端消息表格可横向触摸滚动、正文收窄，重复标题规则不再事后改写 composer', () => {
     const html = renderWebRemoteMobilePatch()
     expect(html).toContain('[data-web-remote-main="true"] .message-item [class*="pl-[46px]"] { padding-left:0!important; }')
@@ -140,7 +160,9 @@ describe('renderWebRemoteMobilePatch DOM write convergence', () => {
     expect(html).toContain('button[data-web-remote-mobile-session-title-hidden="true"] { display:none!important; }')
     expect(html).not.toContain("setAttribute('data-placeholder','输入消息…')")
     expect(html).toContain('renameButton.textContent=')
-    expect(html).toContain('menu.hidden=true;sessionButton.click()')
+    expect(html).toContain('sessionButton.__PROMA_WEB_REMOTE_AGENT_RENAME_HANDLER__')
+    expect(html).toContain("if(typeof startEdit==='function')startEdit()")
+    expect(html).not.toContain('sessionButton.click()')
   })
 
   afterEach(() => {
