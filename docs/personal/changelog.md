@@ -1724,3 +1724,19 @@
 - **iPhone 与 Android CDP 触屏验收**：两端均从“重命名会话”菜单进入可见的 inline editor；触摸输入框后焦点落在输入框，并通过 CDP 输入新标题、Enter 保存。保存后会话 API、AgentHeader、移动顶栏和侧栏名称一致；再通过移动菜单恢复合成 fixture 会话原标题。两端均验证 Escape 取消和空白标题 Enter 取消不改变已保存标题。截图与结构化记录分别位于 `/tmp/rename-iphone-final/`、`/tmp/rename-android-final/`。Headless mobile CDP 没有呈现 OS 虚拟键盘，因此本次证据证明输入框真实可聚焦且接受文本，不声称观察到键盘 UI 弹出。
 - **验证**：新增 `agent-session-rename.test.ts` 与 mobile patch 观察器测试；定向测试 **17 pass / 0 fail / 75 expect**。全仓 `bun run typecheck` 六个 workspace 全通过；全量 `bun test`（独立临时 HOME，未继承 fixture 目录变量）**785 pass / 0 fail / 2,037 expect / 124 files**；`build:main`、`build:renderer`、`build:web-preload` 通过，renderer 保留既有 large-chunk 提示。
 - Android 横向表格触摸滚动仍未验收（目标表格在 viewport 外，详见同日上一条），不将本轮 Android 重命名成功外推为该布局项已通过。所有浏览器与构建验证均显式使用 fixture dev 环境；未触碰正式应用/数据，未推送、合并、打包或安装，fixture dev 与 8443 forwarding 保持运行。
+
+## 2026-10-19: 安装 60dc9d0f（手机排版/重命名/排队恢复批量）与桌面改名回归
+
+- 由 Claude Code 按 `install-request-2026-10-19.md` 用标准 `install-update.sh` 安装：`/Applications/Proma.app` = `60dc9d0f`，previous = `7b0e4a07`。备份校验通过（35,551 条目）；上一份备份已归档外置硬盘，快照一致。钥匙串弹窗 1 次（16 秒）；`scheduler-start` 在 `web-remote-start` 后 2 ms。草稿清理 1 条（备份 `draft-cleanup-2026-10-19T12-21-58-737Z.json`）；会话 1190 → 1189，渠道 7，定时任务 17 个不变；启动后无 `[FATAL]`、`[ERROR]`。
+- 用户确认手机端本批改动通过（宽表格横滑、左边距、顶栏“重命名会话”、短占位提示）。
+- **桌面改名回归（缺陷）**：安装版桌面从标题下拉点“重命名”后，输入框出现即失焦并保存原标题，无法输入。按申请应回滚，用户选择**保留**（手机改名可替代，等待修复）。根因：本批把桌面菜单项也改为在 `onSelect` 内同步 `focus()` 输入框；此时 Radix 下拉菜单仍打开，焦点陷阱把焦点拉回菜单，输入框立即 blur，桌面的 blur 未受新增保护，直接触发“失焦即保存”。dev 中验收时未覆盖该时序。修复见 `fix/desktop-rename-20261019`。
+- `agent:get-queued-messages-batch` 未在正式版计量中出现：属预期。Web Remote 只对“运行中 / 后台等待 / 本地已有排队项 / 主进程活跃快照”中的会话恢复队列；候选为空时直接返回、不发请求（改动前单会话请求在同样条件下也是 0 次）。安装时没有运行中的会话，故无调用。
+- 桌面排队消息（运行中再发、Cmd+R 恢复）由用户在日常使用中实测。
+- 安装过程中 Claude Code 结束钥匙串轮询时用了宽泛的 `pkill -f`，误结束了外层后台 shell；`install-update.sh` 与 `ditto` 未受影响。已约定不再用 `pkill -f` 匹配宽泛文本。
+
+## 2026-10-19: 修复桌面会话改名（下拉菜单焦点时序）
+
+- `AgentHeader` 桌面下拉菜单改用 `startMenuEdit`：进入编辑态但不在菜单打开时聚焦；`DropdownMenuContent.onCloseAutoFocus` 中 `preventDefault()`，把焦点交给标题输入框而不是已隐藏的触发器；另设 800 ms 兜底聚焦。手机端顶栏入口仍走 `startEdit`（需在手势内同步聚焦以弹出键盘），行为不变。
+- `handleInputBlur` 的“尚未真正获得焦点时不保存”保护从仅手机端扩展到所有平台。
+- 新增 `AgentHeader.rename-focus.test.ts`（4 项，读取源码断言入口、关闭焦点与 blur 保护）；全量 789 pass / 0 fail，全仓 typecheck 6 个 workspace 通过。dev（fixture）桌面窗口待用户实测保存 / Esc / 失焦三条路径。
+

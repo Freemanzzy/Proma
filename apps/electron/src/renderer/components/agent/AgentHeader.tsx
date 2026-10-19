@@ -84,6 +84,26 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
     })
   }, [session?.id, session?.title])
 
+  /** 桌面下拉菜单进入编辑：不能在菜单仍打开时聚焦，否则 Radix 焦点陷阱会拉回焦点并触发“失焦即保存”。 */
+  const menuEditPendingRef = React.useRef(false)
+  const focusMenuEditInput = React.useCallback((): void => {
+    menuEditPendingRef.current = false
+    inputRef.current?.focus()
+  }, [])
+  const startMenuEdit = React.useCallback((): void => {
+    if (!session) return
+    cancelEditRef.current = false
+    inputFocusReadyRef.current = false
+    focusAttemptPendingRef.current = false
+    menuEditPendingRef.current = true
+    setEditTitle(session.title)
+    setEditing(true)
+    // 兜底：菜单未触发 onCloseAutoFocus 时，待其关闭后再聚焦。
+    window.setTimeout(() => {
+      if (menuEditPendingRef.current && document.activeElement !== inputRef.current) focusMenuEditInput()
+    }, 800)
+  }, [session?.id, session?.title, focusMenuEditInput])
+
   React.useEffect(() => {
     if (!isWebRemoteMobile) return
     return attachWebRemoteAgentRenameHandler(sessionMenuTriggerRef.current, startEdit)
@@ -122,7 +142,8 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
   }
 
   const handleInputBlur = (): void => {
-    if (isWebRemoteMobile && !inputFocusReadyRef.current) return
+    // 输入框尚未真正获得用户焦点（进入编辑过程中的瞬时 blur）时不保存。
+    if (!inputFocusReadyRef.current) return
     requestAnimationFrame(() => {
       if (document.activeElement === inputRef.current) return
       void saveTitle()
@@ -188,8 +209,17 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
               <ChevronDown className="size-3 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="z-[100] min-w-40 titlebar-no-drag">
-            <DropdownMenuItem onSelect={startEdit}>
+          <DropdownMenuContent
+            align="start"
+            className="z-[100] min-w-40 titlebar-no-drag"
+            onCloseAutoFocus={(event) => {
+              if (!menuEditPendingRef.current) return
+              // 菜单关闭后把焦点交给标题输入框，而不是归还给（已隐藏的）触发器。
+              event.preventDefault()
+              focusMenuEditInput()
+            }}
+          >
+            <DropdownMenuItem onSelect={startMenuEdit}>
               <Pencil className="size-3.5" />
               重命名
             </DropdownMenuItem>
