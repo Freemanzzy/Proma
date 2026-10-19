@@ -1698,3 +1698,12 @@
 - 用户确认：DeepSeek 新会话正常回复，无 400；手机端图片附件可显示，“文件”页能列出并预览 YAML/PDF，下载可用。
 - 安装审阅备注：`agent:list-directory` 只读，允许根由请求中的会话/工作区 ID 推出；项目模式工作区的允许范围包含项目根目录，这是设计如此。若以后把允许根扩展到这些根之外，需要同步更新 `full-ui-security.test.ts`。
 
+## 2026-10-19: Web Remote 手机消息排版与队列恢复 batch IPC
+
+- **来源与取证**：依据用户提供的 iPhone 原始截图 会话工作台 `evidence/mobile-format-20261019-iphone.png` 复现并定位。消息正文来自 `renderer/components/ai-elements/message.tsx` 的桌面 `pl-[46px]` 缩进；Markdown table 在手机端原先没有可横滚的 overflow 容器，并受正文 `overflow-hidden` 祖先裁切。重复的下方标题来自 `AgentHeader.tsx` 会话下拉按钮，顶栏标题由 Web Remote mobile patch 另行显示；重命名原功能继续从顶栏菜单提供。Composer 原提示由 `AgentView.tsx` 构造，TipTap 以 `data-placeholder` 展示。
+- **移动端修复**：仅修改 Web Remote `@media(max-width:767px)` 规则与 mobile patch JS。Agent 回复正文取消 46px 桌面缩进；表格成为独立横向触摸滚动面，单元格最小宽度并禁止逐字换行，仍允许页面纵向手势；重复标题只隐藏正文按钮，顶栏标题保留，并在顶栏菜单增加“重命名会话”；长 composer 提示在手机端缩为“输入消息…”，桌面文案不变。mobile-patch 单测覆盖触摸滚动/窄边距规则与 TipTap `data-placeholder` 替换。
+- **手机截图与量测**：iPhone 390×844 fixture CDP 触屏前后证据 `/tmp/fmt-iphone-after/format-before.png`、`/tmp/fmt-iphone-after/format-after-touch.png`。测得 table `overflowX=auto`、`scrollWidth=937`、`clientWidth=366`；水平触摸后 `scrollLeft=256`。正文容器由原 46px 留白（表格 x=88px）收至 x=42px；下方标题按钮 `display:none`，顶栏标题仍显示。Android 基线截图在 `/tmp/fmt-android-before/`，Android `layout` suite 的 11 个页面审计均通过；但重复运行 Android 格式专项时，harness CDP pairing/Runtime.evaluate 超时，未取得 Android after 截图；composer 的最终 UI 也未在 after 截图中复核，不将其宣称为端到端通过。
+- **队列恢复优化**：新增 `agent:get-queued-messages-batch` IPC，主进程批量复用 `listQueuedAgentMessages`，最多 200 个非空 session ID，返回 `Record<sessionId, snapshots>`。Web Remote policy 对该通道只允许只读调用；输入作结构及数量校验，返回阶段逐个以 `sessionAllowed(sessionId)` 过滤，只返回本次请求且在设备授权工作区内的会话，混合授权请求不会因允许其中一个 ID 而泄露其他会话。Renderer 的 Web Remote 初始化/恢复改为一次 batch 请求；desktop 仍沿用旧单会话 API。已有按 `queueMessageId` 去重、不覆盖本地投影的合并逻辑未变。全局安全测试覆盖混合授权、非数组、201 项超限与空 ID。
+- **验证**：定向 `full-ui-security.test.ts` + `mobile-patch.test.ts` **47 pass / 0 fail / 240 expect**；全量 `bun test` **779 pass / 0 fail / 2,018 expect / 122 files**；全仓 `bun run typecheck` 6 个 workspace 全部退出 0；`@proma/electron` 的 `build:main`、`build:renderer`、`build:web-preload` 均退出 0（renderer 仍有既有 large-chunk 警告）。仓库实际没有根目录 `build:main` 命令，改为按 workspace 脚本运行；没有提交 harness 文件（临时取证扩展运行后已恢复）。
+- **待补验收**：尚未通过 fixture 队列重载/计量日志证明运行期恢复请求数由多次变为一次，也未在实际队列恢复后确认待发项仍显示；Android 格式专项与最终 composer 截图未通过 harness。对应 backlog 条目标记为待补验收。所有修改均留在 `fix/batch-20261019`；未推送、合并、打包或安装，正式应用及正式用户数据未触碰。dev 继续由 `.proma-dev-fixture` 启动。
+

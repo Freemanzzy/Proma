@@ -3523,6 +3523,16 @@ export function registerIpcHandlers(): void {
     },
   )
 
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_QUEUED_MESSAGES_BATCH,
+    async (_, sessionIds: unknown): Promise<Record<string, import('@proma/shared').AgentQueuedMessageSnapshot[]>> => {
+      if (!Array.isArray(sessionIds) || sessionIds.length > 200 || sessionIds.some((id) => typeof id !== 'string' || !id)) return {}
+      const snapshots: Record<string, import('@proma/shared').AgentQueuedMessageSnapshot[]> = {}
+      for (const sessionId of new Set(sessionIds as string[])) snapshots[sessionId] = listQueuedAgentMessages(sessionId)
+      return snapshots
+    },
+  )
+
   // 兼容旧调用：将消息交给主进程 deferred queue。
   ipcMain.handle(
     AGENT_IPC_CHANNELS.ENQUEUE_QUEUED_MESSAGE,

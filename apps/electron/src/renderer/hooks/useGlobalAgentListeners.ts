@@ -1133,8 +1133,13 @@ export function useGlobalAgentListeners(): void {
         streamStates: store.get(agentStreamingStatesAtom),
         queues,
       })
-      for (const sessionId of sessionIds) {
-        const snapshots = await window.electronAPI.getQueuedAgentMessages(sessionId)
+      if (sessionIds.length === 0) return
+      const recoverySessionIds = isWebRemote ? sessionIds.slice(0, 200) : sessionIds
+      const snapshotsBySession: Record<string, import('@proma/shared').AgentQueuedMessageSnapshot[]> = {}
+      if (isWebRemote) Object.assign(snapshotsBySession, await window.electronAPI.getQueuedAgentMessagesBatch(recoverySessionIds))
+      else for (const sessionId of recoverySessionIds) snapshotsBySession[sessionId] = await window.electronAPI.getQueuedAgentMessages(sessionId)
+      for (const sessionId of recoverySessionIds) {
+        const snapshots = snapshotsBySession[sessionId] ?? []
         if (snapshots.length === 0) continue
         store.set(agentSessionMessageQueueAtom, (previous) => {
           const current = previous.get(sessionId) ?? []
