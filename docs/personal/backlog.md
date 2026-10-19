@@ -4,12 +4,14 @@
 
 ## 待合入分支（已验证、未发布）
 
-- 无。最近一次安装 `7b0e4a07`（2026-10-16）已包含此前全部已合入分支（10-14 标题/fixture 批次、10-15 DeepSeek+REA 与手机附件批次）。
+- `fix/batch-20261019`（当前分支，commit `9cc8b14b`）：Web Remote 手机消息布局、队列恢复顺序、重命名菜单输入焦点与顶栏同步；iPhone/Android rename CDP touch、全量测试/typecheck/三项构建已通过。未推送、合并、打包或安装。
+- 最近一次安装 `7b0e4a07`（2026-10-16）已包含此前全部已合入分支（10-14 标题/fixture 批次、10-15 DeepSeek+REA 与手机附件批次）。
 - 观察：手机 PDF 预览页“省流量”胶囊压住缩放控件，待用户决定是否处理。
 
 | 分支 | 基于 | 内容 | 验证 | 状态 |
 |---|---|---|---|---|
 | `fix/mobile-dedupe-20261001`（已合入） | `personal` efc420c1 | P：手机端 `agent:list-active-sessions` / `count-archived-sessions` 并发合并 + 3 秒复用，元数据变更事件使缓存失效（同组操作 13 次 / 825 KB → 6 次 / 382 KB）。Q：IPC WebSocket 带 `src` 与随机 `page` 参数，v2 `open` 行记录来源，用于区分同页双连接与多页面实例。R：非省流量模式首屏历史预算 2 MiB → 1 MiB（41.9 MB 历史弱网首屏 11.3 s → 7.7 s），“加载更早”仍 2 MiB/页 | 原分支 678 pass / 0 fail；合入后本批全量 685 pass / 0 fail；typecheck 与 main/renderer/web-preload 构建通过 | 2026-10-02 以 `--no-ff` 合入 `fix/mobile-batch-20261002`（未推送、未发布）；冲突仅在 changelog，双方记录均保留并按时间顺序排列 |
+| `fix/batch-20261019`（当前分支） | `personal` 47daaaae | Web Remote 手机正文/表格布局与占位文案、队列恢复批量 IPC 和快照顺序；新增移动端重命名显式回调、输入框焦点守卫与顶栏标题同步。桌面布局和单会话队列恢复路径不变。 | **785 pass / 0 fail**、六 workspace typecheck 通过；iPhone/Android CDP touch 验证 rename 输入/保存/取消与标题同步；build:main/renderer/web-preload 通过。Android 表格横向触摸仍未验收；OS 虚拟键盘未在 headless CDP 中观察。 | 已提交 `9cc8b14b`；仍待后续发布流程，未推送、合并、打包或安装。详见 changelog 2026-10-19 两条记录。 |
 
 已归档、不合入：开发进程安全完整方案（原 `fix/dev-process-safety-20260930`，约 2,000 行 launchd 托管），以 git bundle 存档于本机会话工作台 `archive/dev-process-safety-20260930.bundle`；评估结论为过重，改走下方“开发启动小修复”。
 
@@ -43,7 +45,8 @@
 | 2026-10-12 | Claude 5.5 标题偶发为空标题回退；本地兜底标题包含会话引用 ID 与 URL 编码文本 | Mac | ✅ 已实现：Claude 5.5+ 标题请求改用 adaptive + low、`max_tokens=256`；提示词与兜底先清理 session/file 等 UI 引用标记。Opus 5.5 / Sonnet 5.5 各以复现消息和两条普通消息请求一次，6/6 HTTP 200、`end_turn` 且有可读标题；全仓 typecheck、全量测试、`build:main` 通过。详见 changelog 2026-10-12「Claude 5.5 标题请求改用 adaptive low，兜底标题清理引用标记」 |
 | 2026-10-14 | iPhone 空/有历史会话切换“文件/改动”菜单时，省流量按钮可能盖住菜单选项并截获触摸 | Web Remote | ✅ 已修复：移动端 tab menu 的层级提升到高于会话历史条，fixture `iphone:layout` 触屏/CDP 命中审计 11/11 页面通过；旧层级复现截图与修复后截图分别为 `/tmp/proma-mobile-layout-before-20261014.png`、`/tmp/proma-mobile-layout-after-20261014.png`。`mobile-preview.sh fixture` 的 smoke/layout/session-sync/interactions 全部通过。另在 harness 等待面板切换稳定后再执行布局审计，避免动画期间误判。详见 changelog 2026-10-14「完成隔离 fixture 手机回归并修复菜单遮挡」 |
 | 2026-10-15 | 手机端对话里的图片附件损坏、文件抽屉列表为空，并反馈文件无法打开/下载 | Android、iPhone | ✅ 已修复：图片附件复用 session-scoped `file:read-binary-base64`；文件列表限 workspace 并强制 realpath 根校验；YAML/TXT/PNG/PDF 均能预览，PDF 由 Vite 打包的 PDF.js worker 渲染 canvas；手机下载读取上限 50 MiB，Blob 下载可用时点按下载，iPhone share API 可用且不支持 `download` 时传 File 给分享回退。截图分目录：`/tmp/webremote-file-preview-iphone/`、`/tmp/webremote-file-preview-android/`。全量测试 **776/776**、全仓 typecheck、build:main/renderer/web-preload 通过；桌面 `readAttachment` IPC 保持并有单测。分支尚未推送、打包或安装，详见 changelog 同日对应记录。 |
-| 2026-10-19 | 手机端消息排版问题（iPhone 竖屏截图，会话“周度回顾TK性能与文档同步”）：① Agent 回复正文左侧留白过大，正文从约 1/5 屏宽处开始；② Markdown 表格列宽被挤压：表头“优先级”逐字换行，最后一列“依据”被右侧裁掉、只露出每行开头几个字，也无法横向滚动；③ 顶栏与其下方各显示一次会话标题（含下拉箭头），重复占用一行；④ 次要：输入框占位提示较长，空输入时占 3 行 | iPhone | 待取证：用 fixture 构造含宽表格的长回复，在 iPhone/安卓视口查对应元素的 padding/margin 来源（疑为桌面头像/缩进留位未在移动端收起）与表格容器的 overflow 设置；方案方向：移动端收窄消息左侧留白；表格放进可横向滚动容器并给表头/单元格设最小宽度；重复标题在移动端只保留一处。截图存本机会话工作台 `evidence/mobile-format-20261019-iphone.png` |
+| 2026-10-19 | 手机端消息排版问题（iPhone 竖屏截图，会话“周度回顾TK性能与文档同步”）：正文左留白、宽表格挤压/无法横滑、标题重复、composer 提示过长 | iPhone、Android | 🟡 已修复并部分验收：仅 Web Remote 手机端收窄正文，表格横向滚动，隐藏重复正文标题（顶栏重命名保留）；TipTap 占位改为渲染期显示“输入消息…”，桌面及无模型提示不变。iPhone CDP touch `scrollLeft=256`、table `937/366`，正文 x=88→42px。Android after 截图 `/tmp/fmt-android-after/format-after-touch.png`；量测 `937/388`，占位可见；一次有明确触点的 touch 仍未滚动：目标表格已在 viewport 外（rect top=-2251.75px），前后 `scrollLeft=0`，详见 `/tmp/fmt-android-after/table-touch-final.json`，因此 Android 横向触摸仅保持待验收。详见 changelog 2026-10-19 follow-up。 |
+| 2026-10-19 | Web Remote 手机端从“重命名会话”菜单后输入框不可用，标题顶栏/侧栏不同步 | iPhone、Android | ✅ 已修复：菜单直接调用 `AgentHeader` inline editor，用户触摸输入框后获得焦点；Enter 保存后会话、AgentHeader、移动顶栏与侧栏同步；Escape 与空白标题取消均保持已保存标题。两端 CDP touch 与 fixture flow 记录在 `/tmp/rename-iphone-final/`、`/tmp/rename-android-final/`。Headless CDP 未显示 OS 虚拟键盘。详见 changelog 2026-10-19「修复 Web Remote 手机端会话重命名」。 |
 | 2026-10-10 | 正式版退出半停期间，main.log 每分钟一条 `子任务唤醒 queued … suppressed=59`（同一 parentSessionId） | Mac | 仅观察；退出半停修复后若仍出现再查子任务唤醒在调度器停止后的排队逻辑 |
 | 2026-10-10 | 开着 iOS 模拟器预览时退出 Proma 的清理路径（detached serve-sim 停流 + 结束子进程）尚未实测 | Mac | 下次用到模拟器侧栏时顺带验证：开预览 → Cmd+Q → 日志 `will-quit`、无 `quit-stalled`、`ps` 无 serve-sim 残留 |
 
@@ -54,7 +57,7 @@
 3. **正式版后台服务诊断**：✅ 已实现（2026-10-07），Web Remote/调度器/子进程/退出阶段事件日志与定时自检详见 `docs/personal/web-remote.md`。
 4. **两层测试**：✅ 已实现。功能回归默认用 `bash scripts/personal/mobile-preview.sh fixture` 重置并运行合成 fixture（2 个工作区、20 条会话、父子委派、Automation、归档、合成大历史）；真实负载层仍按下方触发条件执行，只测量、不作功能判定。2026-10-14 已跑 smoke/layout/session-sync/interactions 全套通过。
 5. **手机查看子任务**：✅ 已完成（2026-10-07）。
-6. **`restoreQueuedMessages()` 合并为一次请求**（目前 Web Remote 已限定范围，约 10 次）。
+6. **`restoreQueuedMessages()` 合并为一次请求**：✅ Web Remote 最多 200 个 sessionId 的 batch 只读 IPC，逐项过滤越权会话；desktop 保留原单会话调用。reload 时先取活跃快照再恢复队列，避免 session 列表尚未到达导致零 batch。fixture API Key 会话实测 reload 后 batch 1 次、单会话 0 次，队列项显示并可取消；全量安全测试通过。详见 changelog 2026-10-19。
 7. **发送的可见确认标记**（可选，用户未要求）。
 8. **“只推送手机正在看的会话的实时输出”**：完成事件瘦身与背压上线后积压已消除，暂不需要；若计量再出现 MB 级峰值再评估。
 9. **WebAssembly 被 CSP 拦截的启动报错**：既有独立缺陷，不得放宽 CSP 修复。

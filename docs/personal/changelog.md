@@ -1698,3 +1698,29 @@
 - 用户确认：DeepSeek 新会话正常回复，无 400；手机端图片附件可显示，“文件”页能列出并预览 YAML/PDF，下载可用。
 - 安装审阅备注：`agent:list-directory` 只读，允许根由请求中的会话/工作区 ID 推出；项目模式工作区的允许范围包含项目根目录，这是设计如此。若以后把允许根扩展到这些根之外，需要同步更新 `full-ui-security.test.ts`。
 
+## 2026-10-19: Web Remote 手机消息排版与队列恢复 batch IPC
+
+- **来源与取证**：依据用户提供的 iPhone 原始截图 会话工作台 `evidence/mobile-format-20261019-iphone.png` 复现并定位。消息正文来自 `renderer/components/ai-elements/message.tsx` 的桌面 `pl-[46px]` 缩进；Markdown table 在手机端原先没有可横滚的 overflow 容器，并受正文 `overflow-hidden` 祖先裁切。重复的下方标题来自 `AgentHeader.tsx` 会话下拉按钮，顶栏标题由 Web Remote mobile patch 另行显示；重命名原功能继续从顶栏菜单提供。Composer 原提示由 `AgentView.tsx` 构造，TipTap 以 `data-placeholder` 展示。
+- **移动端修复**：仅修改 Web Remote `@media(max-width:767px)` 规则与 mobile patch JS。Agent 回复正文取消 46px 桌面缩进；表格成为独立横向触摸滚动面，单元格最小宽度并禁止逐字换行，仍允许页面纵向手势；重复标题只隐藏正文按钮，顶栏标题保留，并在顶栏菜单增加“重命名会话”；长 composer 提示在手机端缩为“输入消息…”，桌面文案不变。mobile-patch 单测覆盖触摸滚动/窄边距规则与 TipTap `data-placeholder` 替换。
+- **手机截图与量测**：iPhone 390×844 fixture CDP 触屏前后证据 `/tmp/fmt-iphone-after/format-before.png`、`/tmp/fmt-iphone-after/format-after-touch.png`。测得 table `overflowX=auto`、`scrollWidth=937`、`clientWidth=366`；水平触摸后 `scrollLeft=256`。正文容器由原 46px 留白（表格 x=88px）收至 x=42px；下方标题按钮 `display:none`，顶栏标题仍显示。Android 基线截图在 `/tmp/fmt-android-before/`，Android `layout` suite 的 11 个页面审计均通过；但重复运行 Android 格式专项时，harness CDP pairing/Runtime.evaluate 超时，未取得 Android after 截图；composer 的最终 UI 也未在 after 截图中复核，不将其宣称为端到端通过。
+- **队列恢复优化**：新增 `agent:get-queued-messages-batch` IPC，主进程批量复用 `listQueuedAgentMessages`，最多 200 个非空 session ID，返回 `Record<sessionId, snapshots>`。Web Remote policy 对该通道只允许只读调用；输入作结构及数量校验，返回阶段逐个以 `sessionAllowed(sessionId)` 过滤，只返回本次请求且在设备授权工作区内的会话，混合授权请求不会因允许其中一个 ID 而泄露其他会话。Renderer 的 Web Remote 初始化/恢复改为一次 batch 请求；desktop 仍沿用旧单会话 API。已有按 `queueMessageId` 去重、不覆盖本地投影的合并逻辑未变。全局安全测试覆盖混合授权、非数组、201 项超限与空 ID。
+- **验证**：定向 `full-ui-security.test.ts` + `mobile-patch.test.ts` **47 pass / 0 fail / 240 expect**；全量 `bun test` **779 pass / 0 fail / 2,018 expect / 122 files**；全仓 `bun run typecheck` 6 个 workspace 全部退出 0；`@proma/electron` 的 `build:main`、`build:renderer`、`build:web-preload` 均退出 0（renderer 仍有既有 large-chunk 警告）。仓库实际没有根目录 `build:main` 命令，改为按 workspace 脚本运行；没有提交 harness 文件（临时取证扩展运行后已恢复）。
+- **待补验收**：尚未通过 fixture 队列重载/计量日志证明运行期恢复请求数由多次变为一次，也未在实际队列恢复后确认待发项仍显示；Android 格式专项与最终 composer 截图未通过 harness。对应 backlog 条目标记为待补验收。所有修改均留在 `fix/batch-20261019`；未推送、合并、打包或安装，正式应用及正式用户数据未触碰。dev 继续由 `.proma-dev-fixture` 启动。
+
+
+## 2026-10-19: Web Remote 手机占位文案与队列恢复顺序补验收
+
+- **TipTap 占位修复**：确认 TipTap 实际显示来自 `p.is-editor-empty[data-placeholder]` 的伪元素；移动端 patch 在节点创建后改 DOM 属性不稳定。将文案决策移入 `AgentView.tsx` 渲染期纯函数，只对 Web Remote 窄屏且已有可用模型时使用“输入消息…”，桌面及无模型/无渠道提示保持原样；移除 post-mount 改写并新增分支单测。iPhone/Android CDP after 截图在 `/tmp/fmt-iphone-after/`、`/tmp/fmt-android-after/`。
+- **队列恢复竞态修复**：CDP reload 实测发现初始化时 `restoreQueuedMessages()` 与 `restoreActiveSnapshots()` 并发；session 元数据尚未装入时 Web Remote 的恢复候选可能为空，因此实际没有发出 batch IPC。初始化与 WebSocket reconnect 现先读取主进程活跃快照，再把快照会话 ID 传给队列候选计算及恢复；Web Remote 将这些 ID 与 session/queue 候选去重合并，desktop 逻辑不变。新增回归覆盖“session 列表尚未到达但已有活跃快照”的情况，并更新顺序断言。
+- **运行期队列回归**：隔离 `.proma-dev-fixture` 的 `clipproxyapi` API Key 会话中，先启动合成 `sleep 70` run，再排入一条合成消息并 reload。reload 后观测到 `agent:get-queued-messages-batch` **1 次**、`agent:get-queued-messages` **0 次**，界面显示 `队列 1` 及对应合成消息；随后成功取消该队列项并停止 run。截图 `/tmp/queue-recovery-20261019/queued-message-restored-after-reload.png`，结构化记录 `/tmp/queue-recovery-20261019/queue-harness-ordered.json`。该 harness 的最终退出码因附加诊断错误读取了快照不存在的顶层 `.id`（正确字段在 `input.queueMessageId`）而为 1；核心计数、恢复可见性、取消及停止结果均已返回并符合断言，不把该诊断误当成产品失败。
+- **Android 触摸边界**：Android 412×915 after 截图与页面量测显示表格 `scrollWidth=937/clientWidth=388`；先前仅通过脚本赋值观察到 `scrollLeft=250`，不作为触摸证据。补做的一次触摸手势选中的表格虽然 `scrollWidth=937`，但其 bounding rect `top=-2251.75, bottom=-2105.25`，不在 viewport 内；手势前后 `scrollLeft=0`，故 Android 横向触摸滚动仍**未验收**，停止重试并保留记录 `/tmp/fmt-android-after/table-touch-final.json`。iPhone 横向触摸实测仍为 `scrollLeft=256`；不得把 iPhone 结果外推至 Android。
+- **验证**：定向相关测试 **29 pass / 0 fail / 119 expect**；全量 `bun test`（临时 HOME，未继承 fixture 目录变量）**781 pass / 0 fail / 2,025 expect / 123 files**；全仓 `bun run typecheck` 六个 workspace 全通过；`build:main`、`build:renderer`、`build:web-preload` 通过。renderer 保留既有大 chunk 提示。Android touch 仅保留为明确未完成项。
+- 未触碰 `/Applications/Proma.app`、`~/.proma`、`~/.proma-dev` 或真实用户数据；所有 dev/harness 使用 `PROMA_DEV_DATA_DIR_NAME=.proma-dev-fixture`。未推送、合并、打包或安装；fixture dev 与 8443 forwarding 保持运行。
+
+## 2026-10-19: 修复 Web Remote 手机端会话重命名
+
+- **根因与改动**：移动端“重命名会话”菜单原先尝试点击 `AgentHeader` 中被 CSS 隐藏的 Radix `DropdownMenuTrigger`，触发回调不等于输入框获得焦点。现在由 `AgentHeader` 显式注册编辑回调，Web Remote 菜单直接调用它，不再点击隐藏触发器；编辑输入框在切换编辑态时保持挂载，避免 Radix 菜单收起导致输入框卸载/焦点丢失。手机端只有在用户真实触摸并聚焦输入框后才允许 blur 保存；桌面路径保持原行为。
+- **顶栏同步**：React 原位更新会话标题时可能只改已有文本节点的 `nodeValue`，旧观察器没有监听 `characterData`，导致侧栏/AgentHeader 已更新而 Web Remote 顶栏仍显示旧标题。扩展 mobile patch 的 observer 后，顶栏会随会话标题变化同步。新增 DOM 单测覆盖文本节点更新。
+- **iPhone 与 Android CDP 触屏验收**：两端均从“重命名会话”菜单进入可见的 inline editor；触摸输入框后焦点落在输入框，并通过 CDP 输入新标题、Enter 保存。保存后会话 API、AgentHeader、移动顶栏和侧栏名称一致；再通过移动菜单恢复合成 fixture 会话原标题。两端均验证 Escape 取消和空白标题 Enter 取消不改变已保存标题。截图与结构化记录分别位于 `/tmp/rename-iphone-final/`、`/tmp/rename-android-final/`。Headless mobile CDP 没有呈现 OS 虚拟键盘，因此本次证据证明输入框真实可聚焦且接受文本，不声称观察到键盘 UI 弹出。
+- **验证**：新增 `agent-session-rename.test.ts` 与 mobile patch 观察器测试；定向测试 **17 pass / 0 fail / 75 expect**。全仓 `bun run typecheck` 六个 workspace 全通过；全量 `bun test`（独立临时 HOME，未继承 fixture 目录变量）**785 pass / 0 fail / 2,037 expect / 124 files**；`build:main`、`build:renderer`、`build:web-preload` 通过，renderer 保留既有 large-chunk 提示。
+- Android 横向表格触摸滚动仍未验收（目标表格在 viewport 外，详见同日上一条），不将本轮 Android 重命名成功外推为该布局项已通过。所有浏览器与构建验证均显式使用 fixture dev 环境；未触碰正式应用/数据，未推送、合并、打包或安装，fixture dev 与 8443 forwarding 保持运行。

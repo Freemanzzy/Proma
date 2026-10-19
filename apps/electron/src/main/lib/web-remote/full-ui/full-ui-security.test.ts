@@ -147,6 +147,18 @@ describe('Web Remote full-ui security policy', () => {
     }
   })
 
+  test('批量恢复队列逐个过滤未授权会话并拒绝无效/超长数组', async () => {
+    expect(getWebRemoteChannelPolicy('agent:get-queued-messages-batch')).toMatchObject({ level: 'read', scope: 'none' })
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
+    bridge.registerInvoke('agent:get-queued-messages-batch', async (_event, ids) => Object.fromEntries((ids as string[]).map((id) => [id, [{ input: { queueMessageId: `q-${id}` }, queuedAt: 1 }]])))
+    const ws = client(bridge)
+    const mixed = await invoke(ws, 'agent:get-queued-messages-batch', [['s-1', 's-2']])
+    expect(mixed.value).toEqual({ 's-1': [{ input: { queueMessageId: 'q-s-1' }, queuedAt: 1 }] })
+    expect((await invoke(ws, 'agent:get-queued-messages-batch', ['not-an-array'])).error.denied).toBe(true)
+    expect((await invoke(ws, 'agent:get-queued-messages-batch', [Array.from({ length: 201 }, (_, index) => `s-${index}`)])).error.denied).toBe(true)
+    expect((await invoke(ws, 'agent:get-queued-messages-batch', [['s-1', '']])).error.denied).toBe(true)
+  })
+
   test('历史媒体只读通道显式为 session scope 并拒绝未授权会话', async () => {
     expect(getWebRemoteChannelPolicy('web-remote:get-history-media')).toMatchObject({ level: 'read', scope: 'session' })
     const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)

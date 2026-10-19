@@ -89,6 +89,13 @@ export const MOBILE_CSS = String.raw`@media (max-width: 767px) {
   [data-web-remote-panel="right"] [data-web-remote-mobile-long-path] { font-size:12px; }
   [data-web-remote-panel="right"] [data-web-remote-long-path] { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   [data-web-remote-panel="right"] [data-web-remote-long-path][data-expanded="true"] { white-space:normal; overflow-wrap:anywhere; }
+  /* Web Remote 的消息正文不需要桌面头像列预留；回复与会话标题对齐。 */
+  [data-web-remote-main="true"] .message-item [class*="pl-[46px]"] { padding-left:0!important; }
+  /* Markdown 表格独立成为横向滚动面，保持纵向页面滚动由外层负责。 */
+  [data-web-remote-main="true"] .prose table { display:block; width:max-content; min-width:100%; max-width:calc(100vw - 24px); overflow-x:auto; overflow-y:hidden; -webkit-overflow-scrolling:touch; touch-action:pan-x pan-y; }
+  [data-web-remote-main="true"] .prose table th, [data-web-remote-main="true"] .prose table td { min-width:5.5em; white-space:nowrap; }
+  /* 顶栏已展示同一会话标题；隐藏正文重复标题，重命名入口保留在顶栏菜单。 */
+  button[data-web-remote-mobile-session-title-hidden="true"] { display:none!important; }
   img[alt="用户头像"] { display:none!important; }
 }
 @media (max-width: 767px) { [data-web-remote-mobile-menu], [data-web-remote-panel-toggle], [data-web-remote-refresh], [data-web-remote-notification-entry] { display:inline-flex!important; align-items:center; justify-content:center; width:40px!important; min-width:40px!important; height:40px!important; min-height:40px!important; padding:0!important; border-radius:12px!important; font-size:0!important; line-height:0!important; } [data-web-remote-mobile-topbar] svg { display:block; flex:none; } }

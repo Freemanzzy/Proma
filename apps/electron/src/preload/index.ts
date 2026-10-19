@@ -679,6 +679,8 @@ export interface ElectronAPI {
   onAgentQueuedMessageStatus: (callback: (status: AgentQueuedMessageStatus) => void) => () => void
   /** 获取主进程持有的 deferred queue 快照；用于 renderer 重载恢复队列 UI。 */
   getQueuedAgentMessages: (sessionId: string) => Promise<AgentQueuedMessageSnapshot[]>
+  /** 一次获取多个会话的队列快照；远程端按会话授权逐项过滤。 */
+  getQueuedAgentMessagesBatch: (sessionIds: string[]) => Promise<Record<string, AgentQueuedMessageSnapshot[]>>
 
   // ===== Agent 工作区管理相关 =====
 
@@ -1997,6 +1999,9 @@ const electronAPI = {
   },
   getQueuedAgentMessages: (sessionId: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_QUEUED_MESSAGES, sessionId)
+  },
+  getQueuedAgentMessagesBatch: (sessionIds: string[]) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_QUEUED_MESSAGES_BATCH, sessionIds)
   },
   onAgentQueuedMessageStatus: (callback: (status: AgentQueuedMessageStatus) => void) => {
     const listener = (_: unknown, status: AgentQueuedMessageStatus): void => callback(status)

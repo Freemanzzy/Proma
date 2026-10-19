@@ -529,13 +529,23 @@ export class WebRemoteIpcBridge {
       return this.deny(channel, 'channel is not registered in the full-ui policy')
     }
     if (policy.level === 'denied') return this.deny(channel, policy.rationale)
-    if (!this.scopeAllowed(policy, args)) return this.deny(channel, 'session/workspace is outside the allowed scope or missing')
+    if (channel === 'agent:get-queued-messages-batch') {
+      const sessionIds = args[0]
+      if (!Array.isArray(sessionIds) || sessionIds.length > 200 || sessionIds.some((id) => typeof id !== 'string' || !id)) {
+        return this.deny(channel, 'sessionIds must be an array of at most 200 non-empty strings')
+      }
+    } else if (!this.scopeAllowed(policy, args)) return this.deny(channel, 'session/workspace is outside the allowed scope or missing')
     if (!(await pathScopeAllowed(channel, args, this.resolvers))) return this.deny(channel, 'file path is outside the allowed workspace/session roots')
     if (policy.level === 'confirm' && !this.consumeConfirmation(client, channel, confirmToken)) return this.challenge(client, channel)
     return null
   }
 
   private filterResult(channel: string, value: unknown, args: unknown[]): unknown {
+    if (channel === 'agent:get-queued-messages-batch') {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+      const requested = new Set(args[0] as string[])
+      return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([sessionId]) => requested.has(sessionId) && this.sessionAllowed(sessionId)))
+    }
     let filtered = channel === 'settings:get' || channel === 'channel:list' ? redactSensitive(value) : channel === 'agent:get-mcp-config' ? redactMcpConfig(value) : value
     if (!HEAVY_SESSION_BASELINE && channel === 'agent:get-sdk-messages' && Array.isArray(value)) {
       const paging = args[1] && typeof args[1] === 'object' ? args[1] as { budgetBytes?: unknown; endIndex?: unknown; inlineImageBudgetBytes?: unknown } : {}

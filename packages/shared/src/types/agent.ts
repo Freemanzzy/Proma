@@ -1835,6 +1835,8 @@ export const AGENT_IPC_CHANNELS = {
   ACTIVE_SESSIONS_SNAPSHOT: 'agent:active-sessions-snapshot',
   /** 获取指定会话中仍由主进程持有的 deferred queue 快照。 */
   GET_QUEUED_MESSAGES: 'agent:get-queued-messages',
+  /** 批量读取指定会话的 deferred queue 快照，供 renderer 一次恢复。 */
+  GET_QUEUED_MESSAGES_BATCH: 'agent:get-queued-messages-batch',
   /** 获取会话 SDKMessage（Phase 4 新格式） */
   GET_SDK_MESSAGES: 'agent:get-sdk-messages',
   /** 更新会话标题 */
