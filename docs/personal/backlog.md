@@ -37,7 +37,7 @@
 | 2026-10-08 | harness `iphone:interactions` 点选 A 后 AskUser 横幅立即消失；真机交互正常 | 测试 | ✅ harness 根因已查明并修复：`findElement('A')` 把关闭按钮 `title="关闭并终止 Agent"` 的 A 子串当作选项，实际触碰 X；精确按选项 `span` 匹配后 `iphone:interactions` 全套通过（AskUser 回答 A、计划审批通过）。证据与截图见 `docs/personal/changelog.md` 2026-10-08 条目/本次会话工作台。权限请求确认仍未覆盖：应用只有 `bypassPermissions`、`plan` 两种模式，没有需确认模式，待父会话决策是否补足产品/测试路径 |
 | 2026-10-08 | 持久化的未使用草稿累积（正式版 9 条；用户确认侧栏不显示） | 数据 | ✅ 已实现启动时严格筛选空草稿，备份完整 metadata 后经会话删除 API 清理；dev 初始 832 会话/3 草稿，清理 3 后 829/0，备份权限 0600；全量测试通过。正式版 `~/.proma` 未触碰。详见 changelog 2026-10-08 “未使用草稿清理” |
 | 2026-10-08 | ChatGPT 订阅 (Codex) 模型目录缺少 GPT-6.1 Sol | Mac | ✅ 已加入精确模型识别、与 GPT-6 Sol 相同的推理档位/上下文、Fast Mode、Pi catalog 与存量渠道幂等候选迁移。CLI 0.154.0 的 HTTP 400 属客户端版本门控；ChatGPT.app 自带 codex-cli 0.162.0-alpha.2 在同一账号返回 ok。Pi SDK 请求头为 `originator: pi` 且无 `version` 头，是否可用待用户在 dev 重新登录后实测，不下最终结论 |
-| 2026-10-08 | Codex Ultra reasoning 档位 | 产品能力 | 未实现：虽然服务端模型清单报告支持 ultra，但该档位会影响 Astra/Sol 等多个模型系列；当前产品 ThinkingLevel/profile 类型没有 ultra，本次仅保持 6.1 Sol 与 6 Sol 一致，不扩展全局档位。后续需单独评估产品 UI、协议映射与各模型支持范围 |
+| 2026-10-08 | Codex Ultra reasoning 档位 | 产品能力 | 未实现：虽然服务端模型清单报告支持 ultra，但该档位会影响 Astra/Sol 等多个模型系列；当前产品 ThinkingLevel/profile 类型没有 ultra，本次仅保持 6.1 Sol 与 6 Sol 一致，不扩展全局档位。后续需单独评估产品 UI、协议映射与各模型支持范围。❌ 用户 2026-10-19 决定不做 |
 | 2026-10-08 | `install-update.sh` 启动后快照比对要求会话数完全一致，会把启动时的草稿清理误判为失败并回滚；本次由 Claude Code 用授权的脚本副本安装 | 安装 | ✅ 已实现：`health-snapshot.py --compare` 仅在启动前 `since` 之后生成的草稿备份 ID 并集与减少 ID 完全一致、备份条目均为草稿、减少 ID 不在启动后索引且其他快照字段一致时接受差异；旧调用保持严格一致。脚本测试与 `/tmp` `--test-mode` 演练覆盖。另：打包前先 Boot 模拟器，避免 serve-sim 冒烟被跳过 |
 | 2026-10-15 | 安装后续：fresh 启动标记、钥匙串前调度器与配置目录日志 | 安装 | ✅ 已实现：安装脚本以本次启动时刻为界轮询 `main.log` / `.1`；调度器与健康检查移到 Web Remote 后、钥匙串相关初始化前；main.log 增加仅含目录名的配置目录事件。全量验证结果见 changelog。 |
 | 2026-10-10 | macOS 退出完成服务清理后进程仍存活，17888/17889 均停止 | Mac/dev | ✅ 已修复并安装（ac21c948，10-11 实测退出 42 ms 到 will-quit）。对照实验支持根因是个人版两阶段 `before-quit`：保留 `preventDefault` + async 清理后再次 `app.quit()` 时稳定进入 watchdog；临时单阶段变体触发 `will-quit` 且未触发 watchdog。已改为单阶段调用同步模拟器子进程清理，watchdog 保留兜底。SIGTERM dev 验证 0.319 秒退出；active serve-sim 预览清理与正常 Dock 退出未实测 |
@@ -59,7 +59,7 @@
 4. **两层测试**：✅ 已实现。功能回归默认用 `bash scripts/personal/mobile-preview.sh fixture` 重置并运行合成 fixture（2 个工作区、20 条会话、父子委派、Automation、归档、合成大历史）；真实负载层仍按下方触发条件执行，只测量、不作功能判定。2026-10-14 已跑 smoke/layout/session-sync/interactions 全套通过。
 5. **手机查看子任务**：✅ 已完成（2026-10-07）。
 6. **`restoreQueuedMessages()` 合并为一次请求**：✅ Web Remote 最多 200 个 sessionId 的 batch 只读 IPC，逐项过滤越权会话；desktop 保留原单会话调用。reload 时先取活跃快照再恢复队列，避免 session 列表尚未到达导致零 batch。fixture API Key 会话实测 reload 后 batch 1 次、单会话 0 次，队列项显示并可取消；全量安全测试通过。详见 changelog 2026-10-19。
-7. **发送的可见确认标记**（可选，用户未要求）。
+7. ~~**发送的可见确认标记**~~：❌ 用户 2026-10-19 决定不做。
 8. **“只推送手机正在看的会话的实时输出”**：完成事件瘦身与背压上线后积压已消除，暂不需要；若计量再出现 MB 级峰值再评估。
 9. **WebAssembly 被 CSP 拦截的启动报错**：既有独立缺陷，不得放宽 CSP 修复。
 10. **上游同步准备**：下次官方 tag 时把 `useGlobalAgentListeners.ts` 的个人版改动拆为独立模块，降低冲突面（见本机 `upstream-surface` 报告）。
