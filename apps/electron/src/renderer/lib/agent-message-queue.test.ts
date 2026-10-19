@@ -29,6 +29,16 @@ describe('queued message @file mention path decoding (Agent 侧真实路径)', (
     ])
   })
 
+  test('Web Remote queue recovery includes authorized active snapshot IDs before the session list is available', () => {
+    expect(selectQueuedMessageRecoverySessionIds({
+      isWebRemote: true,
+      sessions: [],
+      streamStates: new Map(),
+      queues: new Map(),
+      activeSessionIds: new Set(['active-snapshot-only']),
+    })).toEqual(['active-snapshot-only'])
+  })
+
   test('desktop queue recovery still checks every listed session and existing queue key', () => {
     const sessions = [{ id: 'active' }, { id: 'archived', archived: true }]
     const queues = new Map<string, readonly unknown[]>([['orphan', [{}]]])

@@ -133,30 +133,19 @@ function createMobilePatchHarness(
 }
 
 describe('renderWebRemoteMobilePatch DOM write convergence', () => {
-  test('手机端消息表格可横向触摸滚动、正文收窄，重复标题与 composer 文案有对应规则', () => {
+  test('手机端消息表格可横向触摸滚动、正文收窄，重复标题规则不再事后改写 composer', () => {
     const html = renderWebRemoteMobilePatch()
     expect(html).toContain('[data-web-remote-main="true"] .message-item [class*="pl-[46px]"] { padding-left:0!important; }')
     expect(html).toContain('overflow-x:auto; overflow-y:hidden; -webkit-overflow-scrolling:touch; touch-action:pan-x pan-y;')
     expect(html).toContain('button[data-web-remote-mobile-session-title-hidden="true"] { display:none!important; }')
-    expect(html).toContain("document.querySelectorAll('textarea, input, [contenteditable=\"true\"], [data-placeholder]')")
+    expect(html).not.toContain("setAttribute('data-placeholder','输入消息…')")
     expect(html).toContain('renameButton.textContent=')
     expect(html).toContain('menu.hidden=true;sessionButton.click()')
-    expect(html).toContain("input.setAttribute('data-placeholder',")
   })
 
   afterEach(() => {
     for (const restore of mobilePatchPrototypeRestorers.splice(0).reverse()) restore()
     ManualMutationObserver.instances = []
-  })
-
-  test('手机端压缩 TipTap 的 data-placeholder，兼容 contenteditable placeholder', () => {
-    const { document, observers } = createMobilePatchHarness()
-    const placeholder = document.createElement('p')
-    placeholder.setAttribute('data-placeholder', '输入消息...（@ 引用文件，/ 调用 Skill，# 使用 MCP；Enter 发送）')
-    document.body.appendChild(placeholder)
-    observers[0]!.trigger()
-    expect(placeholder.getAttribute('data-placeholder')).toBe('输入消息…')
-    expect(placeholder.dataset.webRemoteMobileComposerPlaceholder).toBe('true')
   })
 
   test('媒体占位点击后原位显示图片，长文本点击后原位展开', async () => {

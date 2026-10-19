@@ -1124,7 +1124,7 @@ export function useGlobalAgentListeners(): void {
     // ===== 0. 初始化：恢复 stoppedByUser、主进程真实运行态与 deferred queue 投影 =====
     // 队列由主进程持有。reload 后只将还在主进程队列中的项合并到本地，
     // 使用 queueMessageId 去重，绝不覆盖用户在 reload 窗口内刚更新的本地投影。
-    const restoreQueuedMessages = async (): Promise<void> => {
+    const restoreQueuedMessages = async (activeSessionIds?: ReadonlySet<string>): Promise<void> => {
       const queues = store.get(agentSessionMessageQueueAtom)
       const isWebRemote = (window as Window & { __PROMA_WEB_REMOTE__?: boolean }).__PROMA_WEB_REMOTE__ === true
       const sessionIds = selectQueuedMessageRecoverySessionIds({
@@ -1132,6 +1132,7 @@ export function useGlobalAgentListeners(): void {
         sessions: store.get(agentSessionsAtom),
         streamStates: store.get(agentStreamingStatesAtom),
         queues,
+        activeSessionIds,
       })
       if (sessionIds.length === 0) return
       const recoverySessionIds = isWebRemote ? sessionIds.slice(0, 200) : sessionIds
@@ -1230,9 +1231,9 @@ export function useGlobalAgentListeners(): void {
       // Keep this recovery limited to runtime state so it neither duplicates a list request nor
       // replaces an archive view with an active-only snapshot. Stopped-session state is restored
       // on renderer initialization above and remains in memory across a WebSocket reconnect.
-      const [activeSnapshotSessionIds] = await Promise.all([
-        restoreActiveSnapshots(),
-        restoreQueuedMessages(),
+      const activeSnapshotSessionIds = await restoreActiveSnapshots()
+      await Promise.all([
+        restoreQueuedMessages(activeSnapshotSessionIds),
         restorePendingRequests(),
       ])
       const missingSessionIds = findMissingActiveAgentSessionIds(
@@ -1256,7 +1257,14 @@ export function useGlobalAgentListeners(): void {
       })
     }
 
-    void Promise.all([restoreQueuedMessages(), restorePendingRequests(), restoreActiveSnapshots(), restoreStoppedSessions()]).catch(console.error)
+    void (async () => {
+      const activeSnapshotSessionIds = await restoreActiveSnapshots()
+      await Promise.all([
+        restoreQueuedMessages(activeSnapshotSessionIds),
+        restorePendingRequests(),
+        restoreStoppedSessions(),
+      ])
+    })().catch(console.error)
     if (typeof window !== 'undefined') {
       ;(window as Window & { __PROMA_WEB_REMOTE_RECOVER?: () => Promise<void> }).__PROMA_WEB_REMOTE_RECOVER = recoverWebRemoteState
     }

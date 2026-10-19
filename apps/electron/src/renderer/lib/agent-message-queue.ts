@@ -14,11 +14,14 @@ export function selectQueuedMessageRecoverySessionIds({
   sessions,
   streamStates,
   queues,
+  activeSessionIds,
 }: {
   isWebRemote: boolean
   sessions: readonly Pick<AgentSessionMeta, 'id' | 'archived' | 'isDraft'>[]
   streamStates: ReadonlyMap<string, Pick<AgentStreamState, 'running' | 'backgroundWaiting'>>
   queues: ReadonlyMap<string, readonly unknown[]>
+  /** Main-process activity snapshots can arrive before the session list during renderer startup. */
+  activeSessionIds?: ReadonlySet<string>
 }): string[] {
   const sessionIds = isWebRemote
     ? sessions.filter((session) => {
@@ -27,7 +30,8 @@ export function selectQueuedMessageRecoverySessionIds({
       return state?.running === true || state?.backgroundWaiting === true || (queues.get(session.id)?.length ?? 0) > 0
     }).map((session) => session.id)
     : sessions.map((session) => session.id)
-  return [...new Set([...sessionIds, ...queues.keys()])]
+  const activeSnapshotIds = isWebRemote ? (activeSessionIds ?? []) : []
+  return [...new Set([...sessionIds, ...queues.keys(), ...activeSnapshotIds])]
 }
 
 export type QueueDropPlacement = 'before' | 'after'

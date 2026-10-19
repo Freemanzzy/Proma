@@ -115,11 +115,6 @@ export const MOBILE_JS = String.raw`(function(){
       setIfChanged(saver,'dataSaverState',weak?'on':'off',function(){saver.textContent=weak?'省流量 开':'省流量 关';saver.setAttribute('aria-pressed',String(weak));saver.setAttribute('aria-label','切换省流量模式，当前'+(weak?'开启':'关闭'))});
     }
     syncDataSaver();
-    // 手机上缩短 Agent composer 占位文案；桌面端以及无可用模型提示保持原样。
-    document.querySelectorAll('textarea, input, [contenteditable="true"], [data-placeholder]').forEach(function(input){
-      var placeholder=input.getAttribute('placeholder')||input.getAttribute('data-placeholder')||'';
-      if(placeholder.indexOf('输入消息...（')===0){input.dataset.webRemoteMobileComposerPlaceholder='true';if(input.hasAttribute('data-placeholder'))input.setAttribute('data-placeholder','输入消息…');else input.setAttribute('placeholder','输入消息…')}
-    });
     // AgentHeader 会话标题已复制到顶栏；正文按钮作为顶栏菜单重命名的动作目标保留在 DOM，视觉上隐藏。
     document.querySelectorAll('button[aria-label^="会话菜单："]').forEach(function(button){button.dataset.webRemoteMobileSessionTitleHidden='true'});
     function syncLargeInlineImages(){
