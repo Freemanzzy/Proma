@@ -164,6 +164,8 @@ export interface FeishuChatBinding {
   modelId?: string
   /** 绑定来源：飞书主动绑定或 Proma 桌面 Session 镜像 */
   source?: 'feishu' | 'session-mirror'
+  /** 是否将桌面发起的用户消息和回答同步到该绑定群；旧数据默认关闭。 */
+  mirrorDesktopRuns?: boolean
   /** 是否已归档 */
   archived?: boolean
   /** 归档时间 */

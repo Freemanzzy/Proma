@@ -334,7 +334,7 @@ export async function createAgentWorkspace(input: string | CreateAgentWorkspaceI
 /** 更新工作区名称（slug 和目录不变） */
 export async function updateAgentWorkspace(
   id: string,
-  updates: { name: string },
+  updates: import('@proma/shared').UpdateAgentWorkspaceInput,
 ): Promise<AgentWorkspace> {
   const index = readIndex()
   const idx = index.workspaces.findIndex((w) => w.id === id)
@@ -345,14 +345,20 @@ export async function updateAgentWorkspace(
 
   const existing = index.workspaces[idx]!
 
-  const duplicate = index.workspaces.find((w) => w.id !== id && w.name === updates.name)
-  if (duplicate) {
-    throw new Error(`项目名称「${updates.name}」已存在`)
+  if (updates.name !== undefined) {
+    const trimmedName = updates.name.trim()
+    if (!trimmedName) throw new Error('项目名称不能为空')
+    const duplicate = index.workspaces.find((w) => w.id !== id && w.name === trimmedName)
+    if (duplicate) throw new Error(`项目名称「${trimmedName}」已存在`)
+    updates = { ...updates, name: trimmedName }
+  }
+  if (updates.externalAccess !== undefined && updates.externalAccess !== 'read-write' && updates.externalAccess !== 'read-only') {
+    throw new Error('工作区外部访问模式无效')
   }
 
   const updated: AgentWorkspace = {
     ...existing,
-    name: updates.name,
+    ...updates,
     updatedAt: Date.now(),
   }
 

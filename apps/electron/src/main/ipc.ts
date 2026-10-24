@@ -443,6 +443,7 @@ import {
   getDecryptedBotAppSecret,
 } from './lib/feishu-config'
 import { feishuBridgeManager } from './lib/feishu-bridge-manager'
+import { cleanDesktopMirrorText, shouldMirrorDesktopRun } from './lib/feishu/desktop-mirror'
 import { syncFeishuSyncSleepBlocker } from './lib/feishu-sleep-blocker'
 import { presenceService } from './lib/feishu-presence'
 import { getDingTalkConfig, saveDingTalkConfig, getDecryptedClientSecret, getDingTalkMultiBotConfig, saveDingTalkBotConfig, removeDingTalkBot, getDecryptedBotClientSecret } from './lib/dingtalk-config'
@@ -2843,7 +2844,7 @@ export function registerIpcHandlers(): void {
   // 更新 Agent 工作区
   ipcMain.handle(
     AGENT_IPC_CHANNELS.UPDATE_WORKSPACE,
-    async (_, id: string, updates: { name: string }): Promise<AgentWorkspace> => {
+    async (_, id: string, updates: import('@proma/shared').UpdateAgentWorkspaceInput): Promise<AgentWorkspace> => {
       return updateAgentWorkspace(id, updates)
     }
   )
@@ -3467,6 +3468,21 @@ export function registerIpcHandlers(): void {
           await feishuBridgeManager.startSessionMirrorRun(session).catch((error) => {
             console.error('[飞书 Session 镜像] 流式卡片初始化失败:', error)
           })
+          const binding = feishuBridgeManager.listAllBindings().find((item) => item.sessionId === session.id)
+          if (shouldMirrorDesktopRun(binding, 'desktop')) {
+            const rawText = input.rawUserMessage ?? input.userMessage
+            const mirrorText = cleanDesktopMirrorText(rawText)
+            if (mirrorText) {
+              // best-effort：飞书接口慢或无响应时最多等 5 秒，绝不拖住桌面发送。
+              let mirrorTimer: ReturnType<typeof setTimeout> | undefined
+              await Promise.race([
+                feishuBridgeManager.startBoundDesktopMirrorRun(session, mirrorText),
+                new Promise<void>((_, reject) => { mirrorTimer = setTimeout(() => reject(new Error('飞书桌面同步超过 5 秒，已跳过等待')), 5_000) }),
+              ]).catch((error) => {
+                console.error('[飞书桌面同步] best-effort 同步失败:', redactSensitiveLogValue(error))
+              }).finally(() => { if (mirrorTimer) clearTimeout(mirrorTimer) })
+            }
+          }
         }
         // runGeneration 是主进程内部运行身份；renderer IPC 绝不能指定或复用它。
         const { runGeneration: _ignoredRunGeneration, ...publicInput } = input as AgentSendInput & { runGeneration?: unknown }

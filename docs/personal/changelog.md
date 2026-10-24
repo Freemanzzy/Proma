@@ -1740,3 +1740,39 @@
 - `handleInputBlur` 的“尚未真正获得焦点时不保存”保护从仅手机端扩展到所有平台。
 - 新增 `AgentHeader.rename-focus.test.ts`（4 项，读取源码断言入口、关闭焦点与 blur 保护）；全量 789 pass / 0 fail，全仓 typecheck 6 个 workspace 通过。dev（fixture）桌面窗口待用户实测保存 / Esc / 失焦三条路径。
 
+
+## 2026-10-24: 飞书群模型跟随会话（Step 1）
+
+- **模型优先级**：新增纯函数 `resolveBridgeModelSelection`，飞书发送路径与 `/now` 统一使用 session meta > binding > Bot 默认 > 应用设置；只接受当前仍启用的渠道和模型，失效的会话选择回退并仅输出不含密钥的诊断日志。
+- **飞书切换同步**：`/model <渠道> <模型>` 同时更新绑定与会话 `channelId/modelId`，通过 `updateAgentSessionMeta` 局部更新，不覆盖其它会话元数据；新绑定创建逻辑未改。
+- **验证**：新增 3 项模型优先级/无效回退单测，定向测试 3 pass；`bun run --cwd apps/electron typecheck` 通过。首轮测试因模块依赖 Electron 的 `shell` 导出不适用于 Bun 测试环境，将选择器拆到纯函数模块后测试通过。
+- **当时的范围状态**：该记录提交时仅完成执行简报 Step 1；Step 2–4 与总体验收后续另行完成并记录（见本文件后续 2026-10-24 条目）。未连接真实 Feishu 或发送消息。
+
+
+## 2026-10-24: 飞书绑定会话提前自动压缩（Step 2）
+
+- `feishuBridgeManager.hasSessionBinding(sessionId)` 提供只读绑定查询，覆盖任意来源。Agent 编排层据此向 Pi adapter 显式传入 120,000 token trigger；adapter 不导入飞书模块。
+- 新增纯函数计算 `reserveTokens = min(contextWindow, max(originalReserve, contextWindow - trigger))`。无绑定时仍使用原 reserve，且永不超过窗口；窗口 1M/200K/128K 及无绑定情形均有单测。超阈值会话首次运行时触发一次压缩属于预期。
+- **验证**：定向 `pi-compaction.test.ts` 4 pass；Electron typecheck 通过。真实 Feishu-bound run 尚未在 dev 验证（按要求不连接真实 Bot）。
+
+## 2026-10-24: 飞书绑定的桌面消息镜像开关（Step 3）
+
+- `FeishuChatBinding.mirrorDesktopRuns` 为可选布尔值，旧数据/默认值均关闭。`/mirror` 查询状态，`/mirror on|off` 只允许 `binding.userId` 对应的绑定用户写入并保存；`/now` 展示状态，`/help` 列出命令。
+- 桌面 `SEND_MESSAGE` 针对普通飞书绑定且开关开启时，先 best-effort 发 `[Proma 桌面]` 问题文本，再初始化绑定群的流式回答卡；不依赖全局 session mirror mode。文本清理 UI 引用标记（包括文件路径引用）并截断 2,000 字符；附件内容与路径不发送。飞书入口不经过桌面 IPC，`source === 'session-mirror'` 亦被排除，避免重复镜像。
+- **验证**：桌面镜像策略、清理/截断、绑定用户授权定向测试 3 pass；Electron typecheck 通过。尚未连接真实 Bot（按限制），因此飞书端真实发送/卡片更新未在 dev 实测。
+
+## 2026-10-24: Feishu workspace 外部只读模式（Step 4）
+
+- `AgentWorkspace.externalAccess` 为可选 `read-write | read-only`，旧工作区默认常规读写。工作区列表设置区新增“对其他工作区只读”复选项；仅用户显式操作才持久化。Renderer、IPC 和 workspace manager 均支持此字段。
+- `canUseTool` 在任何 permission-mode 分支（包括 `bypassPermissions`）之前检查：`Write`/`Edit`/`NotebookEdit` 按 `file_path`/`notebook_path` realpath 判定，仅允许 workspace 根、项目文件根（包含其 session dirs）。目标不存在时通过最近的已存在父目录解析；symlink 逃逸拒绝。Bash/PowerShell 仅使用已有只读分类器。无界文件/进程执行 `REPL`、`Workflow`、Terminal 写执行与控制、`SelectWorktree`、`InstallWindowsShell` 在该模式拒绝；Read/Grep/Glob/LS 继续走普通权限策略。协作委派参数没有 workspace 选择项，child 在 `ctx.workspaceId` 中创建并由同一 workspace guard 保护。
+- **定向验证**：路径/符号链接/不存在路径、Bash/PowerShell 分类和 bypassPermissions 守卫测试 4 pass；Step 1–4 合计定向测试 18 pass；Electron typecheck 通过。fixture dev 动态验收未完成，具体状态见本文件末尾总体验收记录。
+- **残余风险**：写型 MCP 工具（如 GitHub、Nowledge Mem/Library 等）不由此路径守卫拦截；Bash 分类器不是完整 shell parser，复杂 shell expansion、间接命令及未覆盖写命令仍需谨慎；路径检查与后续工具写入间存在常规 TOCTOU 窗口。真实 Feishu Bot / 群镜像不连接、不发送。
+
+## 2026-10-24: Feishu 群功能批次总体验收
+
+- **提交**：Step 1 `25b538d2`、Step 2 `9146694b`、Step 3 `b50b7428`、Step 4 `b902e63a`；每个提交各有且仅有一个 `Made-with: Proma` trailer，author email 均与 `git config user.email` 一致。分支为 `fix/feishu-group-20261024`；未 push、merge、package 或 install。
+- **验证**：全仓 `bun run typecheck` 六个 workspace 全部通过；隔离 HOME 后 `bun test` 为 803 pass / 0 fail（129 files）。第一次在 fixture 环境变量下跑测试出现 1 个 planning-manager 测试失败；按简报要求改用临时 HOME 且不启用 fixture 变量重跑后通过。`build:main`、`build:renderer`、`build:web-preload` 均通过；renderer 有既存的大 chunk 提示。
+- **Fixture dev**：使用 `PROMA_DEV_DATA_DIR_NAME=.proma-dev-fixture` 运行 `mobile-preview.sh fixture` 和 `start`，fixture 启动与只读页面加载成功；dev 服务当前保持运行。`/tmp/feishu-ro-dev/01-app-before-toggle.png` 与 `dev-log-excerpt.txt` 保存了页面及启动日志。真实 Agent 只读场景未能继续：移动 Web Remote 不提供桌面 workspace 设置写入口，workspace `updateAgentWorkspace` 也未通过该通道完成，fixture 中两个 workspace 的 `externalAccess` 仍为空；未发起验证 session。跨 workspace 读取、Write/Bash 写入拒绝、本 workspace 写入成功的动态结果因此均**未验证**；目标文件均不存在。不要将静态/单测结果误报为 dev 实测。
+- **文档**：本仓未找到专门的 Feishu 群命令/字段操作指南，也未在 `web-remote.md` 中添加桌面设置文档；命令 `/mirror [on|off]` 与 `AgentWorkspace.externalAccess` 字段说明保留在本 changelog 的 Step 3 / Step 4 条目及对应实现中。
+- **残余风险**：写型 MCP 工具（如 GitHub、Nowledge Mem/Library）不受本地工具路径守卫控制；Bash/PowerShell 只读分类器不是完整 shell 解析器，未覆盖或间接写入形式可能漏判；路径检查与实际写入之间存在 TOCTOU 窗口。Feishu 群消息与镜像未接真实 Bot 验证；120K 压缩阈值未在真实 Feishu-bound run 验证。
+- **结论**：代码与静态/自动化验收完成，但 Step 4 fixture 动态读写验收未完成，故该批次仍有明确的发布前验证缺口。

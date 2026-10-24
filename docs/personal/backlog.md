@@ -74,3 +74,5 @@
 
 - 用户 2026-10-07 决定：不把 Proma 加入登录项，继续由用户手动启动。
 - 约束（2026-10-16）：Web Remote `agent:list-directory` 若扩展允许根（超出会话/工作区/附加目录/worktree），必须同步更新 `full-ui-security.test.ts`。
+
+- **分支 `fix/feishu-group-20261024`（基于 `c9ffa511`）**：执行简报 Step 1–4 均已实现并提交；全仓 typecheck、全量测试（临时 HOME 隔离后 803 pass / 0 fail）及 `build:main`、`build:renderer`、`build:web-preload` 通过。fixture dev 服务保持运行，但 Step 4 的真实 Agent 读/写动态验收未完成：移动 Web Remote 无 workspace 设置写入口，且没有建立只读 workspace 状态或发起验证 session。证据与限制见 changelog 2026-10-24。未完成动态验收前不得视为可发布完成项。

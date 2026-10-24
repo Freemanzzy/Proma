@@ -33,7 +33,7 @@ import type {
 import { FEISHU_IPC_CHANNELS, AGENT_IPC_CHANNELS } from '@proma/shared'
 import { getDecryptedBotAppSecret } from './feishu-config'
 import { agentEventBus, runAgentHeadless, stopAgent } from './agent-service'
-import { createAgentSession, listAgentSessions, getAgentSessionMeta } from './agent-session-manager'
+import { createAgentSession, listAgentSessions, getAgentSessionMeta, updateAgentSessionMeta } from './agent-session-manager'
 import {
   listAgentWorkspacesByUpdatedAt,
   getAgentWorkspace,
@@ -73,6 +73,7 @@ import {
   describeBindingModel,
 } from './bridge-model-utils'
 import type { ToolSummary, FormattedAgentResult, WorkspaceListItem } from './feishu-message'
+import { resolveBridgeModelSelection } from './bridge-model-selection'
 import { CardStream } from './feishu/card-stream'
 import {
   createInitialState,
@@ -85,6 +86,7 @@ import {
 import { renderCard as renderRunCard } from './feishu/card-renderer-v2'
 import { buildSessionMirrorGroupName, normalizeSessionMirrorUserOpenId } from './feishu/session-mirror'
 import { resolveGroupMessageAccess } from './feishu/group-message-policy'
+import { canToggleDesktopMirror } from './feishu/desktop-mirror'
 import { ScopedQueue } from './feishu/scoped-queue'
 import { RunCoordinator } from './feishu/run-coordinator'
 import { extractFinalAssistantText, isPartialSDKMessage } from './bridge-agent-message-utils'
@@ -614,6 +616,33 @@ class FeishuBridge {
     }
   }
 
+  /** Best-effort desktop question + streaming answer for an opted-in regular Feishu binding. */
+  async startBoundDesktopMirrorRun(session: AgentSessionMeta, userText: string): Promise<void> {
+    const binding = this.findBindingBySessionId(session.id)
+    if (!binding || binding.source === 'session-mirror' || binding.mirrorDesktopRuns !== true) return
+    if (!this.client) throw new Error('飞书 Bot 尚未连接')
+    await this.sendTextMessage(binding.chatId, `[Proma 桌面] ${userText}`)
+    if (this.streamingCards.has(session.id)) return
+    const initialState = createInitialState()
+    this.streamingRunStates.set(session.id, initialState)
+    try {
+      const cardStream = await CardStream.open(
+        this.client,
+        binding.chatId,
+        renderRunCard(initialState, {
+          header: `${binding.groupName ?? session.title} · 桌面 Agent 处理中`,
+          stopHint: '桌面会话运行中',
+        }),
+      )
+      this.streamingCards.set(session.id, cardStream)
+      this.streamingCardsUsedSessions.add(session.id)
+    } catch (error) {
+      this.streamingRunStates.delete(session.id)
+      console.error('[飞书桌面同步] 流式卡片创建失败:', redactSensitiveLogValue(error))
+      throw error
+    }
+  }
+
   stopSessionMirrorRun(sessionId: string): void {
     this.markStreamingInterrupted(sessionId)
   }
@@ -1062,6 +1091,10 @@ class FeishuBridge {
         await this.handleNowCommand(msgCtx)
         break
 
+      case '/mirror':
+        await this.handleMirrorCommand(msgCtx, arg)
+        break
+
       case '/model':
       case '/m':
         await this.handleModelCommand(msgCtx, arg)
@@ -1070,6 +1103,30 @@ class FeishuBridge {
       default:
         await this.sendMessage(chatId, `未知命令: ${command}。输入 /help 查看帮助。`)
     }
+  }
+
+  private async handleMirrorCommand(msgCtx: FeishuMessageContext, arg: string): Promise<void> {
+    const binding = this.chatBindings.get(msgCtx.chatId)
+    if (!binding || binding.source === 'session-mirror') {
+      await this.sendMessage(msgCtx.chatId, '当前聊天没有可设置桌面同步的飞书绑定。')
+      return
+    }
+    const mode = arg.trim().toLowerCase()
+    if (mode !== '' && mode !== 'on' && mode !== 'off') {
+      await this.sendMessage(msgCtx.chatId, '用法：/mirror [on|off]')
+      return
+    }
+    if (mode === '') {
+      await this.sendMessage(msgCtx.chatId, `桌面消息与回答同步：${binding.mirrorDesktopRuns === true ? '已开启' : '已关闭'}`)
+      return
+    }
+    if (!canToggleDesktopMirror(binding, msgCtx.senderOpenId)) {
+      await this.sendMessage(msgCtx.chatId, '只有绑定用户可以更改桌面同步设置。')
+      return
+    }
+    binding.mirrorDesktopRuns = mode === 'on'
+    this.saveBindings()
+    await this.sendMessage(msgCtx.chatId, `桌面消息与回答同步已${binding.mirrorDesktopRuns ? '开启' : '关闭'}。`)
   }
 
   // ===== 会话管理 =====
@@ -1405,12 +1462,22 @@ class FeishuBridge {
       const session = getAgentSessionMeta(binding.sessionId)
       lines.push(`**会话**: ${session?.title ?? '未知'} (\`${binding.sessionId.slice(0, 8)}\`)`)
 
-      // 模型信息（与发送路径同序解析：binding > Bot 配置 > 应用设置）
+      // 模型信息按 session meta > binding > Bot 默认 > 应用设置解析。
       const nowSettings = getSettings()
-      const effChannelId = binding.channelId || this.botConfig.defaultChannelId || nowSettings.agentChannelId
-      const effModelId = binding.modelId || this.botConfig.defaultModelId || nowSettings.agentModelId
-      const modelInfo = describeBindingModel(effChannelId, effModelId)
+      const selection = resolveBridgeModelSelection([
+        session ? { channelId: session.channelId, modelId: session.modelId } : undefined,
+        { channelId: binding.channelId, modelId: binding.modelId },
+        { channelId: this.botConfig.defaultChannelId, modelId: this.botConfig.defaultModelId },
+        { channelId: nowSettings.agentChannelId, modelId: nowSettings.agentModelId },
+      ], listSwitchableChannels())
+      if (selection.sourceIndex > 0 && session && (session.channelId || session.modelId)) {
+        console.warn('[飞书 Bridge] 会话模型选择不可用，已回退到下一优先级')
+      }
+      const modelInfo = describeBindingModel(selection.channelId, selection.modelId)
       lines.push(`**模型**: ${modelInfo.channelName} / ${modelInfo.modelName}${modelInfo.valid ? '' : '（已失效）'}`)
+      if (binding.source !== 'session-mirror') {
+        lines.push(`**桌面同步**: ${binding.mirrorDesktopRuns === true ? '已开启' : '已关闭'}（/mirror on|off）`)
+      }
     } else {
       lines.push('**会话**: 未绑定（发送消息将自动创建）')
     }
@@ -1573,6 +1640,7 @@ class FeishuBridge {
 
     targetBinding.channelId = channel.id
     targetBinding.modelId = model.id
+    updateAgentSessionMeta(targetBinding.sessionId, { channelId: channel.id, modelId: model.id })
     this.saveBindings()
 
     await this.sendCardMessage(chatId, buildModelSwitchedCard(channel.name, model.name))
@@ -1745,10 +1813,19 @@ class FeishuBridge {
       ? [this.buildPiFeishuChatHistoryTool(chatId)]
       : undefined
 
-    // 渠道/模型解析：binding（per-chat 用户在 IM 里切过的）优先，其次 Bot 配置、应用设置
+    // 会话选择优先；无效/已停用选择自动回退，且日志不包含渠道凭据。
     const latestSettings = getSettings()
-    const channelId = binding.channelId || this.botConfig.defaultChannelId || latestSettings.agentChannelId || ''
-    const modelId = binding.modelId || this.botConfig.defaultModelId || latestSettings.agentModelId
+    const selection = resolveBridgeModelSelection([
+      { channelId: session.channelId, modelId: session.modelId },
+      { channelId: binding.channelId, modelId: binding.modelId },
+      { channelId: this.botConfig.defaultChannelId, modelId: this.botConfig.defaultModelId },
+      { channelId: latestSettings.agentChannelId, modelId: latestSettings.agentModelId },
+    ], listSwitchableChannels())
+    if (selection.sourceIndex > 0 && (session.channelId || session.modelId)) {
+      console.warn('[飞书 Bridge] 会话模型选择不可用，已回退到下一优先级')
+    }
+    const channelId = selection.channelId || ''
+    const modelId = selection.modelId
 
     const input: AgentSendInput = {
       sessionId: binding.sessionId,

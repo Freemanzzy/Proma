@@ -164,6 +164,17 @@ class FeishuBridgeManager {
     await bridge.ensureSessionMirror(session)
   }
 
+  /** Start the question/answer mirror for an opted-in regular binding; bypasses global auto-mirror mode. */
+  async startBoundDesktopMirrorRun(session: AgentSessionMeta, userText: string): Promise<void> {
+    for (const bridge of this.bridges.values()) {
+      const binding = bridge.listBindings().find((item) => item.sessionId === session.id)
+      if (!binding || binding.source === 'session-mirror' || binding.mirrorDesktopRuns !== true) continue
+      if (bridge.getStatus().status !== 'connected') throw new Error('绑定的飞书 Bot 当前未连接')
+      await bridge.startBoundDesktopMirrorRun(session, userText)
+      return
+    }
+  }
+
   /** 在 Agent 运行前创建 Session 镜像群里的流式卡片。 */
   async startSessionMirrorRun(session: AgentSessionMeta): Promise<void> {
     const mirrorSettings = getSettings().feishuSessionMirror
@@ -272,6 +283,11 @@ class FeishuBridgeManager {
     }
 
     return updated
+  }
+
+  /** Read-only session-binding query, independent of binding source. */
+  hasSessionBinding(sessionId: string): boolean {
+    return this.listAllBindings().some((binding) => binding.sessionId === sessionId)
   }
 
   /** 跨所有 Bot 的绑定列表 */

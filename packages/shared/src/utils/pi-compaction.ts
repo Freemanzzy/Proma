@@ -19,3 +19,19 @@ export function calculatePiAutoCompactionReserveTokens(contextWindow: number): n
 export function calculatePiAutoCompactionThresholdTokens(contextWindow: number): number {
   return contextWindow - calculatePiAutoCompactionReserveTokens(contextWindow)
 }
+
+/** Bound sessions may start compaction at an explicit token trigger without changing other sessions. */
+export function calculatePiAutoCompactionReserveTokensForTrigger(
+  contextWindow: number,
+  originalReserveTokens: number,
+  triggerTokens?: number,
+): number {
+  if (!Number.isFinite(contextWindow) || contextWindow <= 0) {
+    throw new TypeError('Pi context window must be a positive finite number')
+  }
+  if (triggerTokens == null) return Math.min(contextWindow, originalReserveTokens)
+  if (!Number.isFinite(triggerTokens) || triggerTokens < 0) {
+    throw new TypeError('Pi compaction trigger must be a non-negative finite number')
+  }
+  return Math.min(contextWindow, Math.max(originalReserveTokens, contextWindow - triggerTokens))
+}

@@ -29,6 +29,7 @@ import type {
 } from '@proma/shared'
 import {
   calculatePiAutoCompactionReserveTokens,
+  calculatePiAutoCompactionReserveTokensForTrigger,
   inferReasoningTransport,
   isCodexFastModeSupportedModel,
   resolveReasoningProfile,
@@ -119,6 +120,7 @@ export interface PiAgentQueryOptions extends AgentQueryInput {
   channelId?: string
   channelName?: string
   maxTurns?: number
+  autoCompactionTriggerTokens?: number
   permissionMode: PromaPermissionMode
   canUseTool?: (
     toolName: string,
@@ -1432,8 +1434,11 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         ? sdk.SessionManager.open(sessionFile, input.piSessionDir, cwd)
         : sdk.SessionManager.create(cwd, input.piSessionDir)
       const { modelRuntime, model } = await buildModel(sdk, input)
-      const autoCompactionReserveTokens = calculatePiAutoCompactionReserveTokens(
-        model.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+      const contextWindow = model.contextWindow ?? DEFAULT_CONTEXT_WINDOW
+      const autoCompactionReserveTokens = calculatePiAutoCompactionReserveTokensForTrigger(
+        contextWindow,
+        calculatePiAutoCompactionReserveTokens(contextWindow),
+        input.autoCompactionTriggerTokens,
       )
       let compactContextRequested = false
       let pendingCompactionContinuation: string | undefined
