@@ -1754,3 +1754,9 @@
 - `feishuBridgeManager.hasSessionBinding(sessionId)` 提供只读绑定查询，覆盖任意来源。Agent 编排层据此向 Pi adapter 显式传入 120,000 token trigger；adapter 不导入飞书模块。
 - 新增纯函数计算 `reserveTokens = min(contextWindow, max(originalReserve, contextWindow - trigger))`。无绑定时仍使用原 reserve，且永不超过窗口；窗口 1M/200K/128K 及无绑定情形均有单测。超阈值会话首次运行时触发一次压缩属于预期。
 - **验证**：定向 `pi-compaction.test.ts` 4 pass；Electron typecheck 通过。真实 Feishu-bound run 尚未在 dev 验证（按要求不连接真实 Bot）。
+
+## 2026-10-24: 飞书绑定的桌面消息镜像开关（Step 3）
+
+- `FeishuChatBinding.mirrorDesktopRuns` 为可选布尔值，旧数据/默认值均关闭。`/mirror` 查询状态，`/mirror on|off` 只允许 `binding.userId` 对应的绑定用户写入并保存；`/now` 展示状态，`/help` 列出命令。
+- 桌面 `SEND_MESSAGE` 针对普通飞书绑定且开关开启时，先 best-effort 发 `[Proma 桌面]` 问题文本，再初始化绑定群的流式回答卡；不依赖全局 session mirror mode。文本清理 UI 引用标记（包括文件路径引用）并截断 2,000 字符；附件内容与路径不发送。飞书入口不经过桌面 IPC，`source === 'session-mirror'` 亦被排除，避免重复镜像。
+- **验证**：桌面镜像策略、清理/截断、绑定用户授权定向测试 3 pass；Electron typecheck 通过。尚未连接真实 Bot（按限制），因此飞书端真实发送/卡片更新未在 dev 实测。

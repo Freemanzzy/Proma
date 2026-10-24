@@ -75,4 +75,4 @@
 - 用户 2026-10-07 决定：不把 Proma 加入登录项，继续由用户手动启动。
 - 约束（2026-10-16）：Web Remote `agent:list-directory` 若扩展允许根（超出会话/工作区/附加目录/worktree），必须同步更新 `full-ui-security.test.ts`。
 
-- **进行中分支 `fix/feishu-group-20261024`（基于 `c9ffa511`）**：执行简报 Step 1（模型跟随 session）与 Step 2（绑定会话 120K 自动压缩）已实现并通过定向测试/Electron typecheck；Step 3–4、fixture dev 验收及全仓验收仍待完成。不得将此分支视为可发布完成项。
+- **进行中分支 `fix/feishu-group-20261024`（基于 `c9ffa511`）**：执行简报 Step 1（模型跟随 session）、Step 2（绑定会话 120K 自动压缩）、Step 3（按绑定的桌面消息/回答镜像开关）已实现并通过定向测试/Electron typecheck；Step 4、fixture dev 验收及全仓验收仍待完成。不得将此分支视为可发布完成项。
