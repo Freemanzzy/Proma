@@ -1740,3 +1740,10 @@
 - `handleInputBlur` 的“尚未真正获得焦点时不保存”保护从仅手机端扩展到所有平台。
 - 新增 `AgentHeader.rename-focus.test.ts`（4 项，读取源码断言入口、关闭焦点与 blur 保护）；全量 789 pass / 0 fail，全仓 typecheck 6 个 workspace 通过。dev（fixture）桌面窗口待用户实测保存 / Esc / 失焦三条路径。
 
+
+## 2026-10-24: 飞书群模型跟随会话（Step 1）
+
+- **模型优先级**：新增纯函数 `resolveBridgeModelSelection`，飞书发送路径与 `/now` 统一使用 session meta > binding > Bot 默认 > 应用设置；只接受当前仍启用的渠道和模型，失效的会话选择回退并仅输出不含密钥的诊断日志。
+- **飞书切换同步**：`/model <渠道> <模型>` 同时更新绑定与会话 `channelId/modelId`，通过 `updateAgentSessionMeta` 局部更新，不覆盖其它会话元数据；新绑定创建逻辑未改。
+- **验证**：新增 3 项模型优先级/无效回退单测，定向测试 3 pass；`bun run --cwd apps/electron typecheck` 通过。首轮测试因模块依赖 Electron 的 `shell` 导出不适用于 Bun 测试环境，将选择器拆到纯函数模块后测试通过。
+- **范围状态**：本次只完成执行简报 Step 1；Step 2–4、fixture dev 验收、全仓 typecheck/全量测试及三个 build 尚未执行，不代表完整 Feishu group 功能已完成。未连接真实 Feishu 或发送消息。

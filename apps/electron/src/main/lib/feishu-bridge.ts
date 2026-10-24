@@ -33,7 +33,7 @@ import type {
 import { FEISHU_IPC_CHANNELS, AGENT_IPC_CHANNELS } from '@proma/shared'
 import { getDecryptedBotAppSecret } from './feishu-config'
 import { agentEventBus, runAgentHeadless, stopAgent } from './agent-service'
-import { createAgentSession, listAgentSessions, getAgentSessionMeta } from './agent-session-manager'
+import { createAgentSession, listAgentSessions, getAgentSessionMeta, updateAgentSessionMeta } from './agent-session-manager'
 import {
   listAgentWorkspacesByUpdatedAt,
   getAgentWorkspace,
@@ -73,6 +73,7 @@ import {
   describeBindingModel,
 } from './bridge-model-utils'
 import type { ToolSummary, FormattedAgentResult, WorkspaceListItem } from './feishu-message'
+import { resolveBridgeModelSelection } from './bridge-model-selection'
 import { CardStream } from './feishu/card-stream'
 import {
   createInitialState,
@@ -1405,11 +1406,18 @@ class FeishuBridge {
       const session = getAgentSessionMeta(binding.sessionId)
       lines.push(`**会话**: ${session?.title ?? '未知'} (\`${binding.sessionId.slice(0, 8)}\`)`)
 
-      // 模型信息（与发送路径同序解析：binding > Bot 配置 > 应用设置）
+      // 模型信息按 session meta > binding > Bot 默认 > 应用设置解析。
       const nowSettings = getSettings()
-      const effChannelId = binding.channelId || this.botConfig.defaultChannelId || nowSettings.agentChannelId
-      const effModelId = binding.modelId || this.botConfig.defaultModelId || nowSettings.agentModelId
-      const modelInfo = describeBindingModel(effChannelId, effModelId)
+      const selection = resolveBridgeModelSelection([
+        session ? { channelId: session.channelId, modelId: session.modelId } : undefined,
+        { channelId: binding.channelId, modelId: binding.modelId },
+        { channelId: this.botConfig.defaultChannelId, modelId: this.botConfig.defaultModelId },
+        { channelId: nowSettings.agentChannelId, modelId: nowSettings.agentModelId },
+      ], listSwitchableChannels())
+      if (selection.sourceIndex > 0 && session && (session.channelId || session.modelId)) {
+        console.warn('[飞书 Bridge] 会话模型选择不可用，已回退到下一优先级')
+      }
+      const modelInfo = describeBindingModel(selection.channelId, selection.modelId)
       lines.push(`**模型**: ${modelInfo.channelName} / ${modelInfo.modelName}${modelInfo.valid ? '' : '（已失效）'}`)
     } else {
       lines.push('**会话**: 未绑定（发送消息将自动创建）')
@@ -1573,6 +1581,7 @@ class FeishuBridge {
 
     targetBinding.channelId = channel.id
     targetBinding.modelId = model.id
+    updateAgentSessionMeta(targetBinding.sessionId, { channelId: channel.id, modelId: model.id })
     this.saveBindings()
 
     await this.sendCardMessage(chatId, buildModelSwitchedCard(channel.name, model.name))
@@ -1745,10 +1754,19 @@ class FeishuBridge {
       ? [this.buildPiFeishuChatHistoryTool(chatId)]
       : undefined
 
-    // 渠道/模型解析：binding（per-chat 用户在 IM 里切过的）优先，其次 Bot 配置、应用设置
+    // 会话选择优先；无效/已停用选择自动回退，且日志不包含渠道凭据。
     const latestSettings = getSettings()
-    const channelId = binding.channelId || this.botConfig.defaultChannelId || latestSettings.agentChannelId || ''
-    const modelId = binding.modelId || this.botConfig.defaultModelId || latestSettings.agentModelId
+    const selection = resolveBridgeModelSelection([
+      { channelId: session.channelId, modelId: session.modelId },
+      { channelId: binding.channelId, modelId: binding.modelId },
+      { channelId: this.botConfig.defaultChannelId, modelId: this.botConfig.defaultModelId },
+      { channelId: latestSettings.agentChannelId, modelId: latestSettings.agentModelId },
+    ], listSwitchableChannels())
+    if (selection.sourceIndex > 0 && (session.channelId || session.modelId)) {
+      console.warn('[飞书 Bridge] 会话模型选择不可用，已回退到下一优先级')
+    }
+    const channelId = selection.channelId || ''
+    const modelId = selection.modelId
 
     const input: AgentSendInput = {
       sessionId: binding.sessionId,
