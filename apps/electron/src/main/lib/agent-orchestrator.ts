@@ -1571,6 +1571,8 @@ export class AgentOrchestrator {
       }
       const piCustomTools = [...piBuiltinTools, ...piMcpTools, ...(extensions.piCustomTools ?? [])]
       let githubCopilotCredentialsSnapshot = githubCopilotOAuthCredentials
+      const { feishuBridgeManager } = await import('./feishu-bridge-manager')
+      const hasFeishuBinding = feishuBridgeManager.hasSessionBinding(sessionId)
       const queryOptions: PiAgentQueryOptions = {
         sessionId,
         prompt: finalPrompt,
@@ -1584,6 +1586,7 @@ export class AgentOrchestrator {
         provider: channel.provider,
         channelId,
         channelName: channel.name,
+        ...(hasFeishuBinding ? { autoCompactionTriggerTokens: 120_000 } : {}),
         proxyUrl,
         runtimeEnv,
         ...(maxTurns != null && { maxTurns }),

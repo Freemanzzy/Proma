@@ -45,6 +45,7 @@ export {
 export {
   PI_AUTO_COMPACTION_THRESHOLD_RATIO,
   calculatePiAutoCompactionReserveTokens,
+  calculatePiAutoCompactionReserveTokensForTrigger,
   calculatePiAutoCompactionThresholdTokens,
 } from './pi-compaction'
 export {

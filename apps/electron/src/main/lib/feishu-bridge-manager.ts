@@ -274,6 +274,11 @@ class FeishuBridgeManager {
     return updated
   }
 
+  /** Read-only session-binding query, independent of binding source. */
+  hasSessionBinding(sessionId: string): boolean {
+    return this.listAllBindings().some((binding) => binding.sessionId === sessionId)
+  }
+
   /** 跨所有 Bot 的绑定列表 */
   listAllBindings(): FeishuChatBinding[] {
     const all: FeishuChatBinding[] = []

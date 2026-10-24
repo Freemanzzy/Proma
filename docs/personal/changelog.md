@@ -1746,4 +1746,11 @@
 - **模型优先级**：新增纯函数 `resolveBridgeModelSelection`，飞书发送路径与 `/now` 统一使用 session meta > binding > Bot 默认 > 应用设置；只接受当前仍启用的渠道和模型，失效的会话选择回退并仅输出不含密钥的诊断日志。
 - **飞书切换同步**：`/model <渠道> <模型>` 同时更新绑定与会话 `channelId/modelId`，通过 `updateAgentSessionMeta` 局部更新，不覆盖其它会话元数据；新绑定创建逻辑未改。
 - **验证**：新增 3 项模型优先级/无效回退单测，定向测试 3 pass；`bun run --cwd apps/electron typecheck` 通过。首轮测试因模块依赖 Electron 的 `shell` 导出不适用于 Bun 测试环境，将选择器拆到纯函数模块后测试通过。
-- **范围状态**：本次只完成执行简报 Step 1；Step 2–4、fixture dev 验收、全仓 typecheck/全量测试及三个 build 尚未执行，不代表完整 Feishu group 功能已完成。未连接真实 Feishu 或发送消息。
+- **范围状态**：当时仅完成执行简报 Step 1；后续步骤与全量验收仍待执行，不代表完整 Feishu group 功能已完成。未连接真实 Feishu 或发送消息。
+
+
+## 2026-10-24: 飞书绑定会话提前自动压缩（Step 2）
+
+- `feishuBridgeManager.hasSessionBinding(sessionId)` 提供只读绑定查询，覆盖任意来源。Agent 编排层据此向 Pi adapter 显式传入 120,000 token trigger；adapter 不导入飞书模块。
+- 新增纯函数计算 `reserveTokens = min(contextWindow, max(originalReserve, contextWindow - trigger))`。无绑定时仍使用原 reserve，且永不超过窗口；窗口 1M/200K/128K 及无绑定情形均有单测。超阈值会话首次运行时触发一次压缩属于预期。
+- **验证**：定向 `pi-compaction.test.ts` 4 pass；Electron typecheck 通过。真实 Feishu-bound run 尚未在 dev 验证（按要求不连接真实 Bot）。
