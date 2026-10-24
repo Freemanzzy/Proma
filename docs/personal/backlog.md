@@ -75,4 +75,5 @@
 - 用户 2026-10-07 决定：不把 Proma 加入登录项，继续由用户手动启动。
 - 约束（2026-10-16）：Web Remote `agent:list-directory` 若扩展允许根（超出会话/工作区/附加目录/worktree），必须同步更新 `full-ui-security.test.ts`。
 
-- **已合入 personal、打包中（2026-10-24）**：`fix/feishu-group-20261024`——飞书模型跟随会话、绑定会话约 120K token 提前压缩、按绑定 `/mirror on|off` 桌面同步（默认关）、工作区“对其他工作区只读”（父会话复核补 MultiEdit 与严格 Bash 判定、桌面同步最多等 5 秒，`16dbfea5`）。fixture 运行时只读验收 4/4 通过（证据 `/tmp/feishu-ro-dev/runtime/`）；全量 805/0。与 `fix/desktop-rename-20261019` 一起打包。打包核验发现只读开关放在未挂载的 `WorkspaceSelector`（被 tree-shake），已移到左侧栏项目“…”菜单（`fix/readonly-toggle-entry-20261024`，未做 dev 点击验收，用户选择安装后实测反馈）。残余风险：写型 MCP 工具不受只读限制；Bash 判定为模式匹配非完整解析；真实飞书同步与压缩待安装后验证。
+- **已安装（2026-10-24，`3d33fab5`）**：桌面改名修复（用户实测通过）+ 飞书群 Bot（模型跟随会话、约 120K 提前压缩、`/mirror` 桌面同步开关、对其他工作区只读）。待用户反馈：小R 压缩后的回复速度、`@小R /mirror on` 后的群同步。
+- **已合入 personal、未安装（2026-10-24）**：`fix/feishu-followups-20261024`——启动时不再覆盖飞书 binding 模型；飞书错误摘要写入日志。随下一批安装。

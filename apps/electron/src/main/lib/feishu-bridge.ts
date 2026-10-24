@@ -97,7 +97,7 @@ import {
   type QuotedMessage,
 } from './feishu/prompt-builder'
 
-import { redactSensitiveLogText, redactSensitiveLogValue } from './bridge-log-redaction'
+import { redactSensitiveLogText, redactSensitiveLogValue, summarizeBridgeError } from './bridge-log-redaction'
 import { getFeishuApiBaseUrl, normalizeFeishuDomain } from './feishu-domain'
 
 // ===== 类型定义 =====
@@ -373,7 +373,6 @@ class FeishuBridge {
     try {
       const raw = readFileSync(bindingsPath, 'utf-8')
       const bindings = JSON.parse(raw) as FeishuChatBinding[]
-      const appSettings = getSettings()
 
       for (const b of bindings) {
         // 验证对应会话仍然存在
@@ -383,13 +382,9 @@ class FeishuBridge {
             b.archived = true
             b.archivedAt ??= session.updatedAt
           }
-          // 同步最新的渠道和模型设置（用户可能已更改）
-          if (appSettings.agentChannelId) {
-            b.channelId = appSettings.agentChannelId
-          }
-          if (appSettings.agentModelId) {
-            b.modelId = appSettings.agentModelId
-          }
+          // 个人版：不再在启动时用应用默认模型覆盖 binding。
+          // 模型按“会话 → binding → Bot 默认 → 应用设置”分级解析，不可用时自动回退；
+          // 覆盖会让 binding 这一级失效，并在下一次保存时改写绑定文件。
           this.chatBindings.set(b.chatId, b)
           if (!b.archived) {
             this.sessionToChat.set(b.sessionId, b.chatId)
@@ -1752,7 +1747,7 @@ class FeishuBridge {
       this.streamingCards.set(binding.sessionId, cardStream)
       this.streamingCardsUsedSessions.add(binding.sessionId)
     } catch (error) {
-      console.error('[飞书 Bridge] 流式卡片创建失败，降级为文本进度提示:', redactSensitiveLogValue(error))
+      console.error(`[飞书 Bridge] 流式卡片创建失败，降级为文本进度提示: ${summarizeBridgeError(error)}`, redactSensitiveLogValue(error))
       // 降级：保留原"处理中..."提示，最终走 sendAgentReply 兜底
       await this.sendMessage(chatId, `${prefix}Agent 处理中...`)
     }
@@ -2263,7 +2258,7 @@ class FeishuBridge {
         return name
       }
     } catch (error) {
-      console.warn('[飞书 Bridge] 获取用户信息失败:', redactSensitiveLogValue(error))
+      console.warn(`[飞书 Bridge] 获取用户信息失败: ${summarizeBridgeError(error)}`, redactSensitiveLogValue(error))
     }
 
     return openId.slice(0, 8)
