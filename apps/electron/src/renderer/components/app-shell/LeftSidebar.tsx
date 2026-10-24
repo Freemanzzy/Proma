@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Star, Settings, Plus, CirclePlus, Trash2, Pencil, PanelLeft, PanelRight, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, Clock, CalendarDays, ChevronRight, ChevronDown, ChevronUp, ChevronsDownUp, Blocks, Brain, ListTodo, GitBranch, Download, Loader2, RotateCw, Info } from 'lucide-react'
+import { Pin, PinOff, Star, Settings, Plus, CirclePlus, Trash2, Pencil, PanelLeft, PanelRight, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, Clock, CalendarDays, ChevronRight, ChevronDown, ChevronUp, ChevronsDownUp, Blocks, Brain, ListTodo, GitBranch, Download, Loader2, RotateCw, Info, Lock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
@@ -2049,6 +2049,18 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     }
   }, [setWorkspaces])
 
+  /** 切换工作区“对其他工作区只读”：开启后该工作区的 Agent 只能修改本工作区内的文件。 */
+  const handleToggleExternalReadOnly = React.useCallback(async (workspaceId: string, enabled: boolean): Promise<void> => {
+    try {
+      const updated = await window.electronAPI.updateAgentWorkspace(workspaceId, { externalAccess: enabled ? 'read-only' : 'read-write' })
+      setWorkspaces((prev) => prev.map((w) => (w.id === updated.id ? updated : w)))
+      toast.success(enabled ? '已开启：该工作区对其他工作区只读' : '已关闭：该工作区恢复常规文件访问')
+    } catch (error) {
+      console.error('[侧边栏] 更新工作区只读设置失败:', error)
+      toast.error(error instanceof Error ? error.message : '更新工作区访问设置失败')
+    }
+  }, [setWorkspaces])
+
   /** 重新选择已有文件夹作为本地项目根，保留该项目的会话和设置。 */
   const handleRelinkProjectRoot = React.useCallback(async (workspaceId: string): Promise<void> => {
     try {
@@ -3087,6 +3099,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
               onConfigureProject={isAuto ? noopVoid : handleConfigureProject}
               onRenameWorkspace={isAuto ? noopAsync : handleWorkspaceRename}
               onRelinkProjectRoot={isAuto ? noopAsync : handleRelinkProjectRoot}
+              onToggleExternalReadOnly={isAuto ? noopAsync : handleToggleExternalReadOnly}
               onRequestRestoreProjectRoot={isAuto ? noopVoid : setPendingRestoreProjectRootId}
               onRequestDeleteWorkspace={isAuto ? noopVoid : handleRequestDeleteWorkspace}
               canDeleteWorkspace={isAuto ? false : canDeleteWorkspace(group.workspace)}
@@ -3193,6 +3206,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     handleTogglePinAgent,
     handleToggleStarAgent,
     handleWorkspaceRename,
+    handleToggleExternalReadOnly,
     newProjectName,
     pinnedAgentSessionTrees,
     projectDropIndicator,
@@ -4762,6 +4776,7 @@ interface AgentProjectGroupItemProps {
   onConfigureProject: (workspaceId: string) => void
   onRenameWorkspace: (workspaceId: string, newName: string) => Promise<void>
   onRelinkProjectRoot: (workspaceId: string) => Promise<void>
+  onToggleExternalReadOnly: (workspaceId: string, enabled: boolean) => Promise<void>
   onRequestRestoreProjectRoot: (workspaceId: string) => void
   onRequestDeleteWorkspace: (workspaceId: string) => void
   canDeleteWorkspace: boolean
@@ -4805,6 +4820,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
   onConfigureProject,
   onRenameWorkspace,
   onRelinkProjectRoot,
+  onToggleExternalReadOnly,
   onRequestRestoreProjectRoot,
   onRequestDeleteWorkspace,
   canDeleteWorkspace,
@@ -5009,6 +5025,17 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
               <Settings size={14} />
               配置 MCP 与 Skills
             </DropdownMenuItem>
+            {!isAutomationGroup && (
+              <DropdownMenuItem
+                className="text-xs py-1 [&>svg]:size-3.5"
+                aria-checked={group.workspace.externalAccess === 'read-only'}
+                role="menuitemcheckbox"
+                onSelect={() => void onToggleExternalReadOnly(group.workspace.id, group.workspace.externalAccess !== 'read-only')}
+              >
+                <Lock size={14} />
+                对其他工作区只读{group.workspace.externalAccess === 'read-only' ? ' ✓' : ''}
+              </DropdownMenuItem>
+            )}
             {hasUnavailableProjectRoot && (
               <>
                 <DropdownMenuSeparator className="my-0.5" />
