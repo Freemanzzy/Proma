@@ -3473,9 +3473,14 @@ export function registerIpcHandlers(): void {
             const rawText = input.rawUserMessage ?? input.userMessage
             const mirrorText = cleanDesktopMirrorText(rawText)
             if (mirrorText) {
-              await feishuBridgeManager.startBoundDesktopMirrorRun(session, mirrorText).catch((error) => {
+              // best-effort：飞书接口慢或无响应时最多等 5 秒，绝不拖住桌面发送。
+              let mirrorTimer: ReturnType<typeof setTimeout> | undefined
+              await Promise.race([
+                feishuBridgeManager.startBoundDesktopMirrorRun(session, mirrorText),
+                new Promise<void>((_, reject) => { mirrorTimer = setTimeout(() => reject(new Error('飞书桌面同步超过 5 秒，已跳过等待')), 5_000) }),
+              ]).catch((error) => {
                 console.error('[飞书桌面同步] best-effort 同步失败:', redactSensitiveLogValue(error))
-              })
+              }).finally(() => { if (mirrorTimer) clearTimeout(mirrorTimer) })
             }
           }
         }
