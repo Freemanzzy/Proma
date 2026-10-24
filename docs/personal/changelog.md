@@ -1776,3 +1776,19 @@
 - **文档**：本仓未找到专门的 Feishu 群命令/字段操作指南，也未在 `web-remote.md` 中添加桌面设置文档；命令 `/mirror [on|off]` 与 `AgentWorkspace.externalAccess` 字段说明保留在本 changelog 的 Step 3 / Step 4 条目及对应实现中。
 - **残余风险**：写型 MCP 工具（如 GitHub、Nowledge Mem/Library）不受本地工具路径守卫控制；Bash/PowerShell 只读分类器不是完整 shell 解析器，未覆盖或间接写入形式可能漏判；路径检查与实际写入之间存在 TOCTOU 窗口。Feishu 群消息与镜像未接真实 Bot 验证；120K 压缩阈值未在真实 Feishu-bound run 验证。
 - **结论**：代码与静态/自动化验收完成，但 Step 4 fixture 动态读写验收未完成，故该批次仍有明确的发布前验证缺口。
+
+## 2026-10-24: 安装 3d33fab5（桌面改名修复、飞书群 Bot 四项）
+
+- 由 Claude Code 按 `install-request-2026-10-24.md` 用标准 `install-update.sh` 安装，一次通过：`/Applications/Proma.app` = `3d33fab5`，previous = `60dc9d0f`。备份校验通过（38,371 条目）；上一份备份已归档外置硬盘，快照一致。钥匙串弹窗 1 次（23 秒）；`scheduler-start enabledTasks=21` 在 `web-remote-start` 后 2 ms（启用定时任务 21 个，较 10-19 多 4 个，为用户自行新增）。会话 1242、渠道 7，启动后 SNAPSHOT MATCH；草稿清理 0 条；无 `[FATAL]`。
+- **桌面改名三条路径（Enter / Esc / 点空白）用户实测通过**，10-19 回归已修复。
+- 用户在侧栏菜单打开了“飞书群 Bot”的“对其他工作区只读”（`externalAccess: read-only` 已写入）。飞书群首条消息使用会话模型 `gpt-6.1-sol`，模型跟随会话生效。
+- **飞书绑定 modelId 被改写（既有上游行为）**：`loadBindings()` 每次启动把所有 binding 的 channel/model 覆盖为应用默认，下一次保存时落盘（3 条 binding 的 `modelId` 由 `claude-opus-5-5` 变为应用默认模型）。与新的“会话 → binding → Bot 默认 → 应用设置”分级矛盾。已在 `fix/feishu-followups-20261024` 移除该覆盖（见下条）。
+- 飞书 `获取用户信息失败` 与 `流式卡片创建失败` 各在 19:01、22:51 出现 1 次（安装前已有）；日志只持久化消息字符串，原错误细节缺失。
+- `/mirror` 未开启：binding 中没有 `mirrorDesktopRuns`，因此桌面消息不同步到群（默认关闭，属预期）。多人群需 `@小R /mirror on` 才会被处理。
+
+## 2026-10-24: 飞书安装后续（不覆盖 binding 模型、错误摘要入日志）
+
+- `feishu-bridge.ts` `loadBindings()` 不再用应用默认渠道/模型覆盖 binding；模型按分级解析，不可用时自动回退。
+- 新增 `summarizeBridgeError()`（`bridge-log-redaction.ts`）：把 HTTP 状态、飞书 `code` / `msg` 与错误消息压成一行（脱敏、≤300 字符）拼进日志消息本身；用于“获取用户信息失败”“流式卡片创建失败”两处，下次出现即可看到原因（常见为应用权限 scope 不足）。
+- 新增 `bridge-error-summary.test.ts`（3 项）；全量 808 pass / 0 fail，全仓 typecheck 6 个 workspace 通过。未打包，等下一批一起安装。
+

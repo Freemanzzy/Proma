@@ -60,3 +60,30 @@ export function redactSensitiveLogValue(value: unknown, seen = new WeakSet<objec
     ]),
   )
 }
+
+/**
+ * 把飞书 / axios 风格的错误压缩成一行可持久化的摘要（HTTP 状态、飞书 code/msg、错误消息）。
+ * main.log 只持久化消息字符串，不包含附带的错误对象，因此诊断信息必须拼进消息本身。
+ */
+export function summarizeBridgeError(error: unknown): string {
+  if (error === null || error === undefined) return 'unknown error'
+  if (typeof error !== 'object') return redactSensitiveLogText(String(error)).slice(0, 300)
+  const e = error as {
+    message?: unknown
+    code?: unknown
+    response?: { status?: unknown; data?: { code?: unknown; msg?: unknown; message?: unknown } }
+  }
+  const parts: string[] = []
+  const status = e.response?.status
+  if (typeof status === 'number') parts.push(`status=${status}`)
+  const data = e.response?.data
+  if (data && typeof data === 'object') {
+    if (data.code !== undefined) parts.push(`code=${String(data.code)}`)
+    const msg = data.msg ?? data.message
+    if (typeof msg === 'string' && msg) parts.push(`msg=${msg}`)
+  }
+  if (!parts.some((part) => part.startsWith('code=')) && (typeof e.code === 'string' || typeof e.code === 'number')) parts.push(`code=${String(e.code)}`)
+  if (typeof e.message === 'string' && e.message) parts.push(`message=${e.message}`)
+  return redactSensitiveLogText(parts.join(' ') || 'unknown error').slice(0, 300)
+}
+
