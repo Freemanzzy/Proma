@@ -1760,3 +1760,10 @@
 - `FeishuChatBinding.mirrorDesktopRuns` 为可选布尔值，旧数据/默认值均关闭。`/mirror` 查询状态，`/mirror on|off` 只允许 `binding.userId` 对应的绑定用户写入并保存；`/now` 展示状态，`/help` 列出命令。
 - 桌面 `SEND_MESSAGE` 针对普通飞书绑定且开关开启时，先 best-effort 发 `[Proma 桌面]` 问题文本，再初始化绑定群的流式回答卡；不依赖全局 session mirror mode。文本清理 UI 引用标记（包括文件路径引用）并截断 2,000 字符；附件内容与路径不发送。飞书入口不经过桌面 IPC，`source === 'session-mirror'` 亦被排除，避免重复镜像。
 - **验证**：桌面镜像策略、清理/截断、绑定用户授权定向测试 3 pass；Electron typecheck 通过。尚未连接真实 Bot（按限制），因此飞书端真实发送/卡片更新未在 dev 实测。
+
+## 2026-10-24: Feishu workspace 外部只读模式（Step 4）
+
+- `AgentWorkspace.externalAccess` 为可选 `read-write | read-only`，旧工作区默认常规读写。工作区列表设置区新增“对其他工作区只读”复选项；仅用户显式操作才持久化。Renderer、IPC 和 workspace manager 均支持此字段。
+- `canUseTool` 在任何 permission-mode 分支（包括 `bypassPermissions`）之前检查：`Write`/`Edit`/`NotebookEdit` 按 `file_path`/`notebook_path` realpath 判定，仅允许 workspace 根、项目文件根（包含其 session dirs）。目标不存在时通过最近的已存在父目录解析；symlink 逃逸拒绝。Bash/PowerShell 仅使用已有只读分类器。无界文件/进程执行 `REPL`、`Workflow`、Terminal 写执行与控制、`SelectWorktree`、`InstallWindowsShell` 在该模式拒绝；Read/Grep/Glob/LS 继续走普通权限策略。协作委派参数没有 workspace 选择项，child 在 `ctx.workspaceId` 中创建并由同一 workspace guard 保护。
+- **定向验证**：路径/符号链接/不存在路径、Bash/PowerShell 分类和 bypassPermissions 守卫测试 4 pass；Step 1–4 合计定向测试 18 pass；Electron typecheck 通过。fixture dev 动态验收结果另记于此条后续补验收。
+- **残余风险**：写型 MCP 工具（如 GitHub、Nowledge Mem/Library 等）不由此路径守卫拦截；Bash 分类器不是完整 shell parser，复杂 shell expansion、间接命令及未覆盖写命令仍需谨慎；路径检查与后续工具写入间存在常规 TOCTOU 窗口。真实 Feishu Bot / 群镜像不连接、不发送。

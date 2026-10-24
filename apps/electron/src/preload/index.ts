@@ -694,7 +694,7 @@ export interface ElectronAPI {
   createAgentProject: (input: CreateAgentWorkspaceInput, channelId?: string, modelId?: string) => Promise<CreateAgentProjectResult>
 
   /** 更新 Agent 工作区 */
-  updateAgentWorkspace: (id: string, updates: { name: string }) => Promise<AgentWorkspace>
+  updateAgentWorkspace: (id: string, updates: import('@proma/shared').UpdateAgentWorkspaceInput) => Promise<AgentWorkspace>
 
   /** 将本地项目关联到一个已存在的目录，保留项目和会话。 */
   relinkAgentWorkspaceProjectRoot: (id: string, projectRootPath: string) => Promise<AgentWorkspace>

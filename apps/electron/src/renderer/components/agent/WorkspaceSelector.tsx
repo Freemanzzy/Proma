@@ -32,6 +32,24 @@ export function WorkspaceSelector(): React.ReactElement {
   const [, setWorkspaces] = useAtom(agentWorkspacesAtom)
   const [, setAgentSessions] = useAtom(agentSessionsAtom)
   const [listHeight, setListHeight] = useAtom(projectListHeightAtom)
+  const selectedWorkspace = workspaces.find((workspace) => workspace.id === currentWorkspaceId)
+  const [savingReadOnly, setSavingReadOnly] = React.useState(false)
+
+  const handleExternalReadOnlyChange = async (enabled: boolean): Promise<void> => {
+    if (!selectedWorkspace || savingReadOnly) return
+    setSavingReadOnly(true)
+    try {
+      const updated = await window.electronAPI.updateAgentWorkspace(selectedWorkspace.id, {
+        externalAccess: enabled ? 'read-only' : 'read-write',
+      })
+      setWorkspaces((previous) => previous.map((item) => item.id === updated.id ? updated : item))
+      toast.success(enabled ? '已限制该工作区修改其他目录' : '已恢复该工作区的常规文件访问')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '更新工作区访问设置失败')
+    } finally {
+      setSavingReadOnly(false)
+    }
+  }
 
   // 高度拖拽调整
   const listRef = React.useRef<HTMLDivElement>(null)
@@ -394,6 +412,22 @@ export function WorkspaceSelector(): React.ReactElement {
             </div>
           )}
         </div>
+
+        {selectedWorkspace && (
+          <div className="border-t border-border/40 px-2.5 py-2" onClick={(event) => event.stopPropagation()}>
+            <label className="flex cursor-pointer items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                aria-label="对其他工作区只读"
+                checked={selectedWorkspace.externalAccess === 'read-only'}
+                disabled={savingReadOnly}
+                onChange={(event) => void handleExternalReadOnlyChange(event.target.checked)}
+              />
+              <span>对其他工作区只读</span>
+            </label>
+            <p className="mt-1 pl-5 text-[10px] leading-4 text-muted-foreground">只允许此工作区内的文件写入；Bash/PowerShell 仅开放只读命令。</p>
+          </div>
+        )}
 
         {/* 拖拽调整高度的 handle */}
         <div

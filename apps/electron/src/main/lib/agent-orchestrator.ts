@@ -69,6 +69,7 @@ import { askUserService } from './agent-ask-user-service'
 import { exitPlanService, type ExitPlanPermissionResult } from './agent-exit-plan-service'
 import { validateToolInput } from './agent-tool-input-validator'
 import { isSessionPlanMarkdownPath } from './agent-plan-file-policy'
+import { isBashCommandReadOnly, isPowerShellCommandReadOnly, resolveExternalWorkspaceToolDecision } from './workspace-readonly-policy'
 import { estimateTokenCount, WRITE_CONTENT_TOKEN_THRESHOLD } from './agent-tool-token-estimator'
 import { buildPiBuiltinTools } from './adapters/pi-builtin-tools'
 import { getAgentVaultRoots, getVaultUserContext } from './vault-service'
@@ -1196,53 +1197,6 @@ export class AgentOrchestrator {
         )
       }
 
-      /**
-       * 判断 Bash 命令是否是只读的（计划模式下安全可执行）
-       * 检测写操作特征：文件重定向、破坏性命令、包管理写操作、git 写操作等
-       */
-      const isBashCommandReadOnly = (command: string): boolean => {
-        // 输出重定向：匹配未被数字或 & 前置的 > 符号（排除 2>/dev/null、&> 等 fd 重定向）
-        if (/(?<![0-9&])>/.test(command)) return false
-        // 破坏性文件操作
-        if (/\b(rm|rmdir)\s/.test(command)) return false
-        if (/\bsed\s+[^|&;]*-i/.test(command)) return false  // sed -i 原地编辑
-        if (/\b(chmod|chown|chattr|truncate)\s/.test(command)) return false
-        if (/\b(mv|cp)\s/.test(command)) return false
-        if (/\b(mkdir|touch|mktemp)\s/.test(command)) return false
-        // 包管理器写操作
-        if (/\b(npm|pnpm|yarn|bun)\s+(install|i\b|add|remove|uninstall|update|upgrade|link|unlink)\b/.test(command)) return false
-        if (/\bpip[23]?\s+(install|uninstall|upgrade)\b/.test(command)) return false
-        if (/\b(apt|apt-get|brew|yum|dnf)\s+(install|remove|purge|uninstall|upgrade)\b/.test(command)) return false
-        // Git 写操作
-        if (/\bgit\s+(commit|push|checkout\s+-[bB]|branch\s+-[mMdD]|merge\b|rebase\b|reset\b|stash\s+(drop|pop)\b|add\b|apply\b|cherry-pick\b)/.test(command)) return false
-        // 进程控制
-        if (/\b(kill|killall|pkill)\s/.test(command)) return false
-        // 脚本执行（具有潜在副作用，如 node script.js / python main.py）
-        if (/\b(node|python[23]?|ruby|perl|php)\s+[^-]/.test(command)) return false
-        return true
-      }
-
-      /**
-       * 判断 PowerShell 命令是否可在计划模式只读执行。
-       * 为避免管道、重定向与别名隐含副作用，仅允许显式的只读 cmdlet，或沿用
-       * Bash 策略验证的 Git / JavaScript 工具链探索命令。
-       */
-      const isPowerShellCommandReadOnly = (command: string): boolean => {
-        const trimmed = command.trim()
-        if (!trimmed || /[;`|<>]/.test(trimmed) || /&&|\|\|/.test(trimmed)) return false
-
-        const [commandName] = trimmed.split(/\s+/, 1)
-        const normalizedName = commandName?.toLowerCase()
-        const readOnlyCmdlets = new Set([
-          'get-childitem', 'get-content', 'get-item', 'get-location', 'get-command', 'get-help',
-          'get-process', 'get-date', 'get-culture', 'get-module', 'measure-object',
-          'resolve-path', 'select-string', 'test-path',
-        ])
-        if (normalizedName && readOnlyCmdlets.has(normalizedName)) return true
-
-        return /^(git|bun|npm|pnpm|yarn)\s/.test(trimmed) && isBashCommandReadOnly(trimmed)
-      }
-
       // Plan 模式下允许的只读工具（不包含 Write/Edit/Bash 等写操作）
       const PLAN_MODE_ALLOWED_TOOLS = new Set([
         'Read', 'Glob', 'Grep',
@@ -1291,6 +1245,17 @@ export class AgentOrchestrator {
         if (validationFailure) {
           console.warn(`[Agent 工具验证] 参数缺失: tool=${toolName}, mode=${currentMode}`)
           return validationFailure
+        }
+
+        // 外部只读策略先于所有 permission-mode 分支（包含 bypassPermissions），并由 workspace 元数据继承到子会话。
+        if (workspace?.externalAccess === 'read-only') {
+          const roots = workspaceSlug
+            ? [getAgentWorkspacePath(workspaceSlug), getProjectFilesPath(workspaceSlug)]
+            : []
+          const decision = resolveExternalWorkspaceToolDecision(
+            currentMode, toolName, input, roots, agentCwd ?? process.cwd(),
+          )
+          if (decision) return decision
         }
 
         // ── Write 大文件 token 截断防护 ──
