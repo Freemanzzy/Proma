@@ -38,4 +38,5 @@ test('大于 16 KB 的 WebSocket 帧协商 permessage-deflate 并在网络线上
   expect(evidence.originalPayloadBytes).toBeGreaterThan(16 * 1024)
   expect(evidence.rsv1).toBe(true)
   expect(evidence.wirePayloadBytes).toBeLessThan(evidence.originalPayloadBytes / 20)
-})
+  // 子进程自身有 15 s 上限；bun 默认 5 s 单测超时在全量并发（打包）时会误报，2026-10-29 出现过一次。
+}, 20_000)

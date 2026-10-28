@@ -1813,3 +1813,16 @@
 - 回复后刷新实测：fixture 新建 clipproxyapi Sonnet 会话发送一条短消息，完成后桌面正确显示用户消息与回复（持久化 3 条）。
 - 未做（Step 4 被裁剪）：超大单条 tool_result 折叠与按需展开；单轮超大时窗口仍可能超过 2 MiB。搜索定位、MiniMap、fork/rewind 只做了代码路径核对，未逐项 UI 回归。
 
+## 2026-10-29: 安装 57afeaff（桌面大会话窗口化加载、飞书安装后续）
+
+- 由 Claude Code 按 `install-request-2026-10-29.md` 用标准 `install-update.sh` 安装，一次通过：`/Applications/Proma.app` = `57afeaff`，previous = `3d33fab5`。备份校验通过（38,844 条目）；上一份备份已归档外置硬盘，快照一致。钥匙串弹窗 1 次（18 秒）；`scheduler-start enabledTasks=18` 在 `web-remote-start` 后 2 ms；02:00 的 Nowledge Mem 每日追补按时触发并成功。无 `[FATAL]` / `[ERROR]`。
+- **打包两次**：第一次 811/1，`websocket-compression.test.ts` 在全量并发时触发 bun 默认 5 s 单测超时（该测试与服务端代码本批未改，单独连跑 5/5 通过），该包未安装；第二次 812/0，安装的是第二次的包。
+- 无 CDP 端口：安装版 Proma 只监听 `127.0.0.1:17888`。
+- **窗口化加载实测**（正式数据）：主会话 `f6872fd2`（约 58 MB）首开 399 ms（冷索引）、再开 67 ms，只读约 1.5 MB；其他会话 25–101 ms；均 `windowed=true`。用户确认“加载更早”与回复后刷新正常。
+- 飞书绑定文件重启前后逐字节一致，不再被应用默认模型覆盖（10-24 被旧逻辑改写的值保持现状，见下条待用户决定）。
+- 会话内搜索、minimap 由用户日常使用中反馈。
+
+## 2026-10-29: 放宽两个慢测试的单测超时
+
+- `websocket-compression.test.ts`（子进程探针，自身 15 s 上限）设为 20 s；`web-remote-bundle.test.ts`（esbuild + 子进程，09-26 曾同样超时）设为 30 s。两者此前都受 bun 默认 5 s 限制，全量并发打包时会误报导致打包中止。
+
