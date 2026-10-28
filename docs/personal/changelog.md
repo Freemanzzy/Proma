@@ -1826,3 +1826,11 @@
 
 - `websocket-compression.test.ts`（子进程探针，自身 15 s 上限）设为 20 s；`web-remote-bundle.test.ts`（esbuild + 子进程，09-26 曾同样超时）设为 30 s。两者此前都受 bun 默认 5 s 限制，全量并发打包时会误报导致打包中止。
 
+## 2026-10-29: 源码与依赖备份
+
+- 新建私有、非 fork 的镜像仓库作为 remote `archive`，与官方 fork 网络脱钩。
+- 外置硬盘已写入首份 `git bundle --all`（约 26 MB，含 personal、全部 tag 与官方 `upstream/*`）以及依赖离线包：bun 缓存约 320 MB，Electron 下载缓存约 243 MB。
+- 恢复演练通过：从 bundle 克隆 `personal`，用解压出的缓存执行 `bun install --frozen-lockfile --offline --ignore-scripts`，1,310 个包全部离线装好，pi-ai 补丁已生效。
+- 新增 `scripts/personal/backup-source.sh` 和 maintenance §4.2，并新增每周自动化，以后的改动会持续同步进备份。
+- 首次推送 `archive` 被拒：gh 令牌缺少 `workflow` 权限，GitHub 不允许它创建 `.github/workflows/*`。需要用户执行一次 `gh auth refresh -h github.com -s workflow` 后补推。
+

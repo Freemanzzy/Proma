@@ -68,6 +68,17 @@ Claude Code 接手安装时只做必要复核：包内 marker commit 等于 `per
 - 触发条件（周检“同步策略”小节自动报告）：最新正式 tag 距今 ≥ 8 周，或冲突试探冲突文件 > 30。任一触发即建议切换为“独立维护、只挑选性引入上游改动”（方案 B），由用户决定。
 - 无论 A/B，`~/.proma` 数据格式保持与开源上游兼容，保留回退官方开源版的可能；不考虑迁往商业版。
 
+## 4.2 源码与依赖备份（用户 2026-10-29 决定）
+
+- 远端除 `origin`（公开 fork）外，另有私有、非 fork 的镜像 remote `archive`。它保存全部分支、tag，以及官方 `upstream/*`（放在 `refs/heads/upstream/*` 下），不受官方仓库删除、改私有或 fork 网络下架的影响。
+- `origin` 额外配置了 `archive` 作为第二个 push URL，所以每次 `git push origin …` 都会同时推到镜像。
+- `scripts/personal/backup-source.sh`（需设置 `PROMA_SOURCE_BACKUP_DIR`）负责以下几件事：
+  - 拉取官方 refs，并把全部 refs 推到 `archive`；
+  - 有任何 ref 变化时，在备份目录写一个 `git bundle --all` 并校验；
+  - `bun.lock` 变化时，打包 bun 安装缓存和 Electron 下载缓存，用于新机离线安装：`BUN_INSTALL_CACHE_DIR=<解压目录>/cache bun install --frozen-lockfile --offline`。
+  - 脚本从不删除文件。
+- 备份目录位于外置硬盘（具体路径不写入仓库，见 Proma 自动化“个人版源码备份”）。外置硬盘未挂载时只推 `archive`。
+
 ## 5. 文档规则（SSOT）
 
 - 每类事实只有一个权威位置：当前基线、与上游差异、同步规则 → `PERSONAL.md`；完整变更历史 → `docs/personal/changelog.md`；共同维护规则 → 本文件；Claude Code 的职责细节 → `CLAUDE.md`；操作步骤 → `docs/personal/*-runbook.md`；手机访问 → `docs/personal/web-remote.md`；待合入分支、后续待办、真实负载测试触发条件与 dev 数据约定 → `docs/personal/backlog.md`。其他文档引用，不复制。
