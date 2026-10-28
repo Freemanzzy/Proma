@@ -284,6 +284,7 @@ import {
   createAgentSession,
   getAgentSessionMeta,
   getAgentSessionSDKMessages,
+  getAgentSessionSDKMessagesWindow,
   updateAgentSessionMeta,
   deleteAgentSession,
   migrateChatToAgentSession,
@@ -2573,6 +2574,23 @@ export function registerIpcHandlers(): void {
       return getAgentSessionSDKMessages(id)
     }
   )
+
+  ipcMain.handle(AGENT_IPC_CHANNELS.GET_SDK_MESSAGES_WINDOW, async (_event, id: unknown, input: unknown) => {
+    if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{8,}$/.test(id)) throw new Error('会话 ID 无效')
+    if (input !== undefined && (!input || typeof input !== 'object' || Array.isArray(input))) throw new Error('历史窗口参数无效')
+    const value = (input ?? {}) as Record<string, unknown>
+    for (const key of ['endIndex', 'startIndex', 'budgetBytes'] as const) {
+      const item = value[key]
+      if (item !== undefined && (typeof item !== 'number' || !Number.isSafeInteger(item) || item < 0)) throw new Error('历史窗口参数无效')
+    }
+    if (value.endIndex !== undefined && value.startIndex !== undefined) throw new Error('不能同时指定 endIndex 与 startIndex')
+    if (value.budgetBytes !== undefined && (value.budgetBytes as number) > 16 * 1024 * 1024) throw new Error('历史窗口预算超过 16 MB 上限')
+    return getAgentSessionSDKMessagesWindow(id, {
+      ...(value.endIndex !== undefined ? { endIndex: value.endIndex as number } : {}),
+      ...(value.startIndex !== undefined ? { startIndex: value.startIndex as number } : {}),
+      ...(value.budgetBytes !== undefined ? { budgetBytes: value.budgetBytes as number } : {}),
+    })
+  })
 
   ipcMain.handle(AGENT_IPC_CHANNELS.LOG_HISTORY_LOAD_TIMING, (event, input: unknown): void => {
     const url = event.senderFrame?.url ?? ''

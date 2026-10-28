@@ -481,7 +481,8 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
     return () => clearStopGenerationTarget(stopShortcutTarget)
   }, [stopShortcutTarget])
 
-  const initialCachedMessages = store.get(agentSDKMessagesCacheAtom).get(sessionId)
+  const initialCachedEntry = store.get(agentSDKMessagesCacheAtom).get(sessionId)
+  const initialCachedMessages = initialCachedEntry?.messages
   const [persistedSDKMessages, setPersistedSDKMessages] = React.useState<SDKMessage[]>(
     () => initialCachedMessages ?? [],
   )
@@ -1128,8 +1129,15 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
   ])
 
   // 消息首次加载状态直接由同步缓存决定；缓存命中时首个 render 就显示历史，IPC 只做后台校准。
-  const [messagesLoaded, setMessagesLoaded] = React.useState(initialCachedMessages !== undefined)
+  const [messagesLoaded, setMessagesLoaded] = React.useState(initialCachedEntry !== undefined)
   const [messagesRefreshing, setMessagesRefreshing] = React.useState(false)
+  const [historyWindow, setHistoryWindow] = React.useState(() => ({
+    startIndex: initialCachedEntry?.startIndex ?? 0,
+    total: initialCachedEntry?.total ?? initialCachedMessages?.length ?? 0,
+    hasEarlier: initialCachedEntry?.hasEarlier ?? false,
+  }))
+  const [loadingEarlier, setLoadingEarlier] = React.useState(false)
+  const loadingEarlierRef = React.useRef(false)
   React.useEffect(() => { const onEarlier = (event: Event) => { const detail = (event as CustomEvent<{ sessionId: string; messages: SDKMessage[] }>).detail; if (detail?.sessionId !== sessionId) return; const merged = [...detail.messages, ...persistedSDKMessagesRef.current]; persistedSDKMessagesRef.current = merged; setPersistedSDKMessages(merged); setMessagesCache((prev) => setSessionMessagesCache(prev, sessionId, merged)) }; window.addEventListener('proma-web-remote-history-earlier', onEarlier); return () => window.removeEventListener('proma-web-remote-history-earlier', onEarlier) }, [sessionId, setMessagesCache])
   const messagesRefreshingRef = React.useRef(false)
   const loadingSessionIdRef = React.useRef<string | null>(null)
@@ -1148,10 +1156,12 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
       // 走 else 分支保留当前消息，并在下方 IPC 覆盖时获得最新数据。
       const cached = store.get(agentSDKMessagesCacheAtom).get(sessionId)
       if (cached) {
-        setPersistedSDKMessages(cached)
+        setPersistedSDKMessages(cached.messages)
+        setHistoryWindow({ startIndex: cached.startIndex, total: cached.total, hasEarlier: cached.hasEarlier })
         setMessagesLoaded(true)
       } else {
         setPersistedSDKMessages([])
+        setHistoryWindow({ startIndex: 0, total: 0, hasEarlier: false })
         setMessagesLoaded(false)
       }
     }
@@ -1160,8 +1170,25 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
     const requestId = ++messagesRequestIdRef.current
     const requestMutationVersion = messagesMutationVersionRef.current
     const requestStartedAt = performance.now()
+    const useDesktopWindow = !isWebRemoteFullUi()
+    const cachedWindow = store.get(agentSDKMessagesCacheAtom).get(sessionId)
+    // React StrictMode replays mount effects in dev. The first request is cancelled before
+    // it can populate the cache, so the replay must still use the initial tail window.
+    const shouldLoadInitialWindow = isSessionSwitch || cachedWindow === undefined
+    let loadedWindow = { startIndex: 0, total: 0, hasEarlier: false }
     let cancelled = false
-    window.electronAPI.getAgentSessionSDKMessages(sessionId)
+    const loadPromise = useDesktopWindow
+      ? window.electronAPI.getAgentSessionSDKMessagesWindow(sessionId, shouldLoadInitialWindow
+        ? { budgetBytes: 2 * 1024 * 1024 }
+        : { startIndex: cachedWindow.startIndex }).then((result) => {
+        loadedWindow = { startIndex: result.startIndex, total: result.total, hasEarlier: result.hasEarlier }
+        return result.messages
+      })
+      : window.electronAPI.getAgentSessionSDKMessages(sessionId).then((messages) => {
+        loadedWindow = { startIndex: 0, total: messages.length, hasEarlier: false }
+        return messages
+      })
+    loadPromise
       .then((sdkMsgs) => {
         const ipcMs = performance.now() - requestStartedAt
         if (cancelled || requestId !== messagesRequestIdRef.current) return
@@ -1173,10 +1200,11 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
           return
         }
         // 写入缓存（含 LRU 淘汰，防止会话数增长导致内存无限膨胀）
-        setMessagesCache((prev) => setSessionMessagesCache(prev, sessionId, sdkMsgs))
+        setMessagesCache((prev) => setSessionMessagesCache(prev, sessionId, sdkMsgs, loadedWindow))
         unstable_batchedUpdates(() => {
           persistedSDKMessagesRef.current = sdkMsgs
           setPersistedSDKMessages(sdkMsgs)
+          setHistoryWindow(loadedWindow)
           setMessagesLoaded(true)
           messagesRefreshingRef.current = false
           setMessagesRefreshing(false)
@@ -1234,7 +1262,7 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
               try { bytes = new TextEncoder().encode(JSON.stringify(sdkMsgs)).byteLength } catch { /* estimate unavailable */ }
               void window.electronAPI.logAgentHistoryLoadTiming({
                 sessionId, messages: sdkMsgs.length, bytes, ipcMs, renderMs,
-                totalMs: performance.now() - historyOpenStartedAtRef.current, windowed: false,
+                totalMs: performance.now() - historyOpenStartedAtRef.current, windowed: useDesktopWindow,
               })
             }))
           }
@@ -1249,6 +1277,36 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
       })
     return () => { cancelled = true }
   }, [sessionId, refreshVersion, setStreamingStates, setLiveMessagesMap, setMessagesCache, store])
+
+  const handleLoadEarlierHistory = React.useCallback(async (): Promise<void> => {
+    if (isWebRemoteFullUi() || loadingEarlierRef.current || !historyWindow.hasEarlier) return
+    const cached = store.get(agentSDKMessagesCacheAtom).get(sessionId)
+    const endIndex = cached?.startIndex ?? historyWindow.startIndex
+    if (endIndex <= 0) return
+    loadingEarlierRef.current = true
+    setLoadingEarlier(true)
+    const requestId = ++messagesRequestIdRef.current
+    const mutationVersion = messagesMutationVersionRef.current
+    try {
+      const result = await window.electronAPI.getAgentSessionSDKMessagesWindow(sessionId, {
+        endIndex,
+        budgetBytes: 2 * 1024 * 1024,
+      })
+      if (loadingSessionIdRef.current !== sessionId || requestId !== messagesRequestIdRef.current || mutationVersion !== messagesMutationVersionRef.current) return
+      const merged = [...result.messages, ...persistedSDKMessagesRef.current]
+      persistedSDKMessagesRef.current = merged
+      setPersistedSDKMessages(merged)
+      const nextWindow = { startIndex: result.startIndex, total: result.total, hasEarlier: result.hasEarlier }
+      setHistoryWindow(nextWindow)
+      setMessagesCache((prev) => setSessionMessagesCache(prev, sessionId, merged, nextWindow))
+    } catch (error) {
+      console.error('[Agent 历史] 加载更早消息失败:', error)
+      toast.error('加载更早消息失败，请重试')
+    } finally {
+      loadingEarlierRef.current = false
+      setLoadingEarlier(false)
+    }
+  }, [historyWindow, sessionId, setMessagesCache, store])
 
   // 从会话元数据初始化附加目录（仅冷启动水合，后续由 handleAttachContent/handleDetachDirectory 实时写入）
   React.useEffect(() => {
@@ -3077,6 +3135,9 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
           sessionModelId={agentModelId || undefined}
           messagesLoaded={messagesLoaded}
           persistedSDKMessages={persistedSDKMessages}
+          historyHasEarlier={!isWebRemoteFullUi() && historyWindow.hasEarlier}
+          loadingEarlier={loadingEarlier}
+          onLoadEarlier={handleLoadEarlierHistory}
           sessionPath={sessionPath}
           attachedDirs={allAttachedDirs}
           stoppedByUser={stoppedByUser}

@@ -413,6 +413,15 @@ export type SDKMessage =
   | SDKToolUseSummaryMessage
   | { type: string; session_id?: string; parent_tool_use_id?: string | null; [key: string]: unknown }
 
+/** Windowed persisted history returned to the desktop renderer. */
+export interface AgentSessionSDKMessagesWindow {
+  messages: SDKMessage[]
+  startIndex: number
+  total: number
+  hasEarlier: boolean
+  omittedCount: number
+}
+
 // ===== Agent 事件类型 =====
 
 /** 错误代码 */
@@ -1847,6 +1856,8 @@ export const AGENT_IPC_CHANNELS = {
   GET_QUEUED_MESSAGES_BATCH: 'agent:get-queued-messages-batch',
   /** 获取会话 SDKMessage（Phase 4 新格式） */
   GET_SDK_MESSAGES: 'agent:get-sdk-messages',
+  /** 桌面端按完整轮次读取 SDKMessage 历史窗口；Web Remote 策略默认拒绝。 */
+  GET_SDK_MESSAGES_WINDOW: 'agent:get-sdk-messages-window',
   /** 桌面会话历史加载匿名计时；仅接受数值白名单字段。 */
   LOG_HISTORY_LOAD_TIMING: 'agent:log-history-load-timing',
   /** 更新会话标题 */

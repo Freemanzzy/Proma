@@ -29,6 +29,7 @@ import { tabMinimapCacheAtom } from '@/atoms/tab-atoms'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import { ScrollPositionManager } from '@/hooks/useScrollPositionMemory'
 import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
 import {
   createLocalSearchRecords,
   searchLocalSessionMessages,
@@ -50,6 +51,10 @@ import { agentLiveMessagesAtomFamily, agentSessionStreamingStateAtomFamily, type
 import type { QuotedSelection } from '@/atoms/preview-atoms'
 
 const EMPTY_SDK_MESSAGES: SDKMessage[] = []
+
+function isWebRemoteFullUi(): boolean {
+  return Boolean((window as Window & { __PROMA_WEB_REMOTE__?: boolean }).__PROMA_WEB_REMOTE__)
+}
 
 function stableStringify(value: unknown): string {
   if (value == null || typeof value !== 'object') return JSON.stringify(value) ?? String(value)
@@ -216,6 +221,10 @@ interface AgentMessagesProps {
   sessionModelId?: string
   /** 消息是否已完成首次加载 */
   messagesLoaded?: boolean
+  /** 桌面历史窗口之前是否还有更早消息。 */
+  historyHasEarlier?: boolean
+  loadingEarlier?: boolean
+  onLoadEarlier?: () => Promise<void>
   /** Phase 4: 持久化的 SDKMessage（新格式） */
   persistedSDKMessages?: SDKMessage[]
   /** 当前会话工作目录，用于解析相对文件路径 */
@@ -872,6 +881,9 @@ export const AgentMessages = React.memo(function AgentMessages({
   sessionId,
   sessionModelId,
   messagesLoaded,
+  historyHasEarlier = false,
+  loadingEarlier = false,
+  onLoadEarlier,
   persistedSDKMessages,
   sessionPath,
   attachedDirs,
@@ -968,11 +980,15 @@ export const AgentMessages = React.memo(function AgentMessages({
       const target = Array.from(root.querySelectorAll<HTMLElement>('[data-message-id]')).find(
         (element) => element.dataset.messageId === messageId,
       )
-      if (target) applyNavigation(target)
+      if (target) {
+        applyNavigation(target)
+        return
+      }
+      if (historyHasEarlier && !isWebRemoteFullUi()) void onLoadEarlier?.()
     })
 
     return () => window.cancelAnimationFrame(frame)
-  }, [clearHistoryQuoteHighlight, historyQuoteNavigation, sessionId])
+  }, [clearHistoryQuoteHighlight, historyQuoteNavigation, sessionId, historyHasEarlier, onLoadEarlier, persistedSDKMessages])
 
   // 实时文本仅从 liveMessages 读取。AgentStreamState 只保留运行/控制状态，
   // 避免每个 sdk_delta 同时更新 transcript 和 legacy content 两条路径。
@@ -1128,9 +1144,51 @@ export const AgentMessages = React.memo(function AgentMessages({
     () => createLocalSearchRecords(localSearchRecordInputs),
     [localSearchRecordInputs],
   )
+  const fullSearchRecordsRef = React.useRef<{ sessionId: string; records: LocalSearchRecord[] } | null>(null)
+  React.useEffect(() => { fullSearchRecordsRef.current = null }, [sessionId, persistedSDKMessages])
+  const persistedSDKMessagesRef = React.useRef(persistedSDKMessages ?? [])
+  persistedSDKMessagesRef.current = persistedSDKMessages ?? []
+  const historyWindowStateRef = React.useRef({ historyHasEarlier, loadingEarlier, onLoadEarlier })
+  historyWindowStateRef.current = { historyHasEarlier, loadingEarlier, onLoadEarlier }
+  const revealSearchResult = React.useCallback(async (messageId: string): Promise<boolean> => {
+    const hasMessage = (): boolean => groupIntoTurns(persistedSDKMessagesRef.current)
+      .some((group) => getGroupId(group) === messageId)
+    if (hasMessage()) return true
+    if (isWebRemoteFullUi()) return false
+
+    for (let attempts = 0; attempts < 2_000 && historyWindowStateRef.current.historyHasEarlier; attempts += 1) {
+      if (historyWindowStateRef.current.loadingEarlier) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+        continue
+      }
+      const previousCount = persistedSDKMessagesRef.current.length
+      await historyWindowStateRef.current.onLoadEarlier?.()
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      if (hasMessage()) return true
+      if (persistedSDKMessagesRef.current.length <= previousCount && !historyWindowStateRef.current.loadingEarlier) return false
+    }
+    return hasMessage()
+  }, [])
   const searchMessages = React.useCallback<SessionMessageSearch>(
-    async (query) => searchLocalSessionMessages(localSearchRecords, query),
-    [localSearchRecords],
+    async (query) => {
+      let records = localSearchRecords
+      if (!isWebRemoteFullUi() && historyHasEarlier) {
+        if (fullSearchRecordsRef.current?.sessionId === sessionId) {
+          records = fullSearchRecordsRef.current.records
+        } else {
+          const fullMessages = await window.electronAPI.getAgentSessionSDKMessages(sessionId)
+          const groups = groupIntoTurns(fullMessages)
+          records = createLocalSearchRecords(toTranscript(groups).map((turn, index) => ({
+            messageId: getGroupId(groups[index]!),
+            role: turn.role,
+            text: turn.text,
+          })))
+          fullSearchRecordsRef.current = { sessionId, records }
+        }
+      }
+      return searchLocalSessionMessages(records, query)
+    },
+    [historyHasEarlier, localSearchRecords, sessionId],
   )
 
   // 迷你地图数据 — 只依赖结构快照，流式 token 不触发 getGroupPreview 正则
@@ -1171,6 +1229,17 @@ export const AgentMessages = React.memo(function AgentMessages({
     () => [sessionPath, ...(attachedDirs ?? [])].filter((path): path is string => Boolean(path)),
     [sessionPath, attachedDirs],
   )
+  const loadEarlierButtonRef = React.useRef<HTMLButtonElement | null>(null)
+  const handleLoadEarlierClick = React.useCallback(async () => {
+    const conversation = loadEarlierButtonRef.current?.closest('[role="log"]') as HTMLElement | null
+    const scrollRoot = conversation?.querySelector<HTMLElement>(':scope > div') ?? conversation
+    const previousTop = scrollRoot?.scrollTop ?? 0
+    const previousHeight = scrollRoot?.scrollHeight ?? 0
+    await onLoadEarlier?.()
+    if (!scrollRoot) return
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+    if (scrollRoot.isConnected) scrollRoot.scrollTop = previousTop + scrollRoot.scrollHeight - previousHeight
+  }, [onLoadEarlier])
 
   // turn 在消息渲染时一次性标注到 DOM；历史划选只需读取锚点属性，绝不回扫全部消息。
   const groupHistoryTurns = React.useMemo(() => {
@@ -1195,6 +1264,20 @@ export const AgentMessages = React.memo(function AgentMessages({
           <Conversation resize="instant" className={ready ? 'opacity-100' : 'opacity-0'}>
         <ScrollPositionManager id={sessionId} ready={ready} />
         <ConversationContent>
+          {historyHasEarlier && (
+            <div className="flex justify-center py-1">
+              <Button
+                ref={loadEarlierButtonRef}
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={loadingEarlier}
+                onClick={() => void handleLoadEarlierClick()}
+              >
+                {loadingEarlier ? '正在加载…' : '加载更早'}
+              </Button>
+            </div>
+          )}
           {!hasContent && !streaming ? (
             <EmptyState />
           ) : (
@@ -1250,7 +1333,7 @@ export const AgentMessages = React.memo(function AgentMessages({
             </>
           )}
         </ConversationContent>
-        <ScrollMinimap items={minimapItems} searchMessages={searchMessages} />
+        <ScrollMinimap items={minimapItems} searchMessages={searchMessages} onRevealSearchResult={revealSearchResult} />
         <TaskProgressOverlay
           key={sessionId}
           activities={liveTaskActivities}

@@ -1792,3 +1792,13 @@
 - 新增 `summarizeBridgeError()`（`bridge-log-redaction.ts`）：把 HTTP 状态、飞书 `code` / `msg` 与错误消息压成一行（脱敏、≤300 字符）拼进日志消息本身；用于“获取用户信息失败”“流式卡片创建失败”两处，下次出现即可看到原因（常见为应用权限 scope 不足）。
 - 新增 `bridge-error-summary.test.ts`（3 项）；全量 808 pass / 0 fail，全仓 typecheck 6 个 workspace 通过。未打包，等下一批一起安装。
 
+
+## 2026-10-28: 桌面大型会话按窗口读取历史
+
+- 桌面新增只读 `agent:get-sdk-messages-window`：先按文件大小与 mtime 缓存每行字节范围（最多 8 个文件），再从尾部反向读取完整轮次；默认窗口 2 MiB，并复用 Web Remote 的轮次/工具结果边界判定。解析仅覆盖返回窗口，`total` 为非空 JSONL 行数。提供 `endIndex` 加载更早页、`startIndex` 重读当前已加载后缀；IPC 对 id、参数范围和最高 16 MiB 预算做校验。Web Remote 策略明确把新通道与桌面计时通道设为 denied，不改手机既有 shim。
+- 桌面消息缓存记录 `startIndex/total/hasEarlier`；初始页顶部提供“加载更早”，点击合并并按实际滚动容器高度补偿锚点。刷新重读从已加载起点到 EOF，保留已有 `messagesMutationVersion` 防覆盖。开发中的 React StrictMode 会重放首次 effect，首次 IPC 被取消后第二次可能误判成同会话刷新；现以“会话切换或缓存不存在”决定首屏尾部窗口，避免退化成从 0 读完整历史。
+- **桌面动态验证**：loopback CDP 端口 9224 的新 renderer 载入 58 MB fixture 后显示 `hasEarlier=true`。连续加载两页，消息 DOM 节点数 39→45→125，锚点垂直偏移分别 -0.6 px、+0.2 px；滚动位置保持。首轮观察发现 StrictMode 回放导致完整读盘，修正后复测确认窗口按钮出现。
+- **性能**：`/tmp/desktop-history/baseline.json` 为原点击加载日志的三次基线；`/tmp/desktop-history/after.json` 为三次桌面 preload IPC 窗口读取（仅 IPC，无 renderer 渲染时间，不能与完整 click-to-render 直接等同）。基线 IPC 平均值：58 MB 1,074 ms、335 MB 2,006 ms、小会话 59 ms；窗口 IPC 58 MB 平均 10 ms，335 MB 三次为 440/26/24 ms（首读包含冷行索引扫描，热读中位数 25 ms），小会话平均约 0.3 ms。传输 JSON 大小：58 MB 会话约 60.3 MB→1.27 MB，335 MB 会话约 339.8 MB→93.6 KB，小会话约 1.32 KB→1.03 KB。全量窗口的端到端总耗时/渲染时间尚未以同一方法复测，不能据此宣称完整打开时间改善幅度。
+- **全历史功能处理**：会话小地图继续独立调用全历史接口；会话内搜索在首次触发时全量读取并缓存索引；搜索结果定位如果不在当前窗口，会按页加载更早历史直到找到目标或到达文件开头；历史引用导航仍按页加载至目标。fork/rewind 的入口只从已加载/可见消息发起，主进程按 UUID 从会话文件执行完整操作；历史引用搜索仍走主进程全历史路径。消息引用/划选只针对当前已加载内容；上下文/token 用量来自运行状态，不依赖完整 transcript。代码库中未找到全 transcript 导出入口。小地图、搜索定位、fork/rewind 未逐项做 UI 端到端触发验证。
+- **本批未做**：超大 tool_result 的桌面折叠/“展开”单条消息 IPC（执行简报 Step 4）；真实 API-key channel 回复后的动态刷新验证（避免未经确认产生外部 API 费用）。单个超大轮次可能超过 2 MiB，窗口仍保证完整轮次，不保证严格限制在预算内。手机端 iPhone smoke 通过；session-sync 在显式设 `PROMA_WEB_REMOTE_EXPECTED_WORKSPACE_COUNT=2`（fixture 实有两个 workspace）后通过。第一次 session-sync 使用默认期望值 1 失败是参数不匹配，不是实现缺陷。手机 Web Remote 的代码路径未改。
+- **验证**：新增历史窗口单测及 Web Remote 通道安全测试均通过；全仓 typecheck 六 workspace 通过；全量测试 `bun test --timeout=20000`：812 pass / 0 fail；`build:main`、`build:renderer`、`build:web-preload` 通过（renderer 保留既有 large-chunk 提示）。开发实例使用 `.proma-dev-fixture`，当前保持运行。未触碰 `/Applications/Proma.app`、`~/.proma` 或备份；未推送、合并、打包或安装。

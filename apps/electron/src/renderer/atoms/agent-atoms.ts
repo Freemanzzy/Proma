@@ -1564,7 +1564,13 @@ export const agentMessageRefreshAtom = atom<Map<string, number>>(new Map())
  * AGENT_MSG_CACHE_MAX 个会话；会话删除时也需主动剔除对应条目。
  */
 export const AGENT_MSG_CACHE_MAX = 20
-export const agentSDKMessagesCacheAtom = atom<Map<string, SDKMessage[]>>(new Map())
+export interface AgentSDKMessagesCacheEntry {
+  messages: SDKMessage[]
+  startIndex: number
+  total: number
+  hasEarlier: boolean
+}
+export const agentSDKMessagesCacheAtom = atom<Map<string, AgentSDKMessagesCacheEntry>>(new Map())
 
 /**
  * 写入会话消息缓存并执行 LRU 淘汰。
@@ -1572,13 +1578,21 @@ export const agentSDKMessagesCacheAtom = atom<Map<string, SDKMessage[]>>(new Map
  * 超出上限时从头部（最旧）删除，直到回到上限内。返回新的 Map（不可变更新）。
  */
 export function setSessionMessagesCache(
-  prev: Map<string, SDKMessage[]>,
+  prev: Map<string, AgentSDKMessagesCacheEntry>,
   sessionId: string,
   messages: SDKMessage[],
-): Map<string, SDKMessage[]> {
+  window: { startIndex?: number; total?: number; hasEarlier?: boolean } = {},
+): Map<string, AgentSDKMessagesCacheEntry> {
+  const previous = prev.get(sessionId)
+  const entry: AgentSDKMessagesCacheEntry = {
+    messages,
+    startIndex: window.startIndex ?? previous?.startIndex ?? 0,
+    total: window.total ?? Math.max(previous?.total ?? 0, (window.startIndex ?? previous?.startIndex ?? 0) + messages.length),
+    hasEarlier: window.hasEarlier ?? previous?.hasEarlier ?? false,
+  }
   const next = new Map(prev)
   next.delete(sessionId)
-  next.set(sessionId, messages)
+  next.set(sessionId, entry)
   while (next.size > AGENT_MSG_CACHE_MAX) {
     const oldest = next.keys().next().value
     if (oldest === undefined) break

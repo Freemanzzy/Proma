@@ -157,17 +157,13 @@ function toolIds(value: unknown, blockType: 'tool_use' | 'tool_result'): string[
   return found
 }
 
-/** Select complete user-to-user turns from the tail; a single oversized turn remains intact. */
-export function selectWebRemoteHistoryWindow<T>(messages: T[], budgetBytes = DEFAULT_HISTORY_BUDGET_BYTES, endIndex = messages.length, sessionId = '', inlineImageBudgetBytes = INLINE_IMAGE_PAGE_BUDGET_BYTES): WebRemoteHistoryWindow<T> {
-  const safeBudget = Number.isFinite(budgetBytes) ? Math.max(1, Math.floor(budgetBytes)) : DEFAULT_HISTORY_BUDGET_BYTES
-  const slimmed = slimWebRemoteHistory(messages, '', 0, false)
-  const boundedEnd = Math.min(slimmed.length, Math.max(0, Math.floor(endIndex)))
-  const page = slimmed.slice(0, boundedEnd)
-  if (page.length === 0) return { messages: [], omittedCount: 0, hasEarlier: false, startIndex: 0 }
+/** Shared with desktop file-window reads so tool_use/tool_result turns stay intact. */
+export function getWebRemoteHistoryTurnStartIndices(messages: unknown[]): number[] {
+  if (messages.length === 0) return []
   const starts = [0]
   const pendingToolIds = new Set<string>()
-  for (let i = 0; i < page.length; i++) {
-    const message = page[i]
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i]
     const role = messageRole(message)
     if (role === 'user') {
       const results = toolIds(message, 'tool_result')
@@ -178,6 +174,17 @@ export function selectWebRemoteHistoryWindow<T>(messages: T[], budgetBytes = DEF
     }
     if (role === 'assistant') for (const id of toolIds(message, 'tool_use')) pendingToolIds.add(id)
   }
+  return starts
+}
+
+/** Select complete user-to-user turns from the tail; a single oversized turn remains intact. */
+export function selectWebRemoteHistoryWindow<T>(messages: T[], budgetBytes = DEFAULT_HISTORY_BUDGET_BYTES, endIndex = messages.length, sessionId = '', inlineImageBudgetBytes = INLINE_IMAGE_PAGE_BUDGET_BYTES): WebRemoteHistoryWindow<T> {
+  const safeBudget = Number.isFinite(budgetBytes) ? Math.max(1, Math.floor(budgetBytes)) : DEFAULT_HISTORY_BUDGET_BYTES
+  const slimmed = slimWebRemoteHistory(messages, '', 0, false)
+  const boundedEnd = Math.min(slimmed.length, Math.max(0, Math.floor(endIndex)))
+  const page = slimmed.slice(0, boundedEnd)
+  if (page.length === 0) return { messages: [], omittedCount: 0, hasEarlier: false, startIndex: 0 }
+  const starts = getWebRemoteHistoryTurnStartIndices(page)
   let startIndex = starts[starts.length - 1] ?? 0
   let bytes = 0
   for (let turn = starts.length - 1; turn >= 0; turn--) {

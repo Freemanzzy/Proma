@@ -39,6 +39,7 @@ import type {
   MessageSearchResult,
   SessionMessageSearchResponse,
   AgentSessionMeta,
+  AgentSessionSDKMessagesWindow,
   AgentSessionMetadataChange,
   AgentActiveSessionSnapshot,
   SetAgentSessionActiveWorktreeInput,
@@ -603,6 +604,8 @@ export interface ElectronAPI {
 
   /** 获取 Agent 会话 SDKMessage（Phase 4 新格式） */
   getAgentSessionSDKMessages: (id: string) => Promise<SDKMessage[]>
+  /** 桌面端按完整轮次加载消息历史窗口。 */
+  getAgentSessionSDKMessagesWindow: (id: string, options?: { endIndex?: number; startIndex?: number; budgetBytes?: number }) => Promise<AgentSessionSDKMessagesWindow>
 
   /** 记录桌面历史加载耗时，不传递会话内容。 */
   logAgentHistoryLoadTiming: (input: { sessionId: string; messages: number; bytes: number; ipcMs: number; renderMs: number; totalMs: number; windowed: boolean }) => Promise<void>
@@ -1900,6 +1903,10 @@ const electronAPI = {
 
   getAgentSessionSDKMessages: (id: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_SDK_MESSAGES, id)
+  },
+
+  getAgentSessionSDKMessagesWindow: (id: string, options?: { endIndex?: number; startIndex?: number; budgetBytes?: number }) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_SDK_MESSAGES_WINDOW, id, options)
   },
 
   logAgentHistoryLoadTiming: (input: { sessionId: string; messages: number; bytes: number; ipcMs: number; renderMs: number; totalMs: number; windowed: boolean }) => {
