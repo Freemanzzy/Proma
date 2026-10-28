@@ -43,6 +43,13 @@ function registerProtocolsAndHandlers(): void {
     { scheme: 'proma-file', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
   ])
 
+  // 开发调试 CDP 仅在未打包且显式提供端口时启用，并强制绑定回环地址；打包构建永不开放此端口。
+  const debugPort = process.env.PROMA_DEV_REMOTE_DEBUGGING_PORT
+  if (!app.isPackaged && debugPort && /^(?:1024|[1-9][0-9]{3,4})$/.test(debugPort) && Number(debugPort) <= 65535) {
+    app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1')
+    app.commandLine.appendSwitch('remote-debugging-port', debugPort)
+  }
+
   // Windows: 禁用 LCD 次像素抗锯齿（ClearType），改用灰度 AA。
   // ClearType 是为浅色背景+深色文字设计的，在深色代码块背景下会产生彩色边缘，导致文字模糊。
   if (process.platform === 'win32') {

@@ -604,6 +604,9 @@ export interface ElectronAPI {
   /** 获取 Agent 会话 SDKMessage（Phase 4 新格式） */
   getAgentSessionSDKMessages: (id: string) => Promise<SDKMessage[]>
 
+  /** 记录桌面历史加载耗时，不传递会话内容。 */
+  logAgentHistoryLoadTiming: (input: { sessionId: string; messages: number; bytes: number; ipcMs: number; renderMs: number; totalMs: number; windowed: boolean }) => Promise<void>
+
   /** 更新 Agent 会话标题 */
   updateAgentSessionTitle: (id: string, title: string) => Promise<AgentSessionMeta>
 
@@ -1897,6 +1900,10 @@ const electronAPI = {
 
   getAgentSessionSDKMessages: (id: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_SDK_MESSAGES, id)
+  },
+
+  logAgentHistoryLoadTiming: (input: { sessionId: string; messages: number; bytes: number; ipcMs: number; renderMs: number; totalMs: number; windowed: boolean }) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.LOG_HISTORY_LOAD_TIMING, input)
   },
 
   updateAgentSessionTitle: (id: string, title: string) => {

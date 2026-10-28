@@ -1847,6 +1847,8 @@ export const AGENT_IPC_CHANNELS = {
   GET_QUEUED_MESSAGES_BATCH: 'agent:get-queued-messages-batch',
   /** 获取会话 SDKMessage（Phase 4 新格式） */
   GET_SDK_MESSAGES: 'agent:get-sdk-messages',
+  /** 桌面会话历史加载匿名计时；仅接受数值白名单字段。 */
+  LOG_HISTORY_LOAD_TIMING: 'agent:log-history-load-timing',
   /** 更新会话标题 */
   UPDATE_TITLE: 'agent:update-title',
   /** 更新会话模型选择 */

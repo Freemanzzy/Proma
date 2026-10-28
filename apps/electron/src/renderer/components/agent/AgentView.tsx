@@ -489,6 +489,7 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
   persistedSDKMessagesRef.current = persistedSDKMessages
   const messagesRequestIdRef = React.useRef(0)
   const messagesMutationVersionRef = React.useRef(0)
+  const historyOpenStartedAtRef = React.useRef(performance.now())
   const setStreamingStates = useSetAtom(agentStreamingStatesAtom)
   // 只订阅输入区/工具栏需要的低频流状态。
   const streamViewState = useAtomValue(agentSessionInputStreamStateAtomFamily(sessionId))
@@ -1139,6 +1140,7 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
     // persisted/live 消息，避免“助手气泡先消失、持久化消息再恢复”的空窗跳动。
     const isSessionSwitch = loadingSessionIdRef.current !== sessionId
     if (isSessionSwitch) {
+      historyOpenStartedAtRef.current = performance.now()
       loadingSessionIdRef.current = sessionId
       // 命中缓存则立即填充，消除「先清空 → 等 IPC 全量读盘」的可见空窗；
       // IPC 返回后仍会以最新数据覆盖。未命中才回退到清空 + loading 态。
@@ -1157,9 +1159,11 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
     setMessagesRefreshing(true)
     const requestId = ++messagesRequestIdRef.current
     const requestMutationVersion = messagesMutationVersionRef.current
+    const requestStartedAt = performance.now()
     let cancelled = false
     window.electronAPI.getAgentSessionSDKMessages(sessionId)
       .then((sdkMsgs) => {
+        const ipcMs = performance.now() - requestStartedAt
         if (cancelled || requestId !== messagesRequestIdRef.current) return
         if (requestMutationVersion !== messagesMutationVersionRef.current) {
           // 请求期间已有本地消息变更，旧 IPC 快照不能覆盖当前内存消息。
@@ -1223,6 +1227,17 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
             map.delete(sessionId)
             return map
           })
+          if (!isWebRemoteFullUi()) {
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+              const renderMs = performance.now() - requestStartedAt - ipcMs
+              let bytes = 0
+              try { bytes = new TextEncoder().encode(JSON.stringify(sdkMsgs)).byteLength } catch { /* estimate unavailable */ }
+              void window.electronAPI.logAgentHistoryLoadTiming({
+                sessionId, messages: sdkMsgs.length, bytes, ipcMs, renderMs,
+                totalMs: performance.now() - historyOpenStartedAtRef.current, windowed: false,
+              })
+            }))
+          }
         })
       })
       .catch((error) => {

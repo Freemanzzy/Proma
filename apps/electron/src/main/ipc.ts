@@ -10,6 +10,7 @@ import { existsSync, realpathSync, readFileSync, writeFileSync, mkdirSync, statS
 import { realpath, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
+import { recordPersonalInfo } from './lib/personal-log-writer'
 import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, SLACK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, VAULT_IPC_CHANNELS, PLANNING_CONFLICT_ERROR, MAX_ATTACHMENT_SIZE, isPromaPermissionMode, normalizePathForCompare, removeMcpServerFromConfig, TERMINAL_IPC_CHANNELS, SIMULATOR_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS, WINDOWS_AGENT_ISLAND_IPC_CHANNELS, TRAY_IPC_CHANNELS } from '../types'
 import type {
@@ -2572,6 +2573,18 @@ export function registerIpcHandlers(): void {
       return getAgentSessionSDKMessages(id)
     }
   )
+
+  ipcMain.handle(AGENT_IPC_CHANNELS.LOG_HISTORY_LOAD_TIMING, (event, input: unknown): void => {
+    const url = event.senderFrame?.url ?? ''
+    if (!(url.startsWith('file:') || url.startsWith('http://127.0.0.1:5173'))) return
+    if (!input || typeof input !== 'object') return
+    const value = input as Record<string, unknown>
+    const sessionId = typeof value.sessionId === 'string' ? value.sessionId : ''
+    const numeric = ['messages', 'bytes', 'ipcMs', 'renderMs', 'totalMs'] as const
+    if (!/^[A-Za-z0-9_-]{8,}$/.test(sessionId) || numeric.some((key) => typeof value[key] !== 'number' || !Number.isFinite(value[key]) || (value[key] as number) < 0)) return
+    if (typeof value.windowed !== 'boolean') return
+    recordPersonalInfo('会话加载', `event=agent-history-open session=${sessionId.slice(0, 8)} messages=${Math.floor(value.messages as number)} bytes=${Math.floor(value.bytes as number)} ipcMs=${Math.round(value.ipcMs as number)} renderMs=${Math.round(value.renderMs as number)} totalMs=${Math.round(value.totalMs as number)} windowed=${value.windowed}`)
+  })
 
   // 更新 Agent 会话标题
   ipcMain.handle(
