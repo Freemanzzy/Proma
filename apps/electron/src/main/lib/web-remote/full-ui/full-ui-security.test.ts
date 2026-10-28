@@ -103,6 +103,8 @@ describe('Web Remote full-ui security policy', () => {
   test('登记通道 100% 有分级，未知通道不在白名单', () => {
     expect(getDeclaredWebRemoteChannels().every((channel) => !!getWebRemoteChannelPolicy(channel))).toBe(true)
     expect(getWebRemoteChannelPolicy('not-registered')).toBeUndefined()
+    expect(getWebRemoteChannelPolicy('agent:get-sdk-messages-window')).toMatchObject({ level: 'denied', scope: 'none' })
+    expect(getWebRemoteChannelPolicy('agent:log-history-load-timing')).toMatchObject({ level: 'denied', scope: 'none' })
     expect(policySummary().denied).toBeGreaterThan(0)
   })
 

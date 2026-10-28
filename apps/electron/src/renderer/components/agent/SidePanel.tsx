@@ -389,7 +389,7 @@ function ExplorationBringBackAction({
   const setParentDraftHtml = useSetAtom(agentSessionDraftHtmlAtom)
   const latestExplorationConclusion = React.useMemo(
     () => getLatestExplorationConclusion(
-      [...(explorationMessagesCache.get(branch.sessionId) ?? []), ...explorationLiveMessages],
+      [...(explorationMessagesCache.get(branch.sessionId)?.messages ?? []), ...explorationLiveMessages],
       branch.sourceMessageId,
     ),
     [branch.sessionId, branch.sourceMessageId, explorationLiveMessages, explorationMessagesCache],

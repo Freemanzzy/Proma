@@ -89,6 +89,8 @@ export const WEB_REMOTE_CHANNEL_POLICY: Readonly<Record<string, WebRemoteChannel
   "agent:get-queued-messages": { level: "read", scope: "session", rationale: "只读结果或状态事件；列表和设置结果在返回前按允许范围/敏感字段过滤。" },
   "agent:get-queued-messages-batch": { level: "read", scope: "none", rationale: "批量读取的每个 sessionId 单独校验远程工作区范围，仅返回已授权会话的队列快照；最多 200 个。" },
   "agent:get-sdk-messages": { level: "read", scope: "session", rationale: "只读结果或状态事件；列表和设置结果在返回前按允许范围/敏感字段过滤。" },
+  "agent:get-sdk-messages-window": { level: "denied", scope: "none", rationale: "桌面端历史窗口接口；手机继续使用既有全历史窗口 shim，不开放新通道。" },
+  "agent:log-history-load-timing": { level: "denied", scope: "none", rationale: "桌面端匿名性能计时遥测，不向 Web Remote renderer 开放。" },
   "agent:get-session-path": { level: "session", scope: "session", rationale: "参数必须能解析出 sessionId 或 workspaceId/slug，并校验其在远程允许范围内。" },
   "agent:get-skills": { level: "read", scope: "workspace", rationale: "只读结果或状态事件；列表和设置结果在返回前按允许范围/敏感字段过滤。" },
   "agent:get-skills-dir": { level: "workspace", scope: "workspace", rationale: "参数必须能解析出 sessionId 或 workspaceId/slug，并校验其在远程允许范围内。" },

@@ -51,6 +51,7 @@ import { getConversationMessages } from './conversation-manager'
 import { convertLegacyMessage } from '@proma/session-core'
 import { assertEnabledModelForChannel } from './agent-model-selection'
 import { copyForkWorkspaceFiles } from './agent-fork-workspace-copy'
+import { readAgentSessionSDKMessagesWindowFromFile, type AgentSessionSDKMessagesWindow, type AgentSessionSDKMessagesWindowOptions } from './agent-session-history-window'
 
 /**
  * 会话索引文件格式
@@ -669,6 +670,14 @@ export function getAgentSessionSDKMessages(id: string): SDKMessage[] {
     console.error(`[Agent 会话] 读取 SDKMessage 失败 (${id}):`, error)
     return []
   }
+}
+
+/** Read a complete-turn window from a session JSONL file without parsing the complete history. */
+export function getAgentSessionSDKMessagesWindow(
+  id: string,
+  options: AgentSessionSDKMessagesWindowOptions,
+): AgentSessionSDKMessagesWindow<SDKMessage> {
+  return readAgentSessionSDKMessagesWindowFromFile(getAgentSessionMessagesPath(id), options, normalizePersistedSDKMessage)
 }
 
 /**
