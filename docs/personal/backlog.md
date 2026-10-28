@@ -77,4 +77,4 @@
 - 约束（2026-10-16）：Web Remote `agent:list-directory` 若扩展允许根（超出会话/工作区/附加目录/worktree），必须同步更新 `full-ui-security.test.ts`。
 
 - **已安装（2026-10-24，`3d33fab5`）**：桌面改名修复（用户实测通过）+ 飞书群 Bot（模型跟随会话、约 120K 提前压缩、`/mirror` 桌面同步开关、对其他工作区只读）。用户 10-24 反馈：小R 压缩后回复明显变快 ✅；`/mirror` 群同步暂不测试，用户日后需要时再试（多人群需 `@小R /mirror on`），有问题再反馈。
-- **已合入 personal、未安装（2026-10-24）**：`fix/feishu-followups-20261024`——启动时不再覆盖飞书 binding 模型；飞书错误摘要写入日志。随下一批安装。
+- **已合入 personal、打包中（2026-10-29）**：`fix/feishu-followups-20261024`（启动不再覆盖飞书 binding 模型、飞书错误摘要入日志）+ `perf/desktop-history-window-20261028`（桌面大会话按约 2 MiB 尾窗加载、“加载更早”、回复后只刷新当前窗口、打开计时日志 `scope=会话加载 event=agent-history-open`；fixture 实测 58 MB 1.7 s→0.06–0.34 s、335 MB 3.5 s→约 0.08 s；用户 10-29 01:08 dev 试用通过）。未做：超大单条 tool_result 折叠。
