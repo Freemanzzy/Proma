@@ -1802,3 +1802,14 @@
 - **全历史功能处理**：会话小地图继续独立调用全历史接口；会话内搜索在首次触发时全量读取并缓存索引；搜索结果定位如果不在当前窗口，会按页加载更早历史直到找到目标或到达文件开头；历史引用导航仍按页加载至目标。fork/rewind 的入口只从已加载/可见消息发起，主进程按 UUID 从会话文件执行完整操作；历史引用搜索仍走主进程全历史路径。消息引用/划选只针对当前已加载内容；上下文/token 用量来自运行状态，不依赖完整 transcript。代码库中未找到全 transcript 导出入口。小地图、搜索定位、fork/rewind 未逐项做 UI 端到端触发验证。
 - **本批未做**：超大 tool_result 的桌面折叠/“展开”单条消息 IPC（执行简报 Step 4）；真实 API-key channel 回复后的动态刷新验证（避免未经确认产生外部 API 费用）。单个超大轮次可能超过 2 MiB，窗口仍保证完整轮次，不保证严格限制在预算内。手机端 iPhone smoke 通过；session-sync 在显式设 `PROMA_WEB_REMOTE_EXPECTED_WORKSPACE_COUNT=2`（fixture 实有两个 workspace）后通过。第一次 session-sync 使用默认期望值 1 失败是参数不匹配，不是实现缺陷。手机 Web Remote 的代码路径未改。
 - **验证**：新增历史窗口单测及 Web Remote 通道安全测试均通过；全仓 typecheck 六 workspace 通过；全量测试 `bun test --timeout=20000`：812 pass / 0 fail；`build:main`、`build:renderer`、`build:web-preload` 通过（renderer 保留既有 large-chunk 提示）。开发实例使用 `.proma-dev-fixture`，当前保持运行。未触碰 `/Applications/Proma.app`、`~/.proma` 或备份；未推送、合并、打包或安装。
+
+## 2026-10-28: 桌面大会话按窗口加载——父会话复核与端到端复测
+
+- 父会话用与基线相同口径（CDP 点击侧栏会话行 → 标题切换且消息节点出现后两帧）复测 fixture：
+  - 58 MB（6,155 条）：基线约 1.7–1.8 s（首次 3.9 s）→ 窗口化后约 0.06–0.34 s；
+  - 335 MB（4,657 条）：基线约 3.4–3.7 s → 首次约 0.56 s（冷行索引）、之后约 0.08 s；
+  - 小会话不变（< 50 ms）。
+- 修正计时日志：同一会话回复后的刷新也会写 `agent-history-open`，`totalMs` 从上一次切换算起（出现 37 万 ms 的异常值）。现只在打开/切换会话时记录。
+- 回复后刷新实测：fixture 新建 clipproxyapi Sonnet 会话发送一条短消息，完成后桌面正确显示用户消息与回复（持久化 3 条）。
+- 未做（Step 4 被裁剪）：超大单条 tool_result 折叠与按需展开；单轮超大时窗口仍可能超过 2 MiB。搜索定位、MiniMap、fork/rewind 只做了代码路径核对，未逐项 UI 回归。
+

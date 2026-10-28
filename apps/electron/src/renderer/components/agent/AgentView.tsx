@@ -1255,7 +1255,8 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
             map.delete(sessionId)
             return map
           })
-          if (!isWebRemoteFullUi()) {
+          // 只记录“打开/切换会话”；同会话的回复后刷新不计入，否则 totalMs 会从上次切换起算。
+          if (isSessionSwitch && !isWebRemoteFullUi()) {
             requestAnimationFrame(() => requestAnimationFrame(() => {
               const renderMs = performance.now() - requestStartedAt - ipcMs
               let bytes = 0
