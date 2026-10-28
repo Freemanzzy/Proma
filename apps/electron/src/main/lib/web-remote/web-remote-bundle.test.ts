@@ -39,5 +39,6 @@ describe('Web Remote bundled ws import', () => {
     const execution = spawnSync('node', ['-e', `process.stdout.write(String(require(${JSON.stringify(outputPath)}).default))`], { encoding: 'utf8' })
     expect(execution.status).toBe(0)
     expect(execution.stdout).toBe('function')
-  })
+    // esbuild + 子进程在全量并发（打包）时可能超过 bun 默认 5 s（2026-09-26 出现过）。
+  }, 30_000)
 })
