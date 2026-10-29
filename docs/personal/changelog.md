@@ -1833,4 +1833,5 @@
 - 恢复演练通过：从 bundle 克隆 `personal`，用解压出的缓存执行 `bun install --frozen-lockfile --offline --ignore-scripts`，1,310 个包全部离线装好，pi-ai 补丁已生效。
 - 新增 `scripts/personal/backup-source.sh` 和 maintenance §4.2，并新增每周自动化，以后的改动会持续同步进备份。
 - 首次推送 `archive` 被拒：gh 令牌缺少 `workflow` 权限，GitHub 不允许它创建 `.github/workflows/*`。需要用户执行一次 `gh auth refresh -h github.com -s workflow` 后补推。
+- 2026-10-29 补充：用户授权 gh `workflow` 权限后，镜像 `archive` 推送完成（分支 240＝个人 37＋官方 203，tag 129，`personal` 与 `upstream/main` 均与本地一致）。`origin` 已加第二个 push URL 指向镜像，此后每次 `git push origin` 同步更新镜像。
 
