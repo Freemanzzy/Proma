@@ -1865,3 +1865,22 @@
 - **完整验证**：定向预算测试 10 pass / 0 fail；全量 `bun test` 826 pass / 0 fail（133 files）；`bun run typecheck` 六个 workspace 全部通过；harness `node --check`、dev/preview `bash -n`、fixture Python 编译和 `git diff --check` 通过。
 - **已知待办**：Pi SDK (`pi-ai`) 内部 HTTP retry 在单次 stream 收束前不会逐次出现在 Proma `provider-request` 事件中；评估公开诊断接口及不改 SDK 的可观测方案，登记于 backlog。未改 `node_modules` 或 `patches`。
 - **同步与边界**：更新 `docs/personal/backlog.md` 的分支验收缺口，并登记内部重试日志待办；本记录追加于 changelog。因真实模型对话仍受模型禁用阻塞，`PERSONAL.md` 保持不变。未合并、推送、打包、安装，未触碰 `~/.proma` 或 `/Applications/Proma.app`。
+
+## 2026-10-31: 按用户指定改用 Opus 5.5 并完成图片预算 dev 验收
+
+- **模型选择与隔离**：Sonnet 5.5 在 `.proma-dev` 被禁用、Haiku 5.5 不存在后，用户明确授权改用启用中的 `clipproxyapi/claude-opus-5-5`，并要求 ID 完全匹配、不得改 `~/.proma-dev/channels.json`。Harness 只接受该精确渠道名、API provider 和 model ID，切换后读回 `channelId/modelId` 一致才可发消息。测试前后 `channels.json` SHA-256 相同；未选择 Codex/OAuth，也未编辑渠道配置。
+- **harness 修正**：首次真实 Opus 对话的两条消息均得到预期回复，JSONL 也解析出六张图片，但成功路径在写证据副本时因遗漏 `options` 参数报 `ReferenceError`。修正 `runImageBudget(harness, options, result)` 后重跑，harness 退出码 0；最终结果 JSON 与 JSONL 副本保存在系统临时目录 `proma-mobile-harness/`。
+- **真实对话**：单个新建 `.proma-dev` 会话先逐张 Read 六张 1536×1024、约 3.59 MB 的 PNG，每张用一个英文词描述并以 `image-budget-done` 收尾；第二条消息只要求 `second-done`。渠道与模型读回为 clipproxyapi + `claude-opus-5-5`；首条、第二条均命中预期完成标记。harness 测试 PASS，steps 1/1，new-action exceptions=0；既有 WebAssembly/CSP 启动异常仍作为 pre-action baseline（1 条），未算作本次 action 异常。
+- **JSONL 与预算数据**：本次 JSONL 留存 6 个 image/JPEG blocks，base64 bytes 依次为 **555,288、553,872、554,828、554,528、554,900、554,164**，均 ≤600 KiB。`image-budget` 显示 `imagesBefore=6 imageBytesBefore=3327580`，`imagesAfter=1 imageBytesAfter=554164 newlyRemoved=5`；下一个 `provider-request` 显示 `images=1 imageBytes=554164 approxBodyBytes=557067`，相对六图请求的 `imageBytes=3327580 approxBodyBytes=3329253` 明确下降。budget transform 后 JSONL 仍保留六个图像块。
+- **实际 main.log 原始诊断行**（只含摘要字段，不含正文、图像、路径或密钥）：
+
+  ```text
+  2026-10-30T22:00:27.234Z [INFO] main-process info name=Info scope=Agent 请求 message=event=provider-request session=118edbb3 provider=clipproxyapi model=claude-opus-5-5 inputLimitsImageResize=false messages=2 images=0 imageBytes=0 approxBodyBytes=863 ttfbMs=4019 durationMs=8267 outcome=done
+  2026-10-30T22:02:45.618Z [INFO] main-process info name=Info scope=Agent 请求 message=event=provider-request session=118edbb3 provider=clipproxyapi model=claude-opus-5-5 inputLimitsImageResize=false messages=9 images=6 imageBytes=3327580 approxBodyBytes=3329253 ttfbMs=134379 durationMs=134384 outcome=done
+  2026-10-30T22:02:46.273Z [INFO] main-process info name=Info scope=Agent 请求 message=event=image-budget session=118edbb3 imagesBefore=6 imageBytesBefore=3327580 imagesAfter=1 imageBytesAfter=554164 recompressed=0 newlyRemoved=5 removedTotal=5 overBudgetProtected=false recompressFailed=0
+  2026-10-30T22:03:13.451Z [INFO] main-process info name=Info scope=Agent 请求 message=event=provider-request session=118edbb3 provider=clipproxyapi model=claude-opus-5-5 inputLimitsImageResize=false messages=11 images=1 imageBytes=554164 approxBodyBytes=557067 ttfbMs=21959 durationMs=27161 outcome=done
+  ```
+
+- **审查发现并修正日志 ID 泄漏面**：首次 run 的 `requestModel.provider` 是 Pi 为会话注册的合成 provider 名，嵌入了完整 session UUID。最终实现改为日志使用 `input.channelName ?? input.provider`；上述 PASS 行仅出现 `session` 前 8 位与 `provider=clipproxyapi`，没有完整 session ID。首次未通过试跑产生的原始 main.log 行仍保留在 `.proma-dev/logs/main.log`，未重写日志；其中合成 provider 名带有该测试会话 UUID（不含 prompt、图片或密钥）。`inputLimitsImageResize=false` 是从真实 provider request model 对象读取的 `inputLimits.images.resize` 结果；本模型该项未配置，实际图片仍由 Read 的 600 KiB resize 配置先行缩放。
+- **dev 环境与清理**：四个测试阈值在 NodeService utility 进程环境中读回；dev start/stop 共六轮退出码均为 0。最终状态检查：17889、5173 均未监听，PID 文件不存在、无 harness Chrome。临时图片、测试会话、配对设备与 Chrome profile 已清理；JSONL / harness JSON 证据副本保留在 `/tmp` 下 `proma-mobile-harness/`。未修改渠道 JSON，未触碰 `~/.proma` 或 `/Applications/Proma.app`。
+- **验证**：最终代码全量 `bun test` 826 pass / 0 fail（133 files），`bun run typecheck` 六个 workspace 通过；image-context-budget 定向测试 10 pass；harness `node --check`、dev/preview `bash -n`、fixture Python 编译、`git diff --check` 通过。仍未合并、推送、打包或安装。Pi SDK 内部 HTTP retry 的逐次日志可见性继续留在 backlog #13。

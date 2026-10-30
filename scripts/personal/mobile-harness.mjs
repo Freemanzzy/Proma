@@ -1918,7 +1918,7 @@ async function runSmoke(harness, options, result) {
   result.screenshots.push(finalScreenshot)
 }
 
-async function runImageBudget(harness, result) {
+async function runImageBudget(harness, options, result) {
   const fixtureDir = mkdtempSync(join(tmpdir(), 'proma-image-budget-'))
   result.imageBudgetFixtureDir = fixtureDir
   execFileSync('python3', [join(REPO_ROOT, 'scripts/personal/make-image-budget-fixtures.py'), fixtureDir], { encoding: 'utf8', timeout: 60_000 })
@@ -1941,21 +1941,21 @@ async function runImageBudget(harness, result) {
   // Never send until an enabled API-key channel/model was selected and confirmed from session metadata.
   const channels = await harness.invokeApi('listChannels')
   const channelList = Array.isArray(channels) ? channels : Array.isArray(channels?.channels) ? channels.channels : []
+  const targetModelId = 'claude-opus-5-5'
   const allowedApiProvider = (provider) => ['anthropic', 'anthropic-compatible', 'custom'].includes(provider)
-  const matchesClaude55 = (model) => /claude[- ]?(?:sonnet|haiku)[- ]?5[.-]5/i.test(`${model?.id ?? ''} ${model?.name ?? ''}`)
   const safeChannelSummary = channelList.map((channel) => ({
     id: channel?.id,
     name: channel?.name,
     provider: channel?.provider,
     enabled: channel?.enabled,
-    models: (channel?.models || []).filter(matchesClaude55).map((model) => ({ id: model?.id, name: model?.name, enabled: model?.enabled })),
+    models: (channel?.models || []).filter((model) => model?.id === targetModelId).map((model) => ({ id: model?.id, name: model?.name, enabled: model?.enabled })),
   })).filter((channel) => /clipproxyapi/i.test(`${channel.name ?? ''} ${channel.provider ?? ''}`))
   result.imageBudget.availableClipproxyTargets = safeChannelSummary
   const targetChannel = channelList.find((channel) =>
     channel?.enabled && channel.name === 'clipproxyapi' && allowedApiProvider(channel.provider)
-      && (channel.models || []).some((model) => model?.enabled && matchesClaude55(model)))
-  if (!targetChannel) throw new Error(`未找到启用的 API Key 渠道 clipproxyapi 与 Claude Sonnet 5.5/Haiku 5.5；未向任何渠道发送消息。安全候选：${JSON.stringify(safeChannelSummary)}`)
-  const targetModel = targetChannel.models.find((model) => model?.enabled && matchesClaude55(model))
+      && (channel.models || []).some((model) => model?.enabled && model.id === targetModelId))
+  if (!targetChannel) throw new Error(`未找到启用的 API Key 渠道 clipproxyapi / ${targetModelId}；未向任何渠道发送消息。安全候选：${JSON.stringify(safeChannelSummary)}`)
+  const targetModel = targetChannel.models.find((model) => model?.enabled && model.id === targetModelId)
   const changed = await harness.invokeApi('updateAgentSessionModel', [session.id, targetChannel.id, targetModel.id])
   const readback = (await harness.invokeApi('listAgentSessions')).find((item) => item?.id === session.id)
   result.imageBudget.channel = { id: targetChannel.id, provider: targetChannel.provider }
@@ -1966,7 +1966,7 @@ async function runImageBudget(harness, result) {
     throw new Error(`会话渠道/模型读回不匹配；未发送消息：${JSON.stringify({ expectedChannel: targetChannel.id, expectedModel: targetModel.id, actualChannel: result.imageBudget.readbackChannel, actualModel: result.imageBudget.readbackModel })}`)
   }
 
-  const prompt = `请依次使用 Read 工具读取下面 6 张图片。每张图片只用一个英文单词描述；全部完成后，最后单独回复 image-budget-done。不要跳过图片，不要调用其他工具。\n${imagePaths.join('\n')}`
+  const prompt = `Read each image once; answer with exactly one English word per image, then finish with image-budget-done.\n${imagePaths.join('\n')}`
   await harness.inputAndSend(prompt)
   const first = await harness.waitForAssistantReply(prompt, 'image-budget-done', 360_000)
   result.imageBudget.firstReplyHit = Boolean(first?.assistant && /image-budget-done/i.test(sdkMessageText(first.assistant)))
@@ -2067,7 +2067,7 @@ async function main() {
     result.pageStartupExceptionCategories = harness.exceptions.map((entry) => summarizeHarnessException(entry))
     result.loadMetrics = { first: paired.firstAppLoad, second: secondAppLoad }
     result.sessionManifestBefore = await harness.readSessionManifest()
-    if (options.suite === 'image-budget') await runImageBudget(harness, result)
+    if (options.suite === 'image-budget') await runImageBudget(harness, options, result)
     else if (options.suite === 'smoke') await runSmoke(harness, options, result)
     else if (options.suite === 'mobile-polish') await runMobilePolishChecks(harness, options, result)
     else if (options.suite === 'heavy-session' || options.suite === 'cellular') await runHeavySession(harness, options, result, (path) => { syntheticFileCleanupPath = path })
