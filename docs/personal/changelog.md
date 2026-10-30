@@ -1845,3 +1845,12 @@
   - 该套件的总体结果是 FAIL，原因仅是代码块渲染时既有的 WebAssembly CSP 拦截异常（backlog 后续待办 #9），与复制无关。
   - 全量测试通过（见提交说明）。
 
+
+## 2026-10-31: Agent 图片上下文预算（压缩 / 旧图移出 / 请求级日志）
+
+- **实现**：Pi Read 工具使用公开 `resizeOptions`，最大尺寸 1568×1568、base64 上限 600 KiB、JPEG quality 80。新增 `image-context-budget.ts`：请求前对大于 1 MiB 的历史图重压缩，使用 SHA-256 键的进程内 LRU（最多 64 项 / 64 MiB）；超过字节/张数 HIGH 后从最旧图开始移出到 LOW，保护当前用户文本轮，并在当前 session 内粘性记住移出项。Pi JSONL 不在 transform 阶段改写。新增 utility→main 的事件诊断转发，记录 provider-request 与发生重压缩/移出/失败时的 image-budget 摘要，不记录消息正文、图片内容或路径。
+- **验证**：开工基线 `bun test` 816 pass / 0 fail / 0 error，`bun run typecheck` 通过；完成后 `bun test` 823 pass / 0 fail / 0 error（133 files），`bun run typecheck` 通过。新增预算单测 7/7，覆盖引用保持、重压缩与 LRU、HIGH→LOW 最旧移出、当前轮保护、粘性、Read path 占位、resize 失败保留以及环境变量合法/非法值。生成 6 张 1536×1024、约 2.92 MB PNG，Pi resize API 实测 base64 为 525,148–534,880 bytes，均低于 600 KiB。
+- **dev 实测状态**：使用测试阈值 `PROMA_IMAGE_BUDGET_HIGH_BYTES=1258291`、`PROMA_IMAGE_BUDGET_LOW_BYTES=629145`、`PROMA_IMAGE_BUDGET_HIGH_COUNT=20`、`PROMA_IMAGE_BUDGET_LOW_COUNT=12` 执行 `bash scripts/personal/mobile-preview.sh start`，退出码 0，启动日志确认 17889 和 full-ui 分级覆盖率 100%；随后 `bash scripts/personal/mobile-preview.sh stop`，退出码 0，runbook 按已记录进程组逐 PID 停止并核验。**未在 UI 建立新会话，也未发起模型请求**：因此本次没有 JSONL Read 记录、main.log 的 provider-request/image-budget 原始行、预算下降证据或真实回复，不计为 dev 功能验收通过。需在父会话补完后才可标为验收完成。未触碰正式数据目录或已安装应用。
+- **inputLimits 核实**：本仓库 `pi-model-registry.ts` 注册的渠道模型默认结构未设置 `inputLimits`；所含 Pi provider catalog 源码中未发现模型级 `inputLimits` 声明，只有 faux/custom provider 接受透传。故本次已验证的 Anthropic/clipproxyapi模型使用 Read fallback resize 配置；若未来接入显式且较宽松的 `inputLimits.images.resize`，请求前重压缩仍作兜底。本地 dev 当前生效模型对象的运行时取值尚未通过真实会话单独观察。
+- **缺陷 / 待办**：按字节自动压缩、timeout/retry 策略、界面重试状态和 compaction ratio 均未改；不改 Pi SDK / node_modules / patches。真实 dev 会话验证及 `main.log` 证据列入 backlog 待办。
+- **同步文档**：更新 `docs/personal/backlog.md`（新增本分支的验收缺口及本轮后续不做项）；本记录追加于 `docs/personal/changelog.md`。`PERSONAL.md` 主线状态/官方差异未改，避免把未验证分支描述成当前主线能力。

@@ -13,6 +13,7 @@
 |---|---|---|---|---|
 | `fix/mobile-dedupe-20261001`（已合入） | `personal` efc420c1 | P：手机端 `agent:list-active-sessions` / `count-archived-sessions` 并发合并 + 3 秒复用，元数据变更事件使缓存失效（同组操作 13 次 / 825 KB → 6 次 / 382 KB）。Q：IPC WebSocket 带 `src` 与随机 `page` 参数，v2 `open` 行记录来源，用于区分同页双连接与多页面实例。R：非省流量模式首屏历史预算 2 MiB → 1 MiB（41.9 MB 历史弱网首屏 11.3 s → 7.7 s），“加载更早”仍 2 MiB/页 | 原分支 678 pass / 0 fail；合入后本批全量 685 pass / 0 fail；typecheck 与 main/renderer/web-preload 构建通过 | 2026-10-02 以 `--no-ff` 合入 `fix/mobile-batch-20261002`（未推送、未发布）；冲突仅在 changelog，双方记录均保留并按时间顺序排列 |
 | `fix/batch-20261019`（已合入 2026-10-19） | `personal` 47daaaae | Web Remote 手机正文/表格布局与占位文案、队列恢复批量 IPC 和快照顺序；新增移动端重命名显式回调、输入框焦点守卫与顶栏标题同步。桌面布局和单会话队列恢复路径不变。 | **785 pass / 0 fail**、六 workspace typecheck 通过；iPhone/Android CDP touch 验证 rename 输入/保存/取消与标题同步；build:main/renderer/web-preload 通过。Android 表格横向触摸仍未验收；OS 虚拟键盘未在 headless CDP 中观察。 | 已提交 `9cc8b14b`；仍待后续发布流程，未推送、合并、打包或安装。详见 changelog 2026-10-19 两条记录。 |
+| `feat/image-context-budget-20261031`（待父会话审核） | `personal` 66820eff | Read 新图缩放、请求前历史图片重压缩/粘性移出、请求级诊断日志。 | 基线 816 pass / 0 fail；完成后 823 pass / 0 fail，typecheck 通过；6 张约 2.9 MB PNG 经 resize API 得到 525–535 KB base64。dev 启停通过，但没有实际 Agent 会话；JSONL 图片大小、预算前后日志与真实回复未验收。 | 仅本地分支；待补 dev 真实会话验收，不得合并或推送。详见 changelog 2026-10-31。 |
 
 已归档、不合入：开发进程安全完整方案（原 `fix/dev-process-safety-20260930`，约 2,000 行 launchd 托管），以 git bundle 存档于本机会话工作台 `archive/dev-process-safety-20260930.bundle`；评估结论为过重，改走下方“开发启动小修复”。
 
@@ -65,6 +66,8 @@
 8. **“只推送手机正在看的会话的实时输出”**：完成事件瘦身与背压上线后积压已消除，暂不需要；若计量再出现 MB 级峰值再评估。
 9. **WebAssembly 被 CSP 拦截的启动报错**：既有独立缺陷，不得放宽 CSP 修复。
 10. **上游同步准备**：下次官方 tag 时把 `useGlobalAgentListeners.ts` 的个人版改动拆为独立模块，降低冲突面（见本机 `upstream-surface` 报告）。
+11. **图片上下文预算 dev 验收**：在 `feat/image-context-budget-20261031` 上只用 `~/.proma-dev` 新建会话与 clipproxyapi Claude Sonnet 5.5/Haiku 5.5，完成真实 Read + 多图预算对话；核对 JSONL 每图 ≤600 KB、main.log `image-budget` / `provider-request` 字段与数据下降、正常回复及 JSONL 未被改写。不可选 OAuth 渠道。
+12. **图片请求后续（本轮暂不做）**：按字节触发自动压缩；调整 300s timeout / retry；界面显示重试状态；修改 compaction ratio；修改 Pi SDK（node_modules / patches）仅当新设计经用户重新批准后评估。
 
 ## 测试与开发数据约定
 

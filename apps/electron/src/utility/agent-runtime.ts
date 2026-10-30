@@ -233,7 +233,10 @@ function sendCallback(active: ActiveQuery, callback: string, payload: unknown): 
 
 async function pumpQuery(active: ActiveQuery, input: PiAgentQueryOptions): Promise<void> {
   try {
-    for await (const message of piAdapter.query(input)) {
+    for await (const message of piAdapter.query({
+      ...input,
+      onDiagnosticEvent: (event, fields) => sendQueryEvent(AGENT_RUNTIME_METHODS.EVENT_QUERY_LOG, { event, fields }),
+    })) {
       if (activeQuery !== active) break
       sendQueryEvent(AGENT_RUNTIME_METHODS.EVENT_QUERY, { message })
     }

@@ -12,6 +12,7 @@ import {
 } from '@proma/shared'
 import type { PermissionResult, CanUseToolOptions } from '../agent-permission-service'
 import { AgentRuntimeClient } from '../agent-runtime-client'
+import { recordPersonalInfo } from '../personal-log-writer'
 import type { PiAgentQueryOptions } from './pi-agent-adapter'
 
 type PendingQuery = {
@@ -276,6 +277,20 @@ export class PiUtilityAdapter {
     if (event.method === AGENT_RUNTIME_METHODS.EVENT_QUERY) {
       const message = payload?.message
       if (message && typeof message === 'object') pending.queue.push(message as SDKMessage)
+      return
+    }
+    if (event.method === AGENT_RUNTIME_METHODS.EVENT_QUERY_LOG) {
+      const name = payload?.event
+      const fields = payload?.fields
+      if ((name !== 'image-budget' && name !== 'provider-request') || !fields || typeof fields !== 'object' || Array.isArray(fields)) return
+      const safePairs: string[] = [`event=${name}`]
+      for (const [key, value] of Object.entries(fields as Record<string, unknown>)) {
+        if (!/^[A-Za-z][A-Za-z0-9]*$/.test(key)) continue
+        if (typeof value === 'number' && Number.isFinite(value)) safePairs.push(`${key}=${Math.round(value)}`)
+        else if (typeof value === 'boolean') safePairs.push(`${key}=${value}`)
+        else if (typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,120}$/.test(value)) safePairs.push(`${key}=${value}`)
+      }
+      recordPersonalInfo('Agent 请求', safePairs.join(' '))
       return
     }
     if (event.method === AGENT_RUNTIME_METHODS.EVENT_QUERY_END) {
