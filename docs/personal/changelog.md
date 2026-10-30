@@ -1835,3 +1835,13 @@
 - 首次推送 `archive` 被拒：gh 令牌缺少 `workflow` 权限，GitHub 不允许它创建 `.github/workflows/*`。需要用户执行一次 `gh auth refresh -h github.com -s workflow` 后补推。
 - 2026-10-29 补充：用户授权 gh `workflow` 权限后，镜像 `archive` 推送完成（分支 240＝个人 37＋官方 203，tag 129，`personal` 与 `upstream/main` 均与本地一致）。`origin` 已加第二个 push URL 指向镜像，此后每次 `git push origin` 同步更新镜像。
 
+## 2026-10-30: 修复手机端复制按钮“显示已复制但没复制”
+
+- 根因：`renderer/lib/clipboard.ts` 先调用主进程 `writeClipboardText`。Web Remote 下该 IPC（`clipboard:write-text`）是 denied，shim 对被拒通道静默返回成功，所以界面显示“已复制”，但 Mac 和手机的剪贴板都没有写入。
+- 修复：Web Remote 下不走主进程，直接在点击手势内调用 `navigator.clipboard.writeText`；失败或不可用时用隐藏 textarea + `execCommand('copy')` 兜底；两者都失败时抛错，不再假装成功。桌面路径不变。没有放开 `clipboard:write-text`。所有复制入口（代码块、消息复制、Mermaid、设置页等）都走 `copyTextToClipboard`，一并修复。
+- 验证：
+  - 单测 7/7。变异检验：去掉 Web Remote 分支后，4 个新测试全部变红。
+  - harness 新增 `copy` 套件：发一条只含 bash 代码块的消息，点代码块标题栏的“复制”，再读回剪贴板。Android 和 iPhone 视口下剪贴板都恰好等于代码行，截图在 `/tmp/copy-fix/`。
+  - 该套件的总体结果是 FAIL，原因仅是代码块渲染时既有的 WebAssembly CSP 拦截异常（backlog 后续待办 #9），与复制无关。
+  - 全量测试通过（见提交说明）。
+

@@ -5,7 +5,7 @@
 ## 待合入分支（已验证、未发布）
 
 - 当前安装：`57afeaff`（2026-10-29），之前的已合入分支均已包含。
-- 已合入、未安装：`fix/test-timeouts-20261029`（两个慢测试放宽超时）。随下一批安装。
+- 已合入、未安装：`fix/test-timeouts-20261029`（两个慢测试放宽超时）；`fix/mobile-copy-20261030`（手机复制修复）。
 - 待用户日常实测：桌面排队消息（运行中再发、Cmd+R 恢复）；会话内搜索与 minimap（窗口化加载后）。
 - 观察：手机 PDF 预览页“省流量”胶囊压住缩放控件（用户 10-19 决定先不做）。
 
@@ -49,7 +49,7 @@
 | 2026-10-19 | 手机端消息排版问题（iPhone 竖屏截图，会话“周度回顾TK性能与文档同步”）：正文左留白、宽表格挤压/无法横滑、标题重复、composer 提示过长 | iPhone、Android | 🟡 已修复并部分验收：仅 Web Remote 手机端收窄正文，表格横向滚动，隐藏重复正文标题（顶栏重命名保留）；TipTap 占位改为渲染期显示“输入消息…”，桌面及无模型提示不变。iPhone CDP touch `scrollLeft=256`、table `937/366`，正文 x=88→42px。Android after 截图 `/tmp/fmt-android-after/format-after-touch.png`；量测 `937/388`，占位可见；一次有明确触点的 touch 仍未滚动：目标表格已在 viewport 外（rect top=-2251.75px），前后 `scrollLeft=0`，详见 `/tmp/fmt-android-after/table-touch-final.json`，因此 Android 横向触摸仅保持待验收。详见 changelog 2026-10-19 follow-up。 ✅ 用户 10-19 真机验收通过（含安卓表格横滑）并于 10-24 安装。 |
 | 2026-10-19 | Web Remote 手机端从“重命名会话”菜单后输入框不可用，标题顶栏/侧栏不同步 | iPhone、Android | ✅ 已修复：菜单直接调用 `AgentHeader` inline editor，用户触摸输入框后获得焦点；Enter 保存后会话、AgentHeader、移动顶栏与侧栏同步；Escape 与空白标题取消均保持已保存标题。两端 CDP touch 与 fixture flow 记录在 `/tmp/rename-iphone-final/`、`/tmp/rename-android-final/`。Headless CDP 未显示 OS 虚拟键盘。详见 changelog 2026-10-19「修复 Web Remote 手机端会话重命名」。 |
 | 2026-10-28 | 手机端切换对话时内容出现较慢 | 手机；桌面大型历史窗口另见下文 | 手机端问题仍待定位（未开工）：10-28 正式版计量（54 次 `agent:get-sdk-messages`）p50 31 ms、p90 315 ms、最大 634 ms；首屏历史预算 1 MB（省流量 256 KB），返回 p50 285 KB、p90 855 KB，压缩后约为原始的 28%；手机端解析与渲染耗时未计量。桌面另已实现基于反向 JSONL 索引的 2 MiB 完整轮次窗口、按需“加载更早”和刷新读取当前已加载后缀；Web Remote 逻辑保持原样。桌面 IPC 实测见 changelog 2026-10-28。桌面 UI 点击新消息页与完整功能回归仍有明确验收缺口；不得将桌面改动视为手机问题已解决。手机候选方向：首屏预算降到约 256 KB 并依赖“加载更早”、主进程尾部读取/缓存、手机切换耗时计量。先请用户开关省流量对比体感，以区分传输/渲染量与其他原因 |
-| 2026-10-29 | 手机端代码块右上角“复制”提示“已复制”，但剪贴板里实际没有内容（长按选中文字后的系统复制正常） | 安卓（OPPO） | 根因已从代码确认（真机尚未修复）：`renderer/lib/clipboard.ts` 的 `copyTextToClipboard` 优先调用 `window.electronAPI.writeClipboardText`，在 Web Remote 下它走 IPC `clipboard:write-text`，而该通道在 `channel-policy.ts` 中是 denied。shim（`web-electron-shim.ts` 约 L518）对被拒通道调用 `safeDeniedValue` 正常返回、并不抛错，所以 `copyTextToClipboard` 以为复制已成功，界面显示“已复制”，既没有写入 Mac 剪贴板，也没有退回到浏览器剪贴板。修法：Web Remote 下不走 native writer，直接在点击回调里调用 `navigator.clipboard.writeText`；它不可用（非安全上下文）或失败时，用隐藏 textarea + `document.execCommand('copy')` 兜底；两者都失败时显示“复制失败”，不再假装成功。不放开 `clipboard:write-text`。还需检查其他直接调用 `writeClipboardText` 的入口 |
+| 2026-10-29 | 手机端代码块右上角“复制”提示“已复制”，但剪贴板里实际没有内容（长按选中文字后的系统复制正常） | 安卓（OPPO） | 根因已从代码确认（真机尚未修复）：`renderer/lib/clipboard.ts` 的 `copyTextToClipboard` 优先调用 `window.electronAPI.writeClipboardText`，在 Web Remote 下它走 IPC `clipboard:write-text`，而该通道在 `channel-policy.ts` 中是 denied。shim（`web-electron-shim.ts` 约 L518）对被拒通道调用 `safeDeniedValue` 正常返回、并不抛错，所以 `copyTextToClipboard` 以为复制已成功，界面显示“已复制”，既没有写入 Mac 剪贴板，也没有退回到浏览器剪贴板。修法：Web Remote 下不走 native writer，直接在点击回调里调用 `navigator.clipboard.writeText`；它不可用（非安全上下文）或失败时，用隐藏 textarea + `document.execCommand('copy')` 兜底；两者都失败时显示“复制失败”，不再假装成功。不放开 `clipboard:write-text`。还需检查其他直接调用 `writeClipboardText` 的入口 ✅ 已修复（`fix/mobile-copy-20261030`，Android/iPhone 视口实测剪贴板内容正确），待安装。 |
 | 2026-10-10 | 正式版退出半停期间，main.log 每分钟一条 `子任务唤醒 queued … suppressed=59`（同一 parentSessionId） | Mac | 仅观察；退出半停修复后若仍出现再查子任务唤醒在调度器停止后的排队逻辑 |
 | 2026-10-10 | 开着 iOS 模拟器预览时退出 Proma 的清理路径（detached serve-sim 停流 + 结束子进程）尚未实测 | Mac | 下次用到模拟器侧栏时顺带验证：开预览 → Cmd+Q → 日志 `will-quit`、无 `quit-stalled`、`ps` 无 serve-sim 残留 |
 
