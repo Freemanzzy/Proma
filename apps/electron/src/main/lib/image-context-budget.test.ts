@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { clearImageResizeCacheForTests, createImageContextBudget } from './image-context-budget'
+import { classifyProviderErrorKind, clearImageResizeCacheForTests, createImageContextBudget } from './image-context-budget'
 
-type M = { role: string; content: Array<Record<string, unknown>>; toolCallId?: string }
+type M = { role: string; content: Array<Record<string, unknown>>; toolCallId?: string; timestamp?: number }
 const image = (length: number, fill = 'a') => ({ type: 'image', mimeType: 'image/png', data: fill.repeat(length) })
 const resize = async (bytes: Uint8Array, mimeType: string) => ({ data: Buffer.alloc(Math.min(bytes.length, 20)).toString('base64'), mimeType: 'image/jpeg' })
 const setBudgetEnv = (high: string, low: string, highCount = '20', lowCount = '12') => {
@@ -63,6 +63,52 @@ describe('image context budget', () => {
     const result = await createImageContextBudget()(messages, resize)
     expect(result.stats.overBudgetProtected).toBe(true)
     expect(result.messages[0]!.content.some((block) => block.type === 'image')).toBe(true)
+  })
+
+  test('sticky user-image removals survive prefix compaction and do not affect neighboring images', async () => {
+    setBudgetEnv('10', '8')
+    const budget = createImageContextBudget()
+    const original: M[] = [
+      { role: 'user', timestamp: 100, content: [image(8, 'a')] },
+      { role: 'user', timestamp: 200, content: [image(8, 'b')] },
+      { role: 'user', timestamp: 300, content: [{ type: 'text', text: 'current' }] },
+    ]
+    const first = await budget(original, resize)
+    expect(first.stats.newlyRemoved).toBe(1)
+    const shifted: M[] = [
+      { role: 'system', content: [{ type: 'text', text: 'compacted prefix' }] },
+      ...original,
+    ]
+    const second = await budget(shifted, resize)
+    expect(second.stats.newlyRemoved).toBe(0)
+    expect(second.messages[1]!.content[0]!.type).toBe('text')
+    expect(second.messages[2]!.content[0]!.type).toBe('image')
+    expect(second.stats.removedTotal).toBe(1)
+  })
+
+  test('sticky toolResult removals survive prefix compaction', async () => {
+    setBudgetEnv('10', '8')
+    const budget = createImageContextBudget()
+    const original: M[] = [
+      { role: 'toolResult', toolCallId: 'read-7', content: [image(8, 'a')] },
+      { role: 'toolResult', toolCallId: 'read-8', content: [image(8, 'b')] },
+      { role: 'user', timestamp: 300, content: [{ type: 'text', text: 'current' }] },
+    ]
+    const first = await budget(original, resize)
+    expect(first.stats.newlyRemoved).toBe(1)
+    const shifted: M[] = [{ role: 'assistant', content: [{ type: 'text', text: 'compacted' }] }, ...original]
+    const second = await budget(shifted, resize)
+    expect(second.stats.newlyRemoved).toBe(0)
+    expect(second.messages[1]!.content[0]!.type).toBe('text')
+    expect(second.messages[2]!.content[0]!.type).toBe('image')
+  })
+
+  test('classifies provider errors without preserving raw messages', () => {
+    expect(classifyProviderErrorKind('Request timed out')).toBe('timeout')
+    expect(classifyProviderErrorKind('ECONNRESET while reading')).toBe('network')
+    expect(classifyProviderErrorKind('HTTP status code 529 overloaded')).toBe('http-529')
+    expect(classifyProviderErrorKind('provider rejected request')).toBe('other')
+    expect(classifyProviderErrorKind(undefined)).toBe('other')
   })
 
   test('uses a Read toolCall path in the removal placeholder', async () => {

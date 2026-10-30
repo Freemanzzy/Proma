@@ -67,7 +67,7 @@ import { createDeepSeekReasoningRequestExtension } from './pi-deepseek-reasoning
 import { createOpenAIReasoningRequestExtension } from './pi-openai-reasoning-request-settings'
 import { mergeRuntimeEnv, type AgentRuntimeEnv } from '../agent-runtime-env'
 import { sanitizePiMessageImageContent, sanitizeToolResultImageContent } from '../image-content-validation'
-import { createImageContextBudget, PROMA_READ_IMAGE_RESIZE, type ImageBudgetStats } from '../image-context-budget'
+import { classifyProviderErrorKind, createImageContextBudget, PROMA_READ_IMAGE_RESIZE } from '../image-context-budget'
 import {
   convertPiMessage,
   convertResultMessage,
@@ -1556,7 +1556,6 @@ export class PiAgentAdapter implements AgentProviderAdapter {
       // transformContext 在每个 provider 请求前执行，能隔离 resume 的坏图片而不篡改原 artifact。
       const previousTransformContext = session.agent.transformContext
       const applyImageBudget = createImageContextBudget()
-      let lastImageBudgetStats: ImageBudgetStats | undefined
       session.agent.transformContext = async (messages, signal) => {
         const sanitized = sanitizePiMessageImageContent(
           await previousTransformContext?.(messages, signal) ?? messages,
@@ -1565,9 +1564,8 @@ export class PiAgentAdapter implements AgentProviderAdapter {
           const resized = await sdk.resizeImage(bytes, mimeType, resizeOptions)
           return resized ? { data: Buffer.from(resized.data).toString('base64'), mimeType: resized.mimeType } : null
         })
-        lastImageBudgetStats = budgeted.stats
         if (budgeted.stats.recompressed > 0 || budgeted.stats.newlyRemoved > 0 || budgeted.stats.recompressFailed > 0) {
-          input.onDiagnosticEvent?.('image-budget', { session: session.sessionId.slice(0, 8), ...budgeted.stats })
+          input.onDiagnosticEvent?.('image-budget', { session: input.sessionId.slice(0, 8), ...budgeted.stats })
         }
         return budgeted.messages
       }
@@ -1605,7 +1603,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         const startedAt = Date.now()
         let firstEventAt: number | undefined
         let outcome: 'done' | 'error' | 'aborted' = 'done'
-        let errorLabel = ''
+        let errorKind: string | undefined
         const messages = Array.isArray((context as { messages?: unknown[] }).messages)
           ? (context as { messages: Array<{ content?: unknown }> }).messages : []
         let images = 0
@@ -1624,8 +1622,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
           }
         }
         const logRequest = () => {
-          const stats = lastImageBudgetStats
-          input.onDiagnosticEvent?.('provider-request', { session: session.sessionId.slice(0, 8), provider: requestModel.provider, model: requestModel.id, messages: messages.length, images: stats?.imagesAfter ?? images, imageBytes: stats?.imageBytesAfter ?? imageBytes, approxBodyBytes, ttfbMs: firstEventAt === undefined ? -1 : firstEventAt - startedAt, durationMs: Date.now() - startedAt, outcome, ...(errorLabel ? { error: errorLabel } : {}) })
+          input.onDiagnosticEvent?.('provider-request', { session: input.sessionId.slice(0, 8), provider: requestModel.provider, model: requestModel.id, messages: messages.length, images, imageBytes, approxBodyBytes, ttfbMs: firstEventAt === undefined ? -1 : firstEventAt - startedAt, durationMs: Date.now() - startedAt, outcome, ...(errorKind ? { errorKind } : {}) })
         }
         try {
           const stream = await runWithPiRequestProxy(
@@ -1640,7 +1637,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
                     firstEventAt ??= Date.now()
                     if (event.type === 'error') {
                       outcome = event.reason === 'aborted' ? 'aborted' : 'error'
-                      errorLabel = event.reason
+                      errorKind = classifyProviderErrorKind(event.error?.errorMessage)
                     }
                     yield event
                     if (event.type === 'done' || event.type === 'error') break
@@ -1648,7 +1645,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
                   if (options?.signal?.aborted) outcome = 'aborted'
                 } catch (error) {
                   outcome = options?.signal?.aborted ? 'aborted' : 'error'
-                  errorLabel = (error instanceof Error ? error.name : 'provider-error').replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 120)
+                  errorKind = classifyProviderErrorKind(error instanceof Error ? error.message : String(error))
                   throw error
                 } finally {
                   logRequest()
@@ -1660,7 +1657,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
           })
         } catch (error) {
           outcome = options?.signal?.aborted ? 'aborted' : 'error'
-          errorLabel = (error instanceof Error ? error.name : 'provider-error').replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 120)
+          errorKind = classifyProviderErrorKind(error instanceof Error ? error.message : String(error))
           logRequest()
           throw error
         }

@@ -1854,3 +1854,14 @@
 - **inputLimits 核实**：本仓库 `pi-model-registry.ts` 注册的渠道模型默认结构未设置 `inputLimits`；所含 Pi provider catalog 源码中未发现模型级 `inputLimits` 声明，只有 faux/custom provider 接受透传。故本次已验证的 Anthropic/clipproxyapi模型使用 Read fallback resize 配置；若未来接入显式且较宽松的 `inputLimits.images.resize`，请求前重压缩仍作兜底。本地 dev 当前生效模型对象的运行时取值尚未通过真实会话单独观察。
 - **缺陷 / 待办**：按字节自动压缩、timeout/retry 策略、界面重试状态和 compaction ratio 均未改；不改 Pi SDK / node_modules / patches。真实 dev 会话验证及 `main.log` 证据列入 backlog 待办。
 - **同步文档**：更新 `docs/personal/backlog.md`（新增本分支的验收缺口及本轮后续不做项）；本记录追加于 `docs/personal/changelog.md`。`PERSONAL.md` 主线状态/官方差异未改，避免把未验证分支描述成当前主线能力。
+
+## 2026-10-31: 图片上下文预算第二轮审核返工与 dev harness
+
+- **稳定移出 key**：Pi `toolResult` 图片以 `toolCallId + blockIndex` 标识，user 图片以 `timestamp + blockIndex` 标识；缺少身份字段时才回退消息索引。替换占位符和粘性集合共用同一 key，修复 prefix compaction 改变消息索引后旧图重新出现的问题。新增 user/toolResult 两种前缀压缩回归测试。
+- **请求级诊断**：删除跨请求 `lastImageBudgetStats` 缓存；每条 `provider-request` 直接按当前 `context.messages` 的 image blocks 统计图片数、base64 字节与估算 body 字节。`image-budget` / `provider-request` 会话前缀统一取 Proma `input.sessionId` 前 8 位。失败事件只记录 `errorKind`（timeout/network/http-<status>/other），不记录原始错误消息；新增错误分类单测。
+- **dev 日志与环境**：`dev.sh` 显式设置 `PROMA_DEV=1`；未打包 dev 进程的个人 main logger 写入 `~/.proma-dev/logs/main.log`，不依赖 Electron 默认日志目录。四个 dev start/stop 周期的退出码均为 0；本轮 NodeService utility 进程读回四项阈值 `1258291/629145 bytes`、`20/12 images`。`fork()` 仍按现有实现从主进程 `process.env` 合并 utility 环境。构造 `anthropic / claude-sonnet-5-5` 的 Pi model 对象读得 `inputLimits=null`；由于该渠道模型当前禁用，没有实际 Agent runtime model 实例可查，故这一项不宣称真实请求验收。
+- **可选 harness**：`mobile-preview.sh test iphone:image-budget` 手动执行，不加入默认 fixture 集。它在独立临时目录生成 6 张 1536×1024、每张约 3.59 MB 的 PNG，新建专用会话，先锁定已启用的 API-key `clipproxyapi` Claude Sonnet 5.5/Haiku 5.5 并从会话 metadata 读回一致后才允许发送；随后要求 Read 逐张读取、再发第二条短消息，检查 JSONL 图像块数量与每图 ≤600 KiB，并保存可审计副本。临时图片、harness 会话、配对设备、Chrome 进程和 profile 都有清理路径。
+- **dev 验收实际结果（未通过，不掩盖缺口）**：在 `.proma-dev` 真实渠道目录中，clipproxyapi Anthropic 渠道启用，但 Claude Sonnet 5.5 (`claude-sonnet-5-5`) 明确为 `enabled=false`，目录没有 Haiku 5.5。Harness 四次均在消息发送前 fail-closed，未选择 OAuth、未发起模型请求、未消耗该模型额度；每轮新建会话、配对设备、Chrome/profile 均成功清理，最后两轮生成的独立临时图片目录也已删除。因没有请求，**没有**本轮 JSONL 图像块、`image-budget` / `provider-request` main.log 事件、数据下降或模型回复证据。需要用户在 `.proma-dev` 启用指定 Sonnet 5.5 或 Haiku 5.5 后重跑，不能借用已启用的其他模型替代。
+- **完整验证**：定向预算测试 10 pass / 0 fail；全量 `bun test` 826 pass / 0 fail（133 files）；`bun run typecheck` 六个 workspace 全部通过；harness `node --check`、dev/preview `bash -n`、fixture Python 编译和 `git diff --check` 通过。
+- **已知待办**：Pi SDK (`pi-ai`) 内部 HTTP retry 在单次 stream 收束前不会逐次出现在 Proma `provider-request` 事件中；评估公开诊断接口及不改 SDK 的可观测方案，登记于 backlog。未改 `node_modules` 或 `patches`。
+- **同步与边界**：更新 `docs/personal/backlog.md` 的分支验收缺口，并登记内部重试日志待办；本记录追加于 changelog。因真实模型对话仍受模型禁用阻塞，`PERSONAL.md` 保持不变。未合并、推送、打包、安装，未触碰 `~/.proma` 或 `/Applications/Proma.app`。

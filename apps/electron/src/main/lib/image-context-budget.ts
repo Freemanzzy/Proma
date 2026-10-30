@@ -19,7 +19,7 @@ const CACHE_MAX_BYTES = 64 * 1024 * 1024
 type TextBlock = { type: 'text'; text: string; [key: string]: unknown }
 type ImageBlock = ImageContent & { [key: string]: unknown }
 type Block = TextBlock | ImageBlock | { type: string; [key: string]: unknown }
-type PiMessage = { role?: unknown; content?: unknown; toolCallId?: unknown }
+type PiMessage = { role?: unknown; content?: unknown; toolCallId?: unknown; timestamp?: unknown }
 type Resize = (bytes: Uint8Array, mimeType: string, options?: ModelImageResizeOptions) => Promise<{ data: string; mimeType: string } | null>
 
 export interface ImageBudgetStats {
@@ -61,13 +61,24 @@ function getLimits() {
   return { high, low, highCount, lowCount }
 }
 
+function stableImageKey(message: PiMessage, messageIndex: number, blockIndex: number): string {
+  if (message.role === 'toolResult' && typeof message.toolCallId === 'string' && message.toolCallId) {
+    return `tool:${message.toolCallId}:${blockIndex}`
+  }
+  if (message.role === 'user' && (typeof message.timestamp === 'number' && Number.isFinite(message.timestamp)
+    || typeof message.timestamp === 'string' && message.timestamp.length > 0)) {
+    return `user:${String(message.timestamp)}:${blockIndex}`
+  }
+  return `index:${messageIndex}:${blockIndex}`
+}
+
 function imageBlocks(messages: PiMessage[]) {
   const result: Array<{ messageIndex: number; blockIndex: number; image: ImageBlock; key: string }> = []
   messages.forEach((message, messageIndex) => {
     if ((message.role !== 'user' && message.role !== 'toolResult') || !Array.isArray(message.content)) return
     message.content.forEach((block, blockIndex) => {
       if (block && typeof block === 'object' && (block as Block).type === 'image') {
-        result.push({ messageIndex, blockIndex, image: block as ImageBlock, key: `${messageIndex}:${blockIndex}` })
+        result.push({ messageIndex, blockIndex, image: block as ImageBlock, key: stableImageKey(message, messageIndex, blockIndex) })
       }
     })
   })
@@ -113,6 +124,15 @@ function setCached(key: string, value: { data: string; mimeType: string } | null
     resizeCacheBytes -= resizeCache.get(oldest)?.bytes ?? 0
     resizeCache.delete(oldest)
   }
+}
+
+export function classifyProviderErrorKind(errorMessage: unknown): string {
+  if (typeof errorMessage !== 'string' || !errorMessage) return 'other'
+  if (/timeout|timed out/i.test(errorMessage)) return 'timeout'
+  if (/ECONN|\bEOF\b|terminated|socket|fetch failed/i.test(errorMessage)) return 'network'
+  const status = errorMessage.match(/\b([45]\d{2})\b/)
+  if (status) return `http-${status[1]}`
+  return 'other'
 }
 
 export function clearImageResizeCacheForTests(): void {
@@ -214,7 +234,7 @@ function replaceBlocks<T extends PiMessage>(messages: T[], replacements: Map<str
     if (!Array.isArray(message.content)) return message
     let contentChanged = false
     const content = (message.content as Block[]).map((block, blockIndex) => {
-      const replacement = replacements.get(`${messageIndex}:${blockIndex}`)
+      const replacement = replacements.get(stableImageKey(message, messageIndex, blockIndex))
       if (!replacement) return block
       contentChanged = true
       return replacement

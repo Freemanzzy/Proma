@@ -4,6 +4,7 @@
 set -euo pipefail
 
 export PATH="$HOME/.bun/bin:$PATH"
+export PROMA_DEV=1
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DEV_DATA_DIR_NAME="${PROMA_DEV_DATA_DIR_NAME:-.proma-dev}"
 if [[ "$DEV_DATA_DIR_NAME" != ".proma-dev" && ! "$DEV_DATA_DIR_NAME" =~ ^\.proma-dev-[a-z0-9-]+$ ]]; then
