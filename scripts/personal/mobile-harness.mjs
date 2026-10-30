@@ -1918,6 +1918,31 @@ async function runSmoke(harness, options, result) {
   result.screenshots.push(finalScreenshot)
 }
 
+async function runCopy(harness, options, result) {
+  const origin = new URL(options.url).origin
+  await harness.client.command('Browser.grantPermissions', { origin, permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] }).catch(() => {})
+  const title = `web-remote-harness-copy-${Date.now()}`
+  const session = await harness.createHarnessSession(title)
+  result.harnessSession = { id: session.id, title: session.title, workspaceId: session.workspaceId }
+  const marker = `COPY-PROBE-${Date.now()}`
+  const prompt = `只回复一个 bash 代码块，内容只有一行：echo ${marker}`
+  await harness.inputAndSend(prompt)
+  await harness.waitForAssistantReply(prompt, marker, 90_000)
+  await harness.client.evaluate("navigator.clipboard.writeText('CLIPBOARD-SENTINEL').catch(()=>{})")
+  // 只点代码块标题栏里的“复制”（与用户截图一致），而不是消息底部的复制按钮。
+  const button = await harness.client.evaluate(`(()=>{const b=[...document.querySelectorAll('button')].find(x=>(x.innerText||'').trim()==='复制'&&x.parentElement?.parentElement?.querySelector('pre')&&(x.parentElement.parentElement.innerText||'').includes(${JSON.stringify(marker)}));if(!b)return null;b.scrollIntoView({block:'center'});const r=b.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`)
+  if (!button) throw new Error('找不到代码块标题栏的复制按钮')
+  await delay(300)
+  const fresh = await harness.client.evaluate(`(()=>{const b=[...document.querySelectorAll('button')].find(x=>(x.innerText||'').trim()==='复制'&&x.parentElement?.parentElement?.querySelector('pre')&&(x.parentElement.parentElement.innerText||'').includes(${JSON.stringify(marker)}));const r=b.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`)
+  await touchAt(harness.client, fresh.x, fresh.y)
+  await delay(800)
+  const after = await harness.client.evaluate(`(async()=>{let clip=null;try{clip=await navigator.clipboard.readText()}catch(e){clip='READ_ERROR:'+e.name}const btn=[...document.querySelectorAll('button')].filter(b=>/已复制|复制/.test(b.innerText||'')).map(b=>(b.innerText||'').trim());return {clip,buttons:btn.slice(0,4),webRemote:window.__PROMA_WEB_REMOTE__===true}})()`)
+  result.copy = { marker, clipboardHasMarker: typeof after.clip === 'string' && after.clip.trim() === `echo ${marker}`, clipboardPreview: String(after.clip).slice(0, 80), buttons: after.buttons, webRemote: after.webRemote }
+  result.screenshots.push(await harness.screenshot('copy-after-tap'))
+  if (!result.copy.clipboardHasMarker) throw new Error(`复制后剪贴板不含代码块内容：${JSON.stringify(result.copy)}`)
+  result.steps.push({ name: 'copy-code-block', ok: true })
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2))
   const result = { startedAt: new Date().toISOString(), options: { url: options.url, suite: options.suite, session: options.session, expectedWorkspaceCount: options.expectedWorkspaceCount, width: options.width, height: options.height, deviceScaleFactor: options.deviceScaleFactor, userAgent: options.userAgent, outputDir: options.outputDir, network: options.networkProfile }, steps: [], screenshots: [], consoleErrors: [], exceptions: [], pairedDeviceId: null, revoked: false, chromeExited: false, profileRemoved: false }
@@ -1969,6 +1994,7 @@ async function main() {
     else if (options.suite === 'interactions') await runInteractions(harness, options, result)
     else if (options.suite === 'abort') await runAbort(harness, options, result)
     else if (options.suite === 'extra') await runExtra(harness, options, result)
+    else if (options.suite === 'copy') await runCopy(harness, options, result)
     else if (options.suite === 'attachments') await runAttachments(harness, options, result)
     else if (options.suite === 'file-preview') await runFilePreview(harness, options, result)
     else if (options.suite === 'preload-recovery') await runPreloadRecovery(harness, options, result)
