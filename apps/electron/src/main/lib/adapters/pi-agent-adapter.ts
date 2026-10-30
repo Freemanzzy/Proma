@@ -1622,7 +1622,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
           }
         }
         const logRequest = () => {
-          input.onDiagnosticEvent?.('provider-request', { session: input.sessionId.slice(0, 8), provider: input.channelName ?? input.provider, model: requestModel.id, inputLimitsImageResize: Boolean(requestModel.inputLimits?.images?.resize), messages: messages.length, images, imageBytes, approxBodyBytes, ttfbMs: firstEventAt === undefined ? -1 : firstEventAt - startedAt, durationMs: Date.now() - startedAt, outcome, ...(errorKind ? { errorKind } : {}) })
+          input.onDiagnosticEvent?.('provider-request', { session: input.sessionId.slice(0, 8), provider: input.provider, ...(input.channelId ? { channel: input.channelId.slice(0, 8) } : {}), model: requestModel.id, inputLimitsImageResize: Boolean(requestModel.inputLimits?.images?.resize), messages: messages.length, images, imageBytes, approxBodyBytes, ttfbMs: firstEventAt === undefined ? -1 : firstEventAt - startedAt, durationMs: Date.now() - startedAt, outcome, ...(errorKind ? { errorKind } : {}) })
         }
         try {
           const stream = await runWithPiRequestProxy(

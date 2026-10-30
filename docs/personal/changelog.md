@@ -1884,3 +1884,11 @@
 - **审查发现并修正日志 ID 泄漏面**：首次 run 的 `requestModel.provider` 是 Pi 为会话注册的合成 provider 名，嵌入了完整 session UUID。最终实现改为日志使用 `input.channelName ?? input.provider`；上述 PASS 行仅出现 `session` 前 8 位与 `provider=clipproxyapi`，没有完整 session ID。首次未通过试跑产生的原始 main.log 行仍保留在 `.proma-dev/logs/main.log`，未重写日志；其中合成 provider 名带有该测试会话 UUID（不含 prompt、图片或密钥）。`inputLimitsImageResize=false` 是从真实 provider request model 对象读取的 `inputLimits.images.resize` 结果；本模型该项未配置，实际图片仍由 Read 的 600 KiB resize 配置先行缩放。
 - **dev 环境与清理**：四个测试阈值在 NodeService utility 进程环境中读回；dev start/stop 共六轮退出码均为 0。最终状态检查：17889、5173 均未监听，PID 文件不存在、无 harness Chrome。临时图片、测试会话、配对设备与 Chrome profile 已清理；JSONL / harness JSON 证据副本保留在 `/tmp` 下 `proma-mobile-harness/`。未修改渠道 JSON，未触碰 `~/.proma` 或 `/Applications/Proma.app`。
 - **验证**：最终代码全量 `bun test` 826 pass / 0 fail（133 files），`bun run typecheck` 六个 workspace 通过；image-context-budget 定向测试 10 pass；harness `node --check`、dev/preview `bash -n`、fixture Python 编译、`git diff --check` 通过。仍未合并、推送、打包或安装。Pi SDK 内部 HTTP retry 的逐次日志可见性继续留在 backlog #13。
+
+## 2026-10-31: 图片上下文预算中控审核收口
+
+- **更正**：上一条记录写的“用户明确授权改用 `clipproxyapi/claude-opus-5-5`”有误。改用 Opus 5.5 是中控（父会话）在执行工提问后指定的，用户本人没有逐项确认；dev 渠道配置确实未被修改。
+- **日志字段修正**：`provider-request` 的 `provider` 原先取 `input.channelName`。渠道名含空格或中文时（如“ChatGPT 订阅 (Codex)”），会被 main 侧白名单正则整段丢弃。现改为 provider 类型（如 `anthropic`、`openai-codex`），另加 `channel=<渠道 ID 前 8 位>` 用于区分渠道。
+- **中控复核**：全量 `bun test` 826 pass / 0 fail（133 files），`bun run typecheck` 通过。dev 证据副本复核：6 个 JPEG image block，base64 均为 553,872–555,288 B。main.log 中 `session=118edbb3` 的 4 行与执行工回报一致。
+- **dev 观测**：同一次 dev 请求中，纯文本约 1KB 的 TTFB 为 4.0s，6 图约 3.3MB 的 TTFB 为 134.4s，移出后约 0.55MB 的 TTFB 为 22.0s。TTFB 随请求体积近似线性增长，与 2026-10-31 当晚"大请求体经本机代理上传慢"的诊断一致。
+- **同步文档**：`PERSONAL.md` 的"与上游的差异"补充本功能；本记录追加于 changelog。
