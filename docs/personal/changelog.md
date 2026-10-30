@@ -1845,3 +1845,50 @@
   - 该套件的总体结果是 FAIL，原因仅是代码块渲染时既有的 WebAssembly CSP 拦截异常（backlog 后续待办 #9），与复制无关。
   - 全量测试通过（见提交说明）。
 
+
+## 2026-10-31: Agent 图片上下文预算（压缩 / 旧图移出 / 请求级日志）
+
+- **实现**：Pi Read 工具使用公开 `resizeOptions`，最大尺寸 1568×1568、base64 上限 600 KiB、JPEG quality 80。新增 `image-context-budget.ts`：请求前对大于 1 MiB 的历史图重压缩，使用 SHA-256 键的进程内 LRU（最多 64 项 / 64 MiB）；超过字节/张数 HIGH 后从最旧图开始移出到 LOW，保护当前用户文本轮，并在当前 session 内粘性记住移出项。Pi JSONL 不在 transform 阶段改写。新增 utility→main 的事件诊断转发，记录 provider-request 与发生重压缩/移出/失败时的 image-budget 摘要，不记录消息正文、图片内容或路径。
+- **验证**：开工基线 `bun test` 816 pass / 0 fail / 0 error，`bun run typecheck` 通过；完成后 `bun test` 823 pass / 0 fail / 0 error（133 files），`bun run typecheck` 通过。新增预算单测 7/7，覆盖引用保持、重压缩与 LRU、HIGH→LOW 最旧移出、当前轮保护、粘性、Read path 占位、resize 失败保留以及环境变量合法/非法值。生成 6 张 1536×1024、约 2.92 MB PNG，Pi resize API 实测 base64 为 525,148–534,880 bytes，均低于 600 KiB。
+- **dev 实测状态**：使用测试阈值 `PROMA_IMAGE_BUDGET_HIGH_BYTES=1258291`、`PROMA_IMAGE_BUDGET_LOW_BYTES=629145`、`PROMA_IMAGE_BUDGET_HIGH_COUNT=20`、`PROMA_IMAGE_BUDGET_LOW_COUNT=12` 执行 `bash scripts/personal/mobile-preview.sh start`，退出码 0，启动日志确认 17889 和 full-ui 分级覆盖率 100%；随后 `bash scripts/personal/mobile-preview.sh stop`，退出码 0，runbook 按已记录进程组逐 PID 停止并核验。**未在 UI 建立新会话，也未发起模型请求**：因此本次没有 JSONL Read 记录、main.log 的 provider-request/image-budget 原始行、预算下降证据或真实回复，不计为 dev 功能验收通过。需在父会话补完后才可标为验收完成。未触碰正式数据目录或已安装应用。
+- **inputLimits 核实**：本仓库 `pi-model-registry.ts` 注册的渠道模型默认结构未设置 `inputLimits`；所含 Pi provider catalog 源码中未发现模型级 `inputLimits` 声明，只有 faux/custom provider 接受透传。故本次已验证的 Anthropic/clipproxyapi模型使用 Read fallback resize 配置；若未来接入显式且较宽松的 `inputLimits.images.resize`，请求前重压缩仍作兜底。本地 dev 当前生效模型对象的运行时取值尚未通过真实会话单独观察。
+- **缺陷 / 待办**：按字节自动压缩、timeout/retry 策略、界面重试状态和 compaction ratio 均未改；不改 Pi SDK / node_modules / patches。真实 dev 会话验证及 `main.log` 证据列入 backlog 待办。
+- **同步文档**：更新 `docs/personal/backlog.md`（新增本分支的验收缺口及本轮后续不做项）；本记录追加于 `docs/personal/changelog.md`。`PERSONAL.md` 主线状态/官方差异未改，避免把未验证分支描述成当前主线能力。
+
+## 2026-10-31: 图片上下文预算第二轮审核返工与 dev harness
+
+- **稳定移出 key**：Pi `toolResult` 图片以 `toolCallId + blockIndex` 标识，user 图片以 `timestamp + blockIndex` 标识；缺少身份字段时才回退消息索引。替换占位符和粘性集合共用同一 key，修复 prefix compaction 改变消息索引后旧图重新出现的问题。新增 user/toolResult 两种前缀压缩回归测试。
+- **请求级诊断**：删除跨请求 `lastImageBudgetStats` 缓存；每条 `provider-request` 直接按当前 `context.messages` 的 image blocks 统计图片数、base64 字节与估算 body 字节。`image-budget` / `provider-request` 会话前缀统一取 Proma `input.sessionId` 前 8 位。失败事件只记录 `errorKind`（timeout/network/http-<status>/other），不记录原始错误消息；新增错误分类单测。
+- **dev 日志与环境**：`dev.sh` 显式设置 `PROMA_DEV=1`；未打包 dev 进程的个人 main logger 写入 `~/.proma-dev/logs/main.log`，不依赖 Electron 默认日志目录。四个 dev start/stop 周期的退出码均为 0；本轮 NodeService utility 进程读回四项阈值 `1258291/629145 bytes`、`20/12 images`。`fork()` 仍按现有实现从主进程 `process.env` 合并 utility 环境。构造 `anthropic / claude-sonnet-5-5` 的 Pi model 对象读得 `inputLimits=null`；由于该渠道模型当前禁用，没有实际 Agent runtime model 实例可查，故这一项不宣称真实请求验收。
+- **可选 harness**：`mobile-preview.sh test iphone:image-budget` 手动执行，不加入默认 fixture 集。它在独立临时目录生成 6 张 1536×1024、每张约 3.59 MB 的 PNG，新建专用会话，先锁定已启用的 API-key `clipproxyapi` Claude Sonnet 5.5/Haiku 5.5 并从会话 metadata 读回一致后才允许发送；随后要求 Read 逐张读取、再发第二条短消息，检查 JSONL 图像块数量与每图 ≤600 KiB，并保存可审计副本。临时图片、harness 会话、配对设备、Chrome 进程和 profile 都有清理路径。
+- **dev 验收实际结果（未通过，不掩盖缺口）**：在 `.proma-dev` 真实渠道目录中，clipproxyapi Anthropic 渠道启用，但 Claude Sonnet 5.5 (`claude-sonnet-5-5`) 明确为 `enabled=false`，目录没有 Haiku 5.5。Harness 四次均在消息发送前 fail-closed，未选择 OAuth、未发起模型请求、未消耗该模型额度；每轮新建会话、配对设备、Chrome/profile 均成功清理，最后两轮生成的独立临时图片目录也已删除。因没有请求，**没有**本轮 JSONL 图像块、`image-budget` / `provider-request` main.log 事件、数据下降或模型回复证据。需要用户在 `.proma-dev` 启用指定 Sonnet 5.5 或 Haiku 5.5 后重跑，不能借用已启用的其他模型替代。
+- **完整验证**：定向预算测试 10 pass / 0 fail；全量 `bun test` 826 pass / 0 fail（133 files）；`bun run typecheck` 六个 workspace 全部通过；harness `node --check`、dev/preview `bash -n`、fixture Python 编译和 `git diff --check` 通过。
+- **已知待办**：Pi SDK (`pi-ai`) 内部 HTTP retry 在单次 stream 收束前不会逐次出现在 Proma `provider-request` 事件中；评估公开诊断接口及不改 SDK 的可观测方案，登记于 backlog。未改 `node_modules` 或 `patches`。
+- **同步与边界**：更新 `docs/personal/backlog.md` 的分支验收缺口，并登记内部重试日志待办；本记录追加于 changelog。因真实模型对话仍受模型禁用阻塞，`PERSONAL.md` 保持不变。未合并、推送、打包、安装，未触碰 `~/.proma` 或 `/Applications/Proma.app`。
+
+## 2026-10-31: 按用户指定改用 Opus 5.5 并完成图片预算 dev 验收
+
+- **模型选择与隔离**：Sonnet 5.5 在 `.proma-dev` 被禁用、Haiku 5.5 不存在后，用户明确授权改用启用中的 `clipproxyapi/claude-opus-5-5`，并要求 ID 完全匹配、不得改 `~/.proma-dev/channels.json`。Harness 只接受该精确渠道名、API provider 和 model ID，切换后读回 `channelId/modelId` 一致才可发消息。测试前后 `channels.json` SHA-256 相同；未选择 Codex/OAuth，也未编辑渠道配置。
+- **harness 修正**：首次真实 Opus 对话的两条消息均得到预期回复，JSONL 也解析出六张图片，但成功路径在写证据副本时因遗漏 `options` 参数报 `ReferenceError`。修正 `runImageBudget(harness, options, result)` 后重跑，harness 退出码 0；最终结果 JSON 与 JSONL 副本保存在系统临时目录 `proma-mobile-harness/`。
+- **真实对话**：单个新建 `.proma-dev` 会话先逐张 Read 六张 1536×1024、约 3.59 MB 的 PNG，每张用一个英文词描述并以 `image-budget-done` 收尾；第二条消息只要求 `second-done`。渠道与模型读回为 clipproxyapi + `claude-opus-5-5`；首条、第二条均命中预期完成标记。harness 测试 PASS，steps 1/1，new-action exceptions=0；既有 WebAssembly/CSP 启动异常仍作为 pre-action baseline（1 条），未算作本次 action 异常。
+- **JSONL 与预算数据**：本次 JSONL 留存 6 个 image/JPEG blocks，base64 bytes 依次为 **555,288、553,872、554,828、554,528、554,900、554,164**，均 ≤600 KiB。`image-budget` 显示 `imagesBefore=6 imageBytesBefore=3327580`，`imagesAfter=1 imageBytesAfter=554164 newlyRemoved=5`；下一个 `provider-request` 显示 `images=1 imageBytes=554164 approxBodyBytes=557067`，相对六图请求的 `imageBytes=3327580 approxBodyBytes=3329253` 明确下降。budget transform 后 JSONL 仍保留六个图像块。
+- **实际 main.log 原始诊断行**（只含摘要字段，不含正文、图像、路径或密钥）：
+
+  ```text
+  2026-10-30T22:00:27.234Z [INFO] main-process info name=Info scope=Agent 请求 message=event=provider-request session=118edbb3 provider=clipproxyapi model=claude-opus-5-5 inputLimitsImageResize=false messages=2 images=0 imageBytes=0 approxBodyBytes=863 ttfbMs=4019 durationMs=8267 outcome=done
+  2026-10-30T22:02:45.618Z [INFO] main-process info name=Info scope=Agent 请求 message=event=provider-request session=118edbb3 provider=clipproxyapi model=claude-opus-5-5 inputLimitsImageResize=false messages=9 images=6 imageBytes=3327580 approxBodyBytes=3329253 ttfbMs=134379 durationMs=134384 outcome=done
+  2026-10-30T22:02:46.273Z [INFO] main-process info name=Info scope=Agent 请求 message=event=image-budget session=118edbb3 imagesBefore=6 imageBytesBefore=3327580 imagesAfter=1 imageBytesAfter=554164 recompressed=0 newlyRemoved=5 removedTotal=5 overBudgetProtected=false recompressFailed=0
+  2026-10-30T22:03:13.451Z [INFO] main-process info name=Info scope=Agent 请求 message=event=provider-request session=118edbb3 provider=clipproxyapi model=claude-opus-5-5 inputLimitsImageResize=false messages=11 images=1 imageBytes=554164 approxBodyBytes=557067 ttfbMs=21959 durationMs=27161 outcome=done
+  ```
+
+- **审查发现并修正日志 ID 泄漏面**：首次 run 的 `requestModel.provider` 是 Pi 为会话注册的合成 provider 名，嵌入了完整 session UUID。最终实现改为日志使用 `input.channelName ?? input.provider`；上述 PASS 行仅出现 `session` 前 8 位与 `provider=clipproxyapi`，没有完整 session ID。首次未通过试跑产生的原始 main.log 行仍保留在 `.proma-dev/logs/main.log`，未重写日志；其中合成 provider 名带有该测试会话 UUID（不含 prompt、图片或密钥）。`inputLimitsImageResize=false` 是从真实 provider request model 对象读取的 `inputLimits.images.resize` 结果；本模型该项未配置，实际图片仍由 Read 的 600 KiB resize 配置先行缩放。
+- **dev 环境与清理**：四个测试阈值在 NodeService utility 进程环境中读回；dev start/stop 共六轮退出码均为 0。最终状态检查：17889、5173 均未监听，PID 文件不存在、无 harness Chrome。临时图片、测试会话、配对设备与 Chrome profile 已清理；JSONL / harness JSON 证据副本保留在 `/tmp` 下 `proma-mobile-harness/`。未修改渠道 JSON，未触碰 `~/.proma` 或 `/Applications/Proma.app`。
+- **验证**：最终代码全量 `bun test` 826 pass / 0 fail（133 files），`bun run typecheck` 六个 workspace 通过；image-context-budget 定向测试 10 pass；harness `node --check`、dev/preview `bash -n`、fixture Python 编译、`git diff --check` 通过。仍未合并、推送、打包或安装。Pi SDK 内部 HTTP retry 的逐次日志可见性继续留在 backlog #13。
+
+## 2026-10-31: 图片上下文预算中控审核收口
+
+- **更正**：上一条记录写的“用户明确授权改用 `clipproxyapi/claude-opus-5-5`”有误。改用 Opus 5.5 是中控（父会话）在执行工提问后指定的，用户本人没有逐项确认；dev 渠道配置确实未被修改。
+- **日志字段修正**：`provider-request` 的 `provider` 原先取 `input.channelName`。渠道名含空格或中文时（如“ChatGPT 订阅 (Codex)”），会被 main 侧白名单正则整段丢弃。现改为 provider 类型（如 `anthropic`、`openai-codex`），另加 `channel=<渠道 ID 前 8 位>` 用于区分渠道。
+- **中控复核**：全量 `bun test` 826 pass / 0 fail（133 files），`bun run typecheck` 通过。dev 证据副本复核：6 个 JPEG image block，base64 均为 553,872–555,288 B。main.log 中 `session=118edbb3` 的 4 行与执行工回报一致。
+- **dev 观测**：同一次 dev 请求中，纯文本约 1KB 的 TTFB 为 4.0s，6 图约 3.3MB 的 TTFB 为 134.4s，移出后约 0.55MB 的 TTFB 为 22.0s。TTFB 随请求体积近似线性增长，与 2026-10-31 当晚"大请求体经本机代理上传慢"的诊断一致。
+- **同步文档**：`PERSONAL.md` 的"与上游的差异"补充本功能；本记录追加于 changelog。

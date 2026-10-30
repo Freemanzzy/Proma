@@ -8,7 +8,7 @@
  * The host and session title are intentionally supplied by arguments/environment;
  * no private hostname is embedded in this file.
  */
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -1918,6 +1918,95 @@ async function runSmoke(harness, options, result) {
   result.screenshots.push(finalScreenshot)
 }
 
+async function runImageBudget(harness, options, result) {
+  const fixtureDir = mkdtempSync(join(tmpdir(), 'proma-image-budget-'))
+  result.imageBudgetFixtureDir = fixtureDir
+  execFileSync('python3', [join(REPO_ROOT, 'scripts/personal/make-image-budget-fixtures.py'), fixtureDir], { encoding: 'utf8', timeout: 60_000 })
+  const imagePaths = Array.from({ length: 6 }, (_, index) => join(fixtureDir, `image-${index + 1}.png`))
+  const title = `web-remote-harness-image-budget-${Date.now()}`
+  const session = await harness.createHarnessSession(title)
+  result.imageBudget = {
+    sessionId: session.id,
+    title,
+    permissionMode: 'bypassPermissions',
+    channel: null,
+    model: null,
+    readbackChannel: null,
+    readbackModel: null,
+    firstReplyHit: false,
+    secondReplyHit: false,
+  }
+  await harness.setPermissionMode('bypassPermissions')
+
+  // Never send until an enabled API-key channel/model was selected and confirmed from session metadata.
+  const channels = await harness.invokeApi('listChannels')
+  const channelList = Array.isArray(channels) ? channels : Array.isArray(channels?.channels) ? channels.channels : []
+  const targetModelId = 'claude-opus-5-5'
+  const allowedApiProvider = (provider) => ['anthropic', 'anthropic-compatible', 'custom'].includes(provider)
+  const safeChannelSummary = channelList.map((channel) => ({
+    id: channel?.id,
+    name: channel?.name,
+    provider: channel?.provider,
+    enabled: channel?.enabled,
+    models: (channel?.models || []).filter((model) => model?.id === targetModelId).map((model) => ({ id: model?.id, name: model?.name, enabled: model?.enabled })),
+  })).filter((channel) => /clipproxyapi/i.test(`${channel.name ?? ''} ${channel.provider ?? ''}`))
+  result.imageBudget.availableClipproxyTargets = safeChannelSummary
+  const targetChannel = channelList.find((channel) =>
+    channel?.enabled && channel.name === 'clipproxyapi' && allowedApiProvider(channel.provider)
+      && (channel.models || []).some((model) => model?.enabled && model.id === targetModelId))
+  if (!targetChannel) throw new Error(`未找到启用的 API Key 渠道 clipproxyapi / ${targetModelId}；未向任何渠道发送消息。安全候选：${JSON.stringify(safeChannelSummary)}`)
+  const targetModel = targetChannel.models.find((model) => model?.enabled && model.id === targetModelId)
+  const changed = await harness.invokeApi('updateAgentSessionModel', [session.id, targetChannel.id, targetModel.id])
+  const readback = (await harness.invokeApi('listAgentSessions')).find((item) => item?.id === session.id)
+  result.imageBudget.channel = { id: targetChannel.id, provider: targetChannel.provider }
+  result.imageBudget.model = targetModel.id
+  result.imageBudget.readbackChannel = readback?.channelId ?? changed?.channelId ?? null
+  result.imageBudget.readbackModel = readback?.modelId ?? changed?.modelId ?? null
+  if (result.imageBudget.readbackChannel !== targetChannel.id || result.imageBudget.readbackModel !== targetModel.id) {
+    throw new Error(`会话渠道/模型读回不匹配；未发送消息：${JSON.stringify({ expectedChannel: targetChannel.id, expectedModel: targetModel.id, actualChannel: result.imageBudget.readbackChannel, actualModel: result.imageBudget.readbackModel })}`)
+  }
+
+  const prompt = `Read each image once; answer with exactly one English word per image, then finish with image-budget-done.\n${imagePaths.join('\n')}`
+  await harness.inputAndSend(prompt)
+  const first = await harness.waitForAssistantReply(prompt, 'image-budget-done', 360_000)
+  result.imageBudget.firstReplyHit = Boolean(first?.assistant && /image-budget-done/i.test(sdkMessageText(first.assistant)))
+  if (!result.imageBudget.firstReplyHit) throw new Error('首轮没有收到 image-budget-done')
+
+  const secondPrompt = '只回复 second-done'
+  await harness.inputAndSend(secondPrompt)
+  const second = await harness.waitForAssistantReply(secondPrompt, 'second-done', 120_000)
+  result.imageBudget.secondReplyHit = Boolean(second?.assistant && /second-done/i.test(sdkMessageText(second.assistant)))
+  if (!result.imageBudget.secondReplyHit) throw new Error('第二轮没有收到 second-done')
+
+  const jsonlPath = join(homedir(), '.proma-dev', 'agent-sessions', `${session.id}.jsonl`)
+  const sessionRoot = join(homedir(), '.proma-dev', 'agent-sessions')
+  if (!jsonlPath.startsWith(`${sessionRoot}/`) || !existsSync(jsonlPath)) throw new Error(`找不到本次 dev 测试会话 JSONL: ${jsonlPath}`)
+  const jsonl = readFileSync(jsonlPath, 'utf8')
+  const imageBlocks = []
+  const visit = (value) => {
+    if (!value || typeof value !== 'object') return
+    if (Array.isArray(value)) { for (const item of value) visit(item); return }
+    if (value.type === 'image') {
+      const data = typeof value.data === 'string' ? value.data : typeof value.source?.data === 'string' ? value.source.data : null
+      if (data !== null) imageBlocks.push({ base64Bytes: Buffer.byteLength(data, 'utf8'), mimeType: value.mimeType ?? value.source?.media_type ?? null })
+      return
+    }
+    for (const item of Object.values(value)) visit(item)
+  }
+  for (const line of jsonl.split('\n').filter(Boolean)) visit(JSON.parse(line))
+  result.imageBudget.jsonlImageBlocks = imageBlocks
+  result.imageBudget.jsonlImageBlockCount = imageBlocks.length
+  result.imageBudget.jsonlOriginalImageBlocksPreserved = imageBlocks.length === 6
+  result.imageBudget.jsonlImageBlocksWithinReadLimit = imageBlocks.length === 6 && imageBlocks.every((item) => item.base64Bytes <= 600 * 1024)
+  result.imageBudget.jsonlEvidenceCopy = join(options.outputDir, `image-budget-${session.id}.jsonl`)
+  mkdirSync(options.outputDir, { recursive: true })
+  writeFileSync(result.imageBudget.jsonlEvidenceCopy, jsonl)
+  if (!result.imageBudget.jsonlOriginalImageBlocksPreserved || !result.imageBudget.jsonlImageBlocksWithinReadLimit) {
+    throw new Error(`JSONL 图片块验收失败：${JSON.stringify({ count: imageBlocks.length, imageBlocks })}`)
+  }
+  result.steps.push({ name: 'image-budget-real-session', ok: true })
+}
+
 async function runCopy(harness, options, result) {
   const origin = new URL(options.url).origin
   await harness.client.command('Browser.grantPermissions', { origin, permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] }).catch(() => {})
@@ -1978,7 +2067,8 @@ async function main() {
     result.pageStartupExceptionCategories = harness.exceptions.map((entry) => summarizeHarnessException(entry))
     result.loadMetrics = { first: paired.firstAppLoad, second: secondAppLoad }
     result.sessionManifestBefore = await harness.readSessionManifest()
-    if (options.suite === 'smoke') await runSmoke(harness, options, result)
+    if (options.suite === 'image-budget') await runImageBudget(harness, options, result)
+    else if (options.suite === 'smoke') await runSmoke(harness, options, result)
     else if (options.suite === 'mobile-polish') await runMobilePolishChecks(harness, options, result)
     else if (options.suite === 'heavy-session' || options.suite === 'cellular') await runHeavySession(harness, options, result, (path) => { syntheticFileCleanupPath = path })
     else if (options.suite === 'idle-session-sync') await runIdleSessionSync(harness, options, result, deviceId)
@@ -2104,6 +2194,11 @@ async function main() {
       harnessSessionCleanup.errors.push(String(error))
       result.harnessSessionCleanup = harnessSessionCleanup
       if (!result.error) result.error = `无法执行 harness 专用会话清理: ${String(error)}`
+    }
+    if (options.suite === 'image-budget' && typeof result.imageBudgetFixtureDir === 'string'
+      && result.imageBudgetFixtureDir.startsWith(join(tmpdir(), 'proma-image-budget-'))) {
+      try { rmSync(result.imageBudgetFixtureDir, { recursive: true, force: true }); result.imageBudgetFixturesCleanup = 'removed' }
+      catch (error) { result.imageBudgetFixturesCleanup = `failed: ${String(error)}`; if (!result.error) result.error = result.imageBudgetFixturesCleanup }
     }
     if (syntheticFileCleanupPath && existsSync(syntheticFileCleanupPath)) {
       try { unlinkSync(syntheticFileCleanupPath); result.syntheticJsonlCleanup = 'removed' }

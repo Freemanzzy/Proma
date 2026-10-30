@@ -91,6 +91,7 @@ export const AGENT_RUNTIME_METHODS = {
   EVENT_QUERY_END: 'agent.query.end',
   EVENT_QUERY_ERROR: 'agent.query.error',
   EVENT_QUERY_CALLBACK: 'agent.query.callback',
+  EVENT_QUERY_LOG: 'agent.query.log',
 } as const
 
 export type AgentRuntimeMethod = (typeof AGENT_RUNTIME_METHODS)[keyof typeof AGENT_RUNTIME_METHODS]

@@ -2,14 +2,16 @@ import { app } from 'electron'
 import { join } from 'node:path'
 import { isPersonalBuild } from './personal-build'
 import { appendPersonalMainLog, isNodeWarningOutput, setPersonalInfoSink, type PersonalLogEvent } from './personal-log-writer'
+import { getConfigDir } from './config-paths'
 
 let installed = false
 let fatalRecorder: ((error: unknown) => void) | null = null
 
 export function initializePersonalMainLog(): string | null {
-  if (!isPersonalBuild()) return null
+  const devRuntime = process.env.PROMA_DEV === '1' && !app.isPackaged
+  if (!isPersonalBuild() && !devRuntime) return null
   let logPath: string
-  try { logPath = join(app.getPath('logs'), 'main.log') } catch { return null }
+  try { logPath = devRuntime ? join(getConfigDir(), 'logs', 'main.log') : join(app.getPath('logs'), 'main.log') } catch { return null }
   if (installed) return logPath
   installed = true
   appendPersonalMainLog(logPath, 'startup')

@@ -67,6 +67,7 @@ import { createDeepSeekReasoningRequestExtension } from './pi-deepseek-reasoning
 import { createOpenAIReasoningRequestExtension } from './pi-openai-reasoning-request-settings'
 import { mergeRuntimeEnv, type AgentRuntimeEnv } from '../agent-runtime-env'
 import { sanitizePiMessageImageContent, sanitizeToolResultImageContent } from '../image-content-validation'
+import { classifyProviderErrorKind, createImageContextBudget, PROMA_READ_IMAGE_RESIZE } from '../image-context-budget'
 import {
   convertPiMessage,
   convertResultMessage,
@@ -118,6 +119,8 @@ export interface PiAgentQueryOptions extends AgentQueryInput {
   provider: ProviderType
   /** OAuth credential coordination key; equals the selected Proma channel id. */
   channelId?: string
+  /** Internal utility-to-main, event-only diagnostics; never contains prompt content or paths. */
+  onDiagnosticEvent?: (event: 'image-budget' | 'provider-request', fields: Record<string, string | number | boolean>) => void
   channelName?: string
   maxTurns?: number
   autoCompactionTriggerTokens?: number
@@ -1286,7 +1289,7 @@ function buildBuiltinToolDefinitions(
 ): ToolDefinition[] {
   const shellTool = selectPiBuiltinShellTool(process.platform, runtimeEnv)
   const definitions = [
-    sdk.createReadToolDefinition(cwd),
+    sdk.createReadToolDefinition(cwd, { resizeOptions: PROMA_READ_IMAGE_RESIZE }),
     ...(shellTool === 'bash'
       ? [sdk.createBashToolDefinition(cwd, createPromaBashToolOptions(runtimeEnv))]
       : []),
@@ -1552,9 +1555,20 @@ export class PiAgentAdapter implements AgentProviderAdapter {
       // Pi session artifact 可以来自旧版本，不能假设其历史 tool_result 已通过当前校验。
       // transformContext 在每个 provider 请求前执行，能隔离 resume 的坏图片而不篡改原 artifact。
       const previousTransformContext = session.agent.transformContext
-      session.agent.transformContext = async (messages, signal) => sanitizePiMessageImageContent(
-        await previousTransformContext?.(messages, signal) ?? messages,
-      )
+      const applyImageBudget = createImageContextBudget()
+      session.agent.transformContext = async (messages, signal) => {
+        const sanitized = sanitizePiMessageImageContent(
+          await previousTransformContext?.(messages, signal) ?? messages,
+        )
+        const budgeted = await applyImageBudget(sanitized, async (bytes, mimeType, resizeOptions) => {
+          const resized = await sdk.resizeImage(bytes, mimeType, resizeOptions)
+          return resized ? { data: Buffer.from(resized.data).toString('base64'), mimeType: resized.mimeType } : null
+        })
+        if (budgeted.stats.recompressed > 0 || budgeted.stats.newlyRemoved > 0 || budgeted.stats.recompressFailed > 0) {
+          input.onDiagnosticEvent?.('image-budget', { session: input.sessionId.slice(0, 8), ...budgeted.stats })
+        }
+        return budgeted.messages
+      }
       // Pi 0.86 的 transcript-aware before_agent_start extension 会在下一轮注入动态项目指令。
       if (piAi && input.codexFastMode && input.provider === 'openai-codex' && isCodexFastModeSupportedModel(input.model)) {
         // Pi 的通用 streamSimple 会丢弃 provider 专属 serviceTier；这里直接走
@@ -1585,10 +1599,69 @@ export class PiAgentAdapter implements AgentProviderAdapter {
       // 代理作用域必须只覆盖模型 provider stream：在整个 session.prompt() 链上设
       // AsyncLocalStorage 会把 MCP/产品工具等同一 Agent loop 中的 fetch 也错误地送进 Codex 代理。
       const providerStreamFn = session.agent.streamFunction
-      session.agent.streamFunction = (requestModel, context, options) => runWithPiRequestProxy(
-        requestProxyDispatcher,
-        () => providerStreamFn(requestModel, context, options),
-      )
+      session.agent.streamFunction = async (requestModel, context, options) => {
+        const startedAt = Date.now()
+        let firstEventAt: number | undefined
+        let outcome: 'done' | 'error' | 'aborted' = 'done'
+        let errorKind: string | undefined
+        const messages = Array.isArray((context as { messages?: unknown[] }).messages)
+          ? (context as { messages: Array<{ content?: unknown }> }).messages : []
+        let images = 0
+        let imageBytes = 0
+        let approxBodyBytes = 0
+        for (const message of messages) {
+          if (!Array.isArray(message.content)) continue
+          for (const block of message.content as Array<{ type?: unknown; data?: unknown; text?: unknown }>) {
+            if (block?.type === 'image' && typeof block.data === 'string') {
+              images++
+              imageBytes += Buffer.byteLength(block.data, 'utf8')
+              approxBodyBytes += Buffer.byteLength(block.data, 'utf8')
+            } else if (block?.type === 'text' && typeof block.text === 'string') {
+              approxBodyBytes += Buffer.byteLength(block.text, 'utf8')
+            }
+          }
+        }
+        const logRequest = () => {
+          input.onDiagnosticEvent?.('provider-request', { session: input.sessionId.slice(0, 8), provider: input.provider, ...(input.channelId ? { channel: input.channelId.slice(0, 8) } : {}), model: requestModel.id, inputLimitsImageResize: Boolean(requestModel.inputLimits?.images?.resize), messages: messages.length, images, imageBytes, approxBodyBytes, ttfbMs: firstEventAt === undefined ? -1 : firstEventAt - startedAt, durationMs: Date.now() - startedAt, outcome, ...(errorKind ? { errorKind } : {}) })
+        }
+        try {
+          const stream = await runWithPiRequestProxy(
+            requestProxyDispatcher,
+            () => providerStreamFn(requestModel, context, options),
+          )
+          return new Proxy(stream, {
+            get(target, property) {
+              if (property === Symbol.asyncIterator) return async function* () {
+                try {
+                  for await (const event of target) {
+                    firstEventAt ??= Date.now()
+                    if (event.type === 'error') {
+                      outcome = event.reason === 'aborted' ? 'aborted' : 'error'
+                      errorKind = classifyProviderErrorKind(event.error?.errorMessage)
+                    }
+                    yield event
+                    if (event.type === 'done' || event.type === 'error') break
+                  }
+                  if (options?.signal?.aborted) outcome = 'aborted'
+                } catch (error) {
+                  outcome = options?.signal?.aborted ? 'aborted' : 'error'
+                  errorKind = classifyProviderErrorKind(error instanceof Error ? error.message : String(error))
+                  throw error
+                } finally {
+                  logRequest()
+                }
+              }
+              const value = Reflect.get(target, property, target)
+              return typeof value === 'function' ? value.bind(target) : value
+            },
+          })
+        } catch (error) {
+          outcome = options?.signal?.aborted ? 'aborted' : 'error'
+          errorKind = classifyProviderErrorKind(error instanceof Error ? error.message : String(error))
+          logRequest()
+          throw error
+        }
+      }
       installRuntimeGuardHooks(session, runtimeGuard)
       installCurrentSessionCompactionHooks(session)
       active.session = session
