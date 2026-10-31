@@ -1944,3 +1944,8 @@
 - **草稿预演（待办 2）**：这是 Claude Code 安装前复核的步骤，Proma 侧无需改动。
 - **dev smoke 走 OAuth 渠道（待办 3）**：在 `docs/personal/backlog.md` 的“用户反馈收集”表登记。fixture 模式只含 clipproxyapi 一个渠道，不受影响。对 `.proma-dev` 运行时，smoke、interactions、abort、attachments、push 会在新建会话里沿用默认渠道发消息；recovery 和 extra 会在 `--session` 指定的已有会话里发送，用的是该会话的渠道。目前只有 `image-budget` 会先锁定 API Key 渠道。登记了两种候选方案，等用户说“开工”再定。
 - **同步文档**：`maintenance.md` §2、`backlog.md`、本记录。
+
+## 2026-10-31: dev harness 沿用 Codex 渠道：决定不做
+
+- **用户决定**：不修改 harness 去锁定 API Key 渠道。dev 的 Codex 凭据是 2026-10-08 在 dev 中重新登录得到的，不存在复制凭据刷新失败、影响正式版登录的风险；默认测试集里只有 smoke、attachments 会发少量短消息，只多用一点订阅额度。dev 的 Codex 登录失效时，停下并通知用户在 dev 重新登录。
+- **同步文档**：`docs/personal/backlog.md` 中对应反馈行标为不做，“dev 中禁用 OAuth 渠道”约定补充这一决定；本记录追加于 changelog。
