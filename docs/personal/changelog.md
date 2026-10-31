@@ -1975,3 +1975,9 @@
 - **完整验证**：全量 `bun test` 829 pass / 0 fail（134 files），`bun run typecheck` 六个 workspace 通过，harness `node --check` 通过。
 - **另发现**：`mobile-preview.sh sim` 未能输入配对码却报告通过（界面确认会匹配配对页标题里的“Proma”），已登记 backlog，当次手动完成配对。
 - **同步文档**：`docs/personal/backlog.md`（待合入分支表、#9、新登记 sim 配对误判）、`docs/personal/web-remote.md` §4、`PERSONAL.md` 与上游差异、本记录。未打包、未安装。
+
+## 2026-10-31: 手机端代码高亮用户验收
+
+- 用户在 iOS 模拟器（dev fixture，`/app/` 经临时 8443）新建会话、让模型输出代码，确认代码块有语法着色，验收通过（16:27）。
+- 随后 `mobile-preview.sh stop` 退出码 0，按记录进程组逐 PID 核验后停止；17889、5173、8443 均无监听，Tailscale Serve 只剩 443 → 17888，无残留 harness Chrome。
+- 分支 `fix/web-remote-shiki-engine-20261031` 已在 `personal`，未打包、未安装。同步更新 `docs/personal/backlog.md` 待合入分支表的状态。
