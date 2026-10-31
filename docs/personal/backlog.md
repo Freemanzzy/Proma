@@ -78,6 +78,7 @@
     - e. **Pi 内部 HTTP 重试可见性**（`triggers.piRetryVisibility`）：出现 provider=openai-codex 且 durationMs ≥290s、outcome 为 error/aborted 的请求（该渠道没有 CLIProxyAPI 日志可对照）；或周检发现 `@earendil-works/pi-ai` 升级后提供了公开的重试事件或回调。当前 main.log 只有 stream 级最终摘要，看不到 pi-ai 内部 retryProviderRequest 的逐次结果。
     - **暂缓项**：标注“用户决定暂不改动”的子项（当前为 b），周检只列出计数，不单独触发“⚠️ 需要关注”；若计数较上周明显上升（如翻倍）在报告中提示，由用户决定是否重新评估。
     - 共同约束：不修改 Pi SDK（node_modules / patches），除非新设计经用户重新批准。
+13. **成本与缓存看板**：只读脚本 `python3 scripts/personal/usage-cost-report.py`，默认统计最近 7 天；可用 `--days 30`、`--format json`、`--top 20` 调整窗口、格式与 Top N。按天、定时任务、交互/root 会话、渠道/模型汇总 token、缓存与相对成本指数。只读、手动运行；是否加入周检由用户决定。
 
 ## 测试与开发数据约定
 

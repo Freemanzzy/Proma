@@ -1981,3 +1981,26 @@
 - 用户在 iOS 模拟器（dev fixture，`/app/` 经临时 8443）新建会话、让模型输出代码，确认代码块有语法着色，验收通过（16:27）。
 - 随后 `mobile-preview.sh stop` 退出码 0，按记录进程组逐 PID 核验后停止；17889、5173、8443 均无监听，Tailscale Serve 只剩 443 → 17888，无残留 harness Chrome。
 - 分支 `fix/web-remote-shiki-engine-20261031` 已在 `personal`，未打包、未安装。同步更新 `docs/personal/backlog.md` 待合入分支表的状态。
+
+
+## 2026-11-01: 成本与缓存看板脚本
+
+- **目的**：新增只读 `scripts/personal/usage-cost-report.py`，按天、定时任务、交互会话（子 Agent 归根会话并另列子 Agent 合计）、渠道/模型汇总请求数、input/output/cacheRead/cacheWrite、缓存命中率、大额缓存重建与相对成本指数。默认最近 7 天，可用 `--days 30`、`--format json`、`--top N` 等参数调整；运行命令见 backlog #13。脚本只读取 `~/.proma`，不写正式数据，不解析或输出消息正文、工具参数、文件路径、完整 UUID 或密钥。
+- **数据来源与性能**：`agent-sessions.json`、`automations.json` 与 `agent-sessions/*.jsonl`；按文件 mtime 跳过窗口外文件，逐行只解析 assistant 行。`result` 汇总行不计入。大额缓存重建阈值沿用 `CACHE_REBUILD_MIN_TOKENS=300_000`。相对成本权重为 input×1、cacheWrite×1.25、cacheRead×0.1、output×5；按 Anthropic 官方价格比例折算的相对指数，不是账单；订阅渠道不产生按量费用。
+- **归属与去重**：存在 `sourceAutomationId` 优先归入 Automation 名称（缺失时用 ID 前 8 位）；子 Agent 按 `rootSessionId` 归并至根会话，并单独累计子 Agent 合计；其余是独立交互会话。对同一会话内相同 message ID 与归一化 usage 的 assistant 快照只算一次，避免一份 API response 的多条持久化快照重复计数；不同 message ID 的请求照常独立计数。
+- **核实结论**：抽查多个大文件的相邻 assistant 记录，发现同一 message ID、相同 `_createdAt` 和 usage、但不同外层 UUID 的重复快照（30 个大文件样本观察到 561 次签名相同的相邻 usage 记录）；因此按会话内 message ID + 归一化 usage 去重。最近 30 天正式数据中有 25,268 条含 usage 的 assistant 行，五类 provider（anthropic、openai-codex、deepseek、zhipu、xai）的 usage 均使用 `input_tokens`、`output_tokens`、`cache_read_input_tokens`、`cache_creation_input_tokens` 四个字段，没有发现这五类渠道字段形状不一致；另为常见兼容字段实现了别名映射。未发现最近 30 天 usage 签名重复；无 usage 请求仍计入 `requestsWithoutUsage`。
+- **测试与变异检验**：`test-personal-scripts.py` 增加一组合成数据集成用例，精确断言时间窗口、result 排除、Automation 与 root/child 归属、重复快照去重、OpenAI-style 字段映射、缓存命中率、成本指数及隐私输出。`python3 -m py_compile` 通过；脚本测试全部通过（新增 USAGE COST REPORT PASS）。三项变异均被测试杀死：缓存命中率分母移除 cacheWrite、放行 result 行、取消子 Agent root 归属；变异后均已还原。全量 `bun run typecheck` 通过；全量 `bun test` 829 pass / 0 fail（134 files）。
+- **正式数据实测**（UTC 滚动窗口；报告仅记录汇总，不记录标题）：
+  - 最近 7 天：3,736 请求（无 usage 1）；input 28,563,114、output 2,157,606、cacheRead 898,278,321、cacheWrite 15,557,294 tokens；缓存命中率 95.32%；大额缓存重建 21 次；相对成本指数 148,625,593.6；扫描 92 个文件、mtime 跳过 1,232 个，耗时 0.343 秒。
+  - 最近 30 天：25,283 请求（无 usage 15）；input 170,927,668、output 15,647,460、cacheRead 5,731,158,534、cacheWrite 92,720,174 tokens；缓存命中率 95.60%；大额缓存重建 131 次；相对成本指数 938,181,038.9；扫描 398 个文件、mtime 跳过 926 个，耗时 1.564 秒。
+- **已知局限**：usage 没有账单价格与订阅实际成本信息，成本指数只能用于相对比较；provider 字段在本次 30 天目标 provider usage 样本中齐全，但其它历史数据可能缺少 provider，只能按 channel ID/model 分组或标 unknown。仅按可读 JSONL 中的 assistant message ID 与 usage 去重；缺少 message ID 的记录不做推断去重。报告中的 UTC 日期用于跨区稳定对账。
+- **同步文档**：`docs/personal/backlog.md` 新增 #13；本记录追加。
+
+## 2026-11-01: 成本与缓存看板复核修正
+
+- **独立核算**：父会话用独立脚本对正式数据最近 7 天逐行求和（不去重），请求数 3,791、input / output / cacheRead / cacheWrite 四项 token 与 `usage-cost-report.py` 完全一致，大额缓存重建 21 次与 `request-diagnostics-summary.py` 一致。上一条记录的 3,736 请求是执行工运行时的窗口，数字随时间滚动变化。
+- **修正 1：按天改用本机时区**。原实现按 UTC 切日，用户在 GMT+8，日报会在早上 8 点切日；现改为本机时区日期，表头为“本地日期”。上一条记录中“UTC 日期用于跨区稳定对账”的说法作废。新增断言检查按天分组的日期集合。
+- **修正 2：OpenAI 风格字段换算**。`prompt_tokens` 已包含 `cached_tokens`，原映射会把缓存命中部分同时计入 input 与 cacheRead；现只在使用 `prompt_tokens`（没有 `input_tokens`）时扣除 cacheRead。最近 30 天正式数据五类 provider 都用 `input_tokens` 系字段，实际数字不受影响；单测期望值相应更新。
+- **可读性**：markdown 输出数字加千分位，成本指数取整；JSON 保持原始数值。
+- **验证**：`test-personal-scripts.py` 全部通过；两处修正各做一次变异（去掉扣减、改用 UTC−12 切日），测试均失败后还原。
+- **同步文档**：本记录追加于 changelog。
