@@ -2027,9 +2027,13 @@ async function runCopy(harness, options, result) {
   await delay(800)
   const after = await harness.client.evaluate(`(async()=>{let clip=null;try{clip=await navigator.clipboard.readText()}catch(e){clip='READ_ERROR:'+e.name}const btn=[...document.querySelectorAll('button')].filter(b=>/已复制|复制/.test(b.innerText||'')).map(b=>(b.innerText||'').trim());return {clip,buttons:btn.slice(0,4),webRemote:window.__PROMA_WEB_REMOTE__===true}})()`)
   result.copy = { marker, clipboardHasMarker: typeof after.clip === 'string' && after.clip.trim() === `echo ${marker}`, clipboardPreview: String(after.clip).slice(0, 80), buttons: after.buttons, webRemote: after.webRemote }
+  // Shiki 就绪后每个 token 是带内联 color 的 span；未就绪时代码行没有着色 span。
+  result.copy.highlight = await harness.client.evaluate(`(()=>{const pre=[...document.querySelectorAll('pre')].find(p=>(p.innerText||'').includes(${JSON.stringify(marker)}));if(!pre)return {found:false,coloredSpans:0,distinctColors:0};const spans=[...pre.querySelectorAll('span.line span')].filter(s=>s.style&&s.style.color);return {found:true,coloredSpans:spans.length,distinctColors:new Set(spans.map(s=>s.style.color)).size}})()`)
   result.screenshots.push(await harness.screenshot('copy-after-tap'))
   if (!result.copy.clipboardHasMarker) throw new Error(`复制后剪贴板不含代码块内容：${JSON.stringify(result.copy)}`)
   result.steps.push({ name: 'copy-code-block', ok: true })
+  if (!result.copy.highlight.found || result.copy.highlight.distinctColors < 2) throw new Error(`代码块未语法着色：${JSON.stringify(result.copy.highlight)}`)
+  result.steps.push({ name: 'code-block-highlight', ok: true, ...result.copy.highlight })
 }
 
 async function main() {
