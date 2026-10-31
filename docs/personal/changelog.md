@@ -1892,3 +1892,21 @@
 - **中控复核**：全量 `bun test` 826 pass / 0 fail（133 files），`bun run typecheck` 通过。dev 证据副本复核：6 个 JPEG image block，base64 均为 553,872–555,288 B。main.log 中 `session=118edbb3` 的 4 行与执行工回报一致。
 - **dev 观测**：同一次 dev 请求中，纯文本约 1KB 的 TTFB 为 4.0s，6 图约 3.3MB 的 TTFB 为 134.4s，移出后约 0.55MB 的 TTFB 为 22.0s。TTFB 随请求体积近似线性增长，与 2026-10-31 当晚"大请求体经本机代理上传慢"的诊断一致。
 - **同步文档**：`PERSONAL.md` 的"与上游的差异"补充本功能；本记录追加于 changelog。
+
+## 2026-10-31: 请求诊断后续项触发条件与周检统计脚本
+
+- **目的**：图片上下文预算之后剩余的后续项（单轮读图保护缺口、按字节压缩与 compaction ratio、timeout/retry、重试状态 UI、Pi 内部重试可见性）不再按“想到再做”，改为按日志信号触发。
+- **新增 `scripts/personal/request-diagnostics-summary.py`**（只读）：
+  - 解析 `main.log*` 中最近 N 天（默认 7）的 `event=provider-request` / `event=image-budget` 行，并扫描会话 JSONL 中 assistant 行的单次请求 usage；
+  - 输出一行 JSON：各项计数与 `triggers`（protectedZoneGap / byteBasedCompaction / timeoutRetryPolicy / piRetryVisibility）；
+  - 不输出消息正文、图片或路径。
+  - 缓存重建按单次请求的 `cache_creation_input_tokens` 统计，不用 result 行的整轮合计（一轮多次小写入会被误算）。
+- **测试**：`test-personal-scripts.py` 新增用例，覆盖 7 天窗口过滤、四个触发条件、result 行不计入、不泄露会话正文；退出码 0。
+- **首次实测**（正式版 `~/.proma`，2026-10-31）：
+  - 尚无诊断日志行，因为含诊断日志的版本未安装；
+  - 但最近 7 天已有 31 次单次请求缓存写入 ≥300k tokens（f6872fd2 18 次、f4436093 5 次，其余会话 1–3 次），`byteBasedCompaction` 已触发；
+  - dev 日志（`~/.proma-dev/logs/main.log`）统计正常，未触发。
+- **同步文档**：
+  - `docs/personal/backlog.md` 第 12 条改写为 a–e 五项，各自带触发条件；原第 13 条（Pi 内部重试日志）并入 12e；
+  - 周检定时任务“Proma 个人版 · 官方版本周检（只读）”增加诊断统计步骤（定时任务配置不在仓库内）；
+  - 本记录追加于 changelog。
