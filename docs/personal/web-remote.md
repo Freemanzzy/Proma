@@ -225,3 +225,9 @@ harness 默认整体超时 300 秒（可用 `--timeout-ms` 覆盖），每次页
 - 删除标记与增量 journal 均最多保留 8,192 条。若非常旧的 snapshot 在 journal 超限后才返回，将丢弃该 stale snapshot、保留当前列表并等待下一次权威同步，不用不完整历史覆盖现有状态；同 ID 的后续合法 upsert 会解除 tombstone。单测覆盖旧快照晚到改名/删除、epoch 重启、移出范围和恢复、清除字段、cursor/journal 两种消费顺序及保留上限 fail-closed。
 - 端到端状态（2026-09-30）：Chromium iPhone UA 通过 Web Remote 对本轮自建 session 执行实时改名/归档/恢复/删除和断线重连；main-side 操作通过 raw IPC 模拟，不是独立桌面 UI 或真机 iOS Safari 双端操作。`session-sync` 完整 run 的交互断言可通过，但最终批准的尝试在删除后等待侧栏状态时遇到 CDP page_unresponsive，因此本轮整体标为“部分验证/最终尝试未通过”。越权创建拒绝已在 suite 覆盖；授权移出只收到 ID-only remove、子会话/自动任务分组和迟到快照删除不复活由 `full-ui-security`、session-manager 与 Renderer reducer 单测覆盖。跨工作区真实移动及实体手机仍未 E2E。
 - 最终离线状态核对（2026-09-30）：开发端口 17889/5173 无监听，临时 Tailscale Serve 8443 已关闭；只保留安装版 17888 的既有 Serve 路由，未尝试启动或停止任何应用进程。
+
+## 开发验证注意（2026-10-30）
+
+- dev 实例的 Web Remote（8443 / 17889）提供的是**构建产物** `apps/electron/dist/renderer` 和 web-preload，不走 vite 热更新。改了 renderer 或 shim 之后，要先运行 `bun run build:renderer`（以及 `build:web-preload`），手机端和 harness 才能拿到新代码。否则会测到旧代码，比如 10-30 复制修复第一次实测时就出现了这种情况。
+- harness 跑到会渲染代码块的套件（如 `copy`）时，会把已知的 WebAssembly CSP 拦截（backlog 后续待办 #9）计为 new-action exception，整体结果标为 FAIL。判断时要看该套件自己的断言字段，例如 `result.copy.clipboardHasMarker`。
+
