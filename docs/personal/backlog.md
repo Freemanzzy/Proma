@@ -69,10 +69,11 @@
 11. **图片上下文预算 dev 验收**：✅ 2026-10-31 完成。Sonnet 5.5 disabled / Haiku 5.5 不存在后由中控（父会话）指定改用已启用的 `clipproxyapi/claude-opus-5-5`（ID 精确匹配）；在 `.proma-dev` 新会话 Read 六张约 3.59 MB 图片并发第二条短消息，两轮均正常回复。JSONL 六个原 image blocks 保留，base64 555,288 / 553,872 / 554,828 / 554,528 / 554,900 / 554,164 B（全低于 600 KiB）；main.log 可见 budget 从 3,327,580 B 收至 554,164 B，后续 request 同为 554,164 B，包含短 session ID、`provider=clipproxyapi`、`inputLimitsImageResize=false`。渠道 JSON SHA-256 未变化；无 OAuth，见 changelog 与 `/tmp` 下 `proma-mobile-harness/` 证据副本。分支仍待审核，不得合并或推送。
 12. **图片与请求诊断后续（按触发条件执行，未触发不做）**：信号来自 2026-10-31 起的 `event=provider-request` / `event=image-budget` 日志与会话 JSONL 的单次请求 usage。用 `python3 scripts/personal/request-diagnostics-summary.py`（只读，默认最近 7 天，输出 JSON 的 `triggers`）统计；周检任务每周一运行一次并写入报告。阈值以该脚本常量为准，改阈值时同步本条。
     - a. **单轮内大量读图的保护缺口**（`triggers.protectedZoneGap`）：7 天内出现任一 `overBudgetProtected=true`。原因：当前轮（最后一条用户文本之后）的图片不移出，一轮内连续 Read 几十帧时会超预算。处理方向：保护范围收窄为最近若干张图。
-    - b. **按字节触发自动压缩 / 调整 compaction ratio**（`triggers.byteBasedCompaction`，两项一起评估）：7 天内图片已在预算内（imageBytes ≤4 MiB）但 approxBodyBytes >8 MiB 且 ttfbMs >60s 的请求 ≥3 次；或单次请求的 prompt cache 写入 ≥300k tokens 达到 ≥2 次（闲置后恢复超长会话时整体重建缓存）。
+    - b. **按字节触发自动压缩 / 闲置恢复前压缩**（`triggers.byteBasedCompaction`）——**用户 2026-10-31 决定：暂不改动，保留评估；不降低 compaction ratio（保持窗口 80%）**。2026-10-31 首次统计已触发（7 天内 31 次单次请求缓存写入 ≥300k tokens，f6872fd2 占 18 次），属已知状态。触发条件：7 天内图片已在预算内（imageBytes ≤4 MiB）但 approxBodyBytes >8 MiB 且 ttfbMs >60s 的请求 ≥3 次；或单次请求的 prompt cache 写入 ≥300k tokens 达到 ≥2 次（闲置后恢复超长会话时整体重建缓存）。
     - c. **调整 300s timeout / retry**（`triggers.timeoutRetryPolicy`）：出现 approxBodyBytes <2 MiB 的 `errorKind=timeout`（上游慢而非上传慢），或同一会话超时后 10 分钟内有请求成功（瞬时故障）。大请求体导致的超时不靠调参解决，不算触发。
     - d. **界面显示重试状态**：用户再次反馈“长时间没结果”，且日志确认当时为超时重试；与 c 合并实施。脚本无法判断用户反馈，只提供 `timeouts` 计数供核对。
     - e. **Pi 内部 HTTP 重试可见性**（`triggers.piRetryVisibility`）：出现 provider=openai-codex 且 durationMs ≥290s、outcome 为 error/aborted 的请求（该渠道没有 CLIProxyAPI 日志可对照）；或周检发现 `@earendil-works/pi-ai` 升级后提供了公开的重试事件或回调。当前 main.log 只有 stream 级最终摘要，看不到 pi-ai 内部 retryProviderRequest 的逐次结果。
+    - **暂缓项**：标注“用户决定暂不改动”的子项（当前为 b），周检只列出计数，不单独触发“⚠️ 需要关注”；若计数较上周明显上升（如翻倍）在报告中提示，由用户决定是否重新评估。
     - 共同约束：不修改 Pi SDK（node_modules / patches），除非新设计经用户重新批准。
 
 ## 测试与开发数据约定
