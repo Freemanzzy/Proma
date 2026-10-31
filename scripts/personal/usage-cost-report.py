@@ -12,6 +12,7 @@ from collections import defaultdict
 
 CACHE_REBUILD_MIN_TOKENS = 300_000
 COST_WEIGHTS = {'input': 1.0, 'cacheWrite': 1.25, 'cacheRead': 0.1, 'output': 5.0}
+# 这是按 Anthropic 官方价格比例折算的相对指数，不是账单；订阅渠道不产生按量费用。
 COST_NOTE = '这是按 Anthropic 官方价格比例折算的相对指数，不是账单；订阅渠道不产生按量费用。'
 FIELDS = ('requests', 'requestsWithoutUsage', 'input', 'output', 'cacheRead', 'cacheWrite', 'largeCacheRebuilds', 'relativeCostIndex')
 ALIASES = {
