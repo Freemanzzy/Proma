@@ -2004,3 +2004,14 @@
 - **可读性**：markdown 输出数字加千分位，成本指数取整；JSON 保持原始数值。
 - **验证**：`test-personal-scripts.py` 全部通过；两处修正各做一次变异（去掉扣减、改用 UTC−12 切日），测试均失败后还原。
 - **同步文档**：本记录追加于 changelog。
+
+## 2026-11-01: 桌面输入框会话用量指示器
+
+- 在压缩按钮之后、工具栏渠道/模型区之前新增会话用量标签；hover 展示本会话累计请求与四类 token、命中率、大额重建、成本指数、最近请求以及子 Agent 合计。Web Remote 触屏设备和窄屏隐藏；Web Remote 桌面宽度仍可见。
+- 主进程按 JSONL 文件 inode/字节偏移增量读取，仅对完整行计数；跨增量保留响应去重集合与未完成尾行。截断、替换/大小异常时重算。子 Agent 通过会话索引中 `parentSessionId` 或 `rootSessionId` 汇总。统计严格同步 `scripts/personal/usage-cost-report.py`，两边均注明口径须同步；不读取 channels.json，不向 renderer 暴露消息正文或文件路径。
+- 新增 `agent:get-personal-session-usage` 只读 session-scoped IPC；参数为 sessionId，由 Web Remote policy 按会话授权范围检查，响应仅含聚合用量。生成器输出包含该通道，安全测试覆盖授权/越权。
+- **单测**：主进程 9 项覆盖追加只读、截断与 inode 替换重算、半行延迟、跨增量去重、result/无 usage 排除、OpenAI 缓存换算、子 Agent、最近请求/大额重建及 TS/Python 同 JSONL 一致性；组件 4 项覆盖 k/M 与百分比、空态、琥珀色、触屏/窄屏条件。Web Remote security 定向测试 34 pass。
+- **变异检验**：分别破坏命中率分母、响应去重、增量偏移、触屏隐藏条件；四处替换均先确认唯一命中，测试全部变红后还原。
+- **全量验证**：`bun test` 843 pass / 0 fail（136 files）；`bun run typecheck` 全部 workspace 通过；`python3 scripts/personal/test-personal-scripts.py` 通过；Electron `build:main`、`build:renderer`、`build:web-preload` 通过；`git diff --check`、harness JS/shell 语法检查及 IPC policy 生成器通道核对通过。
+- **fixture dev 验证**（`.proma-dev-fixture`，桌面 1280×900，clipproxyapi API Key 渠道）：第一条消息按 Python 报告为 1 请求、input/output/cacheRead/cacheWrite=`2/4/18146/11518`，成本指数 `16234.1`、命中率 `61.168%`，DOM `缓存 61% · 16.2k`；第二条累计为 2 请求、`6/8/36581/22868`，成本指数 `32289.1`、命中率 `61.527%`，DOM `缓存 62% · 32.3k`。iphone 同会话断言 DOM 不存在；iphone 与 Android `smoke` 均通过。截图：`/tmp/session-usage-badge-desktop-20261101.png`、`/tmp/session-usage-badge-iphone-20261101.png`。harness 会话、配对设备、Chrome/profile 均清理；`mobile-preview.sh stop` 后 17889/5173/8443 无监听，未发现残留 harness Chrome。重复回归期间 dev Electron 曾因堆内存耗尽导致 Android harness 清理超时；重启隔离 fixture 后单独重跑 `android:smoke` 通过，端口与 Chrome 清理检查通过。
+- 本分支待父会话复核；未合并、未推送。
