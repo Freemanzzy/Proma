@@ -1961,3 +1961,17 @@
   - 10-24 被改写的飞书绑定 `modelId`：不恢复。
 - **#9 WebAssembly/CSP 补充实际影响**（按代码核对，未在真机目视确认）：只影响手机端。Web Remote 的 `/app/` CSP 没有 `'wasm-unsafe-eval'`，Shiki 的 WebAssembly 引擎初始化被拒，手机端代码块没有语法着色；桌面没有 CSP，不受影响。记录了两种修复候选，未开工。
 - **同步文档**：`docs/personal/backlog.md`、本记录。
+
+## 2026-10-31: 手机端代码块恢复语法高亮（Shiki 改用 JavaScript 正则引擎，CSP 不变）
+
+- **问题**：Web Remote `/app/` 页面的 CSP `script-src 'self' 'nonce-…'` 不允许编译 WebAssembly。Shiki 默认的 Oniguruma 引擎初始化时抛出 `CompileError: WebAssembly.instantiate(): … violates the following Content Security policy directive`，高亮器一直不就绪，手机端代码块只显示纯文本。桌面渲染进程没有设置 CSP，不受影响。这就是 backlog 后续待办 #9 记录的“WebAssembly 被 CSP 拦截”。
+- **修复**（`packages/core/src/highlight/shiki-service.ts`，+14 行，属于上游文件改动）：新增 `shouldUseJavaScriptRegexEngine()`，`globalThis.__PROMA_WEB_REMOTE__ === true` 时给 `createHighlighter` 传入按需加载的 `createJavaScriptRegexEngine({ forgiving: true })`。引擎经动态 import 拆成独立 chunk，桌面不加载；桌面仍用默认 Oniguruma 引擎。CSP 未修改，没有加 `'wasm-unsafe-eval'` 或 `'unsafe-eval'`。
+- **单测**（`shiki-service.test.ts`，3 个）：标记判断；在独立子进程中把 `WebAssembly.instantiate/instantiateStreaming/compile/Module` 改为抛 CompileError 以模拟该 CSP，Web Remote 下 TypeScript/Python/Shell/JSON 四段代码都能高亮且颜色 ≥4 种，非 Web Remote 对照组初始化失败且报错含 WebAssembly。变异检验：去掉引擎选择后 Web Remote 用例失败。
+- **harness**：`copy` 套件在复制检查后新增 `code-block-highlight` 步骤，统计代码块内带内联颜色的 token span，不同颜色少于 2 种即失败。
+- **dev fixture 验证**（`PROMA_DEV_DATA_DIR_NAME=.proma-dev-fixture`，clipproxyapi / Claude Opus 5.5）：
+  - 对照组（修复前 13:26 的构建）：`iphone:copy` 复制正确，但代码块 0 个着色 span，并出现上述 CompileError；
+  - 修复后重新 `build:renderer`、`build:web-preload`：iphone/android `copy` 均 PASS（3 个着色 span、3 种颜色，剪贴板内容正确），iphone/android `smoke`、iphone `layout`（11/11）、`session-sync`、`interactions` 全部 PASS；所有套件 pre-action 与 new-action 异常都是 0，WASM-CSP 计数 0。
+  - 第一次对照运行因上游首字节 89.8 s 超过 harness 90 s 等待而失败（`outcome=aborted`），属于渠道响应慢，重跑后正常。
+- **完整验证**：全量 `bun test` 829 pass / 0 fail（134 files），`bun run typecheck` 六个 workspace 通过，harness `node --check` 通过。
+- **另发现**：`mobile-preview.sh sim` 未能输入配对码却报告通过（界面确认会匹配配对页标题里的“Proma”），已登记 backlog，当次手动完成配对。
+- **同步文档**：`docs/personal/backlog.md`（待合入分支表、#9、新登记 sim 配对误判）、`docs/personal/web-remote.md` §4、`PERSONAL.md` 与上游差异、本记录。未打包、未安装。
