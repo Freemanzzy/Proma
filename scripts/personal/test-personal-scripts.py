@@ -208,6 +208,73 @@ def check_request_diagnostics_summary(root: Path):
     assert 'secret prompt' not in json.dumps(triggered), 'summary must not leak session content'
     print('REQUEST DIAGNOSTICS SUMMARY PASS: window filter, four triggers, cache-rebuild scan, no content leak')
 
+def check_usage_cost_report(root: Path):
+    import datetime, time
+    script = SCRIPTS / 'usage-cost-report.py'
+    spec = importlib.util.spec_from_file_location('usage_cost_report', script)
+    module = importlib.util.module_from_spec(spec); sys.modules[spec.name] = module; spec.loader.exec_module(module)
+    sessions_dir = root / 'usage-sessions'; sessions_dir.mkdir()
+    now = time.time()
+    def stamp(seconds): return int(seconds * 1000)
+    automation_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    root_id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+    task_id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+    child_id = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+    old_id = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+    index = {'sessions': [
+        {'id':task_id,'title':'Scheduled task','sourceAutomationId':automation_id,'channelId':'channel-task-1234','modelId':'task-model'},
+        {'id':root_id,'title':'Root conversation with a deliberately long title that is safely truncated','channelId':'channel-root-5678','modelId':'root-model'},
+        {'id':child_id,'title':'Child Agent','parentSessionId':root_id,'rootSessionId':root_id,'channelId':'channel-child-9012','modelId':'child-model'},
+        {'id':old_id,'title':'Outside window','channelId':'old-channel','modelId':'old-model'},
+    ]}
+    index_path = root/'usage-index.json'; index_path.write_text(json.dumps(index))
+    auto_path = root/'usage-automations.json'; auto_path.write_text(json.dumps({'automations':[{'id':automation_id,'name':'Nightly Run'}]}))
+    def assistant(mid, seconds, provider, model, usage, extra=None):
+        row = {'type':'assistant','_createdAt':stamp(seconds),'_channelProvider':provider,'_channelModelId':model,
+               'message':{'id':mid,'model':model,'content':[{'type':'text','text':'PRIVATE BODY MUST NOT LEAK'}]}}
+        if usage is not None: row['message']['usage']=usage
+        if extra: row.update(extra)
+        return json.dumps(row,separators=(',',':'))
+    (sessions_dir/f'{task_id}.jsonl').write_text('\n'.join([
+        assistant('task-response',now-3600,'anthropic','task-model',{'input_tokens':10,'output_tokens':2,'cache_read_input_tokens':5,'cache_creation_input_tokens':4}),
+        json.dumps({'type':'result','_createdAt':stamp(now-3500),'usage':{'input_tokens':900000}}),
+        assistant('no-usage-response',now-3400,'anthropic','task-model',None),
+    ])+'\n')
+    (sessions_dir/f'{root_id}.jsonl').write_text(assistant('root-response',now-1800,'openai-codex','root-model',{
+        'prompt_tokens':20,'completion_tokens':4,'prompt_tokens_details':{'cached_tokens':3}})+'\n')
+    repeated=assistant('same-child-response',now-1700,'deepseek','child-model',{'input_tokens':7,'output_tokens':1,'cache_read_input_tokens':2,'cache_creation_input_tokens':300000})
+    # Two serialized assistant snapshots for one API response must only count once.
+    (sessions_dir/f'{child_id}.jsonl').write_text(repeated+'\n'+repeated.replace('PRIVATE BODY MUST NOT LEAK','changed snapshot')+'\n')
+    (sessions_dir/f'{old_id}.jsonl').write_text(assistant('outside-response',now-8*86400,'anthropic','old-model',{'input_tokens':999})+'\n')
+    report=module.summarize(sessions_dir,index_path,auto_path,7,now)
+    assert report['overview']['requests']==4, report['overview']
+    assert report['overview']['requestsWithoutUsage']==1 and report['overview']['input']==37, report['overview']
+    assert report['overview']['output']==7 and report['overview']['cacheRead']==10 and report['overview']['cacheWrite']==300004, report['overview']
+    assert report['overview']['largeCacheRebuilds']==1 and report['overview']['relativeCostIndex']==375078.0, report['overview']
+    assert abs(report['overview']['cacheHitRate']-(10/(37+10+300004))) < 1e-12
+    assert report['scan']['requests']==4
+    task=report['byAutomation'][0]
+    assert task['name']=='Nightly Run' and task['requests']==2 and task['requestsWithoutUsage']==1 and task['input']==10
+    root=next(x for x in report['bySession'] if x['sessionId']==root_id[:8])
+    assert root['requests']==2 and root['input']==27 and root['title'].endswith('…')
+    assert report['childAgentTotal']['requests']==1 and report['childAgentTotal']['cacheWrite']==300000
+    assert len(report['byChannelModel'])==3
+    # Verify emitted output contains no prompt, local paths, or complete session IDs.
+    result=subprocess.run(['python3',str(script),'--sessions-dir',str(sessions_dir),'--index',str(index_path),'--automations',str(auto_path),'--days','7','--now',str(now),'--format','json'],text=True,capture_output=True,check=True)
+    output=result.stdout
+    for forbidden in ('PRIVATE BODY MUST NOT LEAK',str(root),task_id,root_id,child_id,old_id,'secret'):
+        assert forbidden not in output, f'report leaked {forbidden!r}'
+    assert report['scan']['filesSkippedByMtime']==0
+    # mtime prefilter: set one fixture's mtime outside window and re-run.
+    import os
+    os.utime(sessions_dir/f'{old_id}.jsonl',(now-9*86400,now-9*86400))
+    filtered=module.summarize(sessions_dir,index_path,auto_path,7,now)
+    assert filtered['overview']['requests']==4 and filtered['scan']['filesSkippedByMtime']==1
+    # Exact provider-specific aliases and cost formula.
+    assert module.usage_values({'prompt_tokens':11,'completion_tokens':3,'prompt_tokens_details':{'cached_tokens':2}})=={'input':11,'output':3,'cacheRead':2,'cacheWrite':0}
+    print('USAGE COST REPORT PASS: exact counts, window/result filters, task/root/child attribution, provider aliases, dedupe, costs, and output privacy')
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix='proma-personal-script-tests-', dir='/tmp') as td:
         root=Path(td)
@@ -215,6 +282,7 @@ def main():
         check_mobile_preview_stop(root)
         check_fixture_generator(root)
         check_request_diagnostics_summary(root)
+        check_usage_cost_report(root)
         src=root/'source'; src.mkdir(); (src/'sub').mkdir()
         (src/'alpha.txt').write_text('alpha\n'); (src/'sub'/'db.sqlite').write_bytes(b'SQLite fixture bytes')
         (src/'alpha.txt').chmod(0o640); (src/'shortcut').symlink_to('alpha.txt')
