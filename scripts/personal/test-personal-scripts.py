@@ -163,12 +163,58 @@ def check_draft_compare(data_dir: Path, sessions_before: list[dict], sessions_af
     if enabled: args += ['--allow-draft-cleanup-dir',str(backup_dir),'--since','1000']
     return assert_run(args,expected=expected)
 
+def check_request_diagnostics_summary(root: Path):
+    import datetime, time
+    script = SCRIPTS / 'request-diagnostics-summary.py'
+    logs = root / 'diag-logs'; logs.mkdir(); sessions = root / 'diag-sessions'; sessions.mkdir()
+    now = time.time()
+    def stamp(epoch): return datetime.datetime.fromtimestamp(epoch, datetime.timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+    prefix = '[INFO] main-process info name=Info scope=Agent 请求 message='
+    def run():
+        result = subprocess.run(['python3', str(script), '--log-dir', str(logs), '--sessions-dir', str(sessions), '--now', str(now)], text=True, capture_output=True)
+        assert result.returncode == 0, result.stderr
+        return json.loads(result.stdout)
+    (logs / 'main.log').write_text(f'{stamp(now-60)} [INFO] main-process info name=Info scope=服务诊断 message=event=scheduler-heartbeat\n')
+    empty = run()
+    assert empty['diagnosticsPresent'] is False and empty['anyTriggered'] is False, empty
+    lines = [
+        # old line outside the 7-day window must be ignored
+        f'{stamp(now-8*86400)} {prefix}event=image-budget session=aaaaaaaa overBudgetProtected=true',
+        f'{stamp(now-3600)} {prefix}event=provider-request session=bbbbbbbb provider=anthropic messages=9 images=6 imageBytes=3327580 approxBodyBytes=3329253 ttfbMs=134379 durationMs=134384 outcome=done',
+        f'{stamp(now-3000)} {prefix}event=image-budget session=bbbbbbbb imagesBefore=6 overBudgetProtected=false',
+        f'{stamp(now-2000)} {prefix}event=provider-request session=cccccccc provider=anthropic approxBodyBytes=900000 imageBytes=0 ttfbMs=-1 durationMs=300001 outcome=error errorKind=timeout',
+        f'{stamp(now-1900)} {prefix}event=provider-request session=cccccccc provider=anthropic approxBodyBytes=900000 imageBytes=0 ttfbMs=4000 durationMs=9000 outcome=done',
+        f'{stamp(now-1000)} {prefix}event=provider-request session=dddddddd provider=openai-codex approxBodyBytes=20000000 imageBytes=19000000 ttfbMs=-1 durationMs=300500 outcome=aborted',
+    ]
+    (logs / 'main.log').write_text('\n'.join(lines) + '\n')
+    summary = run()
+    assert summary['providerRequests'] == 4 and summary['imageBudgetEvents'] == 1, summary
+    assert summary['overBudgetProtected'] == 0 and summary['triggers']['protectedZoneGap'] is False, summary
+    assert summary['smallBodyTimeouts'] == 1 and summary['timeoutsRecoveredWithin10m'] == 1 and summary['triggers']['timeoutRetryPolicy'] is True, summary
+    assert summary['codexLongStalls'] == 1 and summary['triggers']['piRetryVisibility'] is True, summary
+    assert summary['triggers']['byteBasedCompaction'] is False, summary
+    with (logs / 'main.log').open('a') as handle:
+        handle.write(f'{stamp(now-500)} {prefix}event=image-budget session=eeeeeeee overBudgetProtected=true\n')
+        for offset in (400, 300, 200):
+            handle.write(f'{stamp(now-offset)} {prefix}event=provider-request session=ffffffff provider=anthropic approxBodyBytes=9000000 imageBytes=1000000 ttfbMs=70000 durationMs=80000 outcome=done\n')
+    (sessions / 'ffffffff-0000.jsonl').write_text(
+        json.dumps({'type': 'user', 'message': {'content': [{'type': 'text', 'text': 'secret prompt'}]}}) + '\n'
+        # turn totals on result lines must not count; only a single request's cache write does
+        + '{"type":"result","usage":{"cache_creation_input_tokens":900000},"total_cost_usd":9.0,"_createdAt":' + str(int((now-120)*1000)) + '}\n'
+        + '{"type":"assistant","message":{"content":[],"usage":{"cache_creation_input_tokens":674679}},"_createdAt":' + str(int((now-100)*1000)) + '}\n')
+    triggered = run()
+    assert triggered['triggers']['protectedZoneGap'] is True and triggered['triggers']['byteBasedCompaction'] is True, triggered
+    assert triggered['largeTextSlowRequests'] == 3 and triggered['expensiveCacheRebuilds'] == 1, triggered
+    assert 'secret prompt' not in json.dumps(triggered), 'summary must not leak session content'
+    print('REQUEST DIAGNOSTICS SUMMARY PASS: window filter, four triggers, cache-rebuild scan, no content leak')
+
 def main():
     with tempfile.TemporaryDirectory(prefix='proma-personal-script-tests-', dir='/tmp') as td:
         root=Path(td)
         check_startup_marker_waiter(root)
         check_mobile_preview_stop(root)
         check_fixture_generator(root)
+        check_request_diagnostics_summary(root)
         src=root/'source'; src.mkdir(); (src/'sub').mkdir()
         (src/'alpha.txt').write_text('alpha\n'); (src/'sub'/'db.sqlite').write_bytes(b'SQLite fixture bytes')
         (src/'alpha.txt').chmod(0o640); (src/'shortcut').symlink_to('alpha.txt')
