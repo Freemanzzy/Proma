@@ -69,6 +69,8 @@ tailscale serve --https=8443 off
 
 Web Remote full-ui 的 `agent:stream:complete` 只向手机镜像完成状态和元数据，不携带已持久化的 `messages` 列表；renderer 仍通过既有 `agentMessageRefreshAtom` 刷新并调用 `agent:get-sdk-messages` 获取持久化历史。桌面 Electron 收到的完成事件不变。
 
+代码块语法高亮：`/app/` 页面的 CSP（`web-remote-server.ts`）不允许编译 WebAssembly，Shiki 默认的 Oniguruma 引擎在手机端无法初始化。`packages/core/src/highlight/shiki-service.ts` 在 `window.__PROMA_WEB_REMOTE__ === true` 时按需加载 JavaScript 正则引擎（`forgiving: true`，跳过少数无法转换的正则），CSP 不变；桌面仍用默认引擎。
+
 Android 等触屏设备切换会话时，程序触发的输入框 autofocus 不会弹出软键盘；用户直接触摸输入框仍按浏览器默认行为聚焦并弹出键盘。
 
 ### 历史图片与长工具结果
