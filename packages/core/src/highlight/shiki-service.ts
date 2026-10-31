@@ -145,6 +145,19 @@ export function onHighlighterReady(callback: () => void): () => void {
 }
 
 /**
+ * 个人版：Web Remote 手机页的 CSP 不允许编译 WebAssembly，默认的 Oniguruma 引擎初始化会被拒绝。
+ * 该环境改用不依赖 WebAssembly 的 JavaScript 正则引擎；桌面仍用默认引擎。
+ */
+export function shouldUseJavaScriptRegexEngine(scope: unknown = globalThis): boolean {
+  return (scope as { __PROMA_WEB_REMOTE__?: unknown } | null | undefined)?.__PROMA_WEB_REMOTE__ === true
+}
+
+function loadJavaScriptRegexEngine() {
+  // forgiving：跳过少数 JS 正则无法表达的模式，而不是让整个语言加载失败
+  return import('shiki/engine/javascript').then((mod) => mod.createJavaScriptRegexEngine({ forgiving: true }))
+}
+
+/**
  * 获取或创建 Shiki 高亮器单例
  * 首次调用时懒加载，resolve 后缓存实例供同步使用，并通知所有 ready 订阅者
  */
@@ -153,6 +166,7 @@ function getHighlighter(): Promise<ShikiHighlighter> {
     highlighterPromise = createHighlighter({
       themes: DEFAULT_THEMES,
       langs: DEFAULT_LANGS,
+      ...(shouldUseJavaScriptRegexEngine() ? { engine: loadJavaScriptRegexEngine() } : {}),
     }).then((hl) => {
       cachedHighlighter = hl
       // 通知所有等待中的订阅者，触发后清空（一次性事件）
