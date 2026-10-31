@@ -1920,3 +1920,13 @@
   - 新增“暂缓项”规则：周检只列出暂缓项的计数，不单独标“⚠️ 需要关注”，计数明显上升时再提示；
   - 周检定时任务第 9 步同步了这条规则（定时任务配置不在仓库内）；
   - 本记录追加于 changelog。
+
+## 2026-10-31: 安装 a6f962cd（Claude Code）
+
+- **安装**：14:04 标准 `install-update.sh` 一次通过（EXIT=0）。备份 BACKUP VERIFY PASS（39,857 条目）；启动后 `SNAPSHOT MATCH (draft cleanup): removed=1`，清理的是空草稿 `05d5ca91`，备份 `draft-cleanup-2026-10-31T06-05-40-273Z.json`。钥匙串弹窗 1 次。`previous` = `57afeaff`；旧备份 `20261029-015705-69785` 已归档到外置硬盘，复核快照一致。
+- **安装前复核**：marker = HEAD `a6f962cd`，已推送；签名 certificate leaf `d993d52c…` 与安装版一致；无 `app-update.yml`；826 pass / 0 fail（基线 812）；包内可见 `provider-request`、`image-budget`、`agent.query.log`、`PROMA_IMAGE_BUDGET_HIGH_BYTES`、`inputLimitsImageResize`、`errorKind` 和图片移出占位文本。serve-sim 模拟器冒烟跳过（无 Booted 设备）。
+- **健康检查**：17888 由新版监听，Serve 只有 443 → 17888；无 CDP 端口（只监听 17888）；`config-dir name=.proma`；`scheduler-start` 在 `web-remote-start` 后 3 ms 出现，10 分钟后出现首个心跳；`[FATAL]`/`[ERROR]` 均为 0；定时任务 19/19，无过期；会话 1325，渠道 7。
+- **请求诊断**：用户发消息后出现 `event=provider-request session=f6872fd2 provider=anthropic channel=a0c08014 model=claude-opus-5-5 … images=7 imageBytes=3948620 approxBodyBytes=4820947 ttfbMs=160831 outcome=done`。message 部分只含白名单键，没有斜杠、非 ASCII 字符或完整 UUID。`request-diagnostics-summary.py` 返回 `diagnosticsPresent=true`。
+- **用户验收**：手机代码块复制正确；安装版手机验收通过（两台手机进入完整界面、实时回复、测试通知送达）。
+- **观察**：安装进行中（14:14:50），personal 上新增并推送了 `f02a2a2a`/`21cc93e6`（只改 `docs/personal/web-remote.md`），违反了“写出安装申请后停止修改仓库”的单写者约定；不影响已安装的包。
+- 详细结果见 handoff `install-result-2026-10-31.md`。
