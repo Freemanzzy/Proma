@@ -779,7 +779,7 @@ async function createHarness(options) {
     activeChrome = null
     activeProfile = null
   }
-  return { client, chrome, profile, pair, navigate, installInteractionStreamAudit, loadMetrics, openDrawer, clickSidebarText, clickText, openSession, createHarnessSession, createHarnessSessionRaw, setPermissionMode, inputAndSend, waitText, readHistory, waitForUserSubmission, waitForAssistantReply, waitForRunning, waitForAbortedAssistant, resolveVisibleAskUserA, resolveVisiblePlanApproval, getInteractionStreamEvents, getLastAskUserTouchDiagnostic: () => lastAskUserTouchDiagnostic, getActiveSessionId: () => activeSessionId, getCreatedSessionIds: () => new Set(createdSessionIds), invokeApi, invokeRaw, websocketUrls, websocketHandshakes, websocketFramesReceived, websocketFramesSent, historyReadRequests, websocketDataReceived, http429Responses, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, readSessionManifest, close }
+  return { client, chrome, profile, pair, navigate, installInteractionStreamAudit, loadMetrics, openDrawer, clickSidebarText, clickText, openSession, createHarnessSession, createHarnessSessionRaw, setPermissionMode, inputAndSend, waitText, readHistory, waitForUserSubmission, waitForAssistantReply, waitForRunning, waitForAbortedAssistant, resolveVisibleAskUserA, resolveVisiblePlanApproval, getInteractionStreamEvents, getLastAskUserTouchDiagnostic: () => lastAskUserTouchDiagnostic, getActiveSessionId: () => activeSessionId, getCreatedSessionIds: () => new Set(createdSessionIds), invokeApi, invokeRaw, websocketUrls, websocketHandshakes, websocketFramesReceived, websocketFramesSent, historyReadRequests, websocketDataReceived, http429Responses, freeze, resume, screenshot: (name) => screenshot(client, options.outputDir, name), consoleErrors, exceptions, readSessionManifest, adoptHarnessSession: (id) => createdSessionIds.add(id), close }
 }
 
 async function runDeadSocket(harness, options, result) {
@@ -1876,6 +1876,43 @@ async function runMediaDemo(harness, result) {
   if (!result.mediaDemo.visibleInHarness) throw new Error('演示会话已保存，但页面没有显示合成历史首条消息')
 }
 
+async function runUsageBadge(harness, options, result) {
+  const marker = join(tmpdir(), 'proma-session-usage-badge-session.json')
+  if (options.userAgent === 'desktop') {
+    const title = `usage-badge-harness-${Date.now()}`
+    const session = await harness.createHarnessSession(title)
+    writeFileSync(marker, JSON.stringify({ id: session.id, title }), { mode: 0o600 })
+    result.preserveHarnessSessionIds = [session.id]
+    const dataDir = join(homedir(), process.env.PROMA_DEV_DATA_DIR_NAME || '.proma-dev')
+    const compact = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : `${n}`
+    const rounds = []
+    for (const [i, prompt] of ['仅回复 pong', '仅回复 ping'].entries()) {
+      await harness.inputAndSend(prompt); await harness.waitForAssistantReply(prompt, i ? 'ping' : 'pong', 90000)
+      const report = JSON.parse(execFileSync('python3', [join(REPO_ROOT, 'scripts/personal/usage-cost-report.py'), '--sessions-dir', join(dataDir, 'agent-sessions'), '--index', join(dataDir, 'agent-sessions.json'), '--automations', join(dataDir, 'automations.json'), '--days', '7', '--format', 'json'], { encoding: 'utf8', timeout: 30000 }))
+      const row = report.bySession.find((x) => x.sessionId === session.id.slice(0, 8)); if (!row) throw new Error('Python report omitted harness session')
+      const expected = `缓存 ${Math.round(row.cacheHitRate * 100)}% · ${compact(row.relativeCostIndex)}`
+      const moreTools = await harness.client.evaluate(`(() => { if(document.querySelector('[data-session-usage-badge]'))return false; const button=[...document.querySelectorAll('button')].find((n)=>n.getAttribute('aria-label')==='更多工具'); if (!button) return false; button.click(); return true })()`)
+      await waitUntil(harness.client, `document.querySelector('[data-session-usage-badge]')?.innerText?.trim()===${quoteJs(expected)}`, 15000).catch(async (error) => { const diagnostic = await harness.client.evaluate(`(async()=>({badge:document.querySelector('[data-session-usage-badge]')?.innerText||null,moreTools:${moreTools},webRemote:window.__PROMA_WEB_REMOTE__,width:innerWidth,touch:navigator.maxTouchPoints,coarse:matchMedia('(pointer: coarse)').matches,toolbar:document.querySelector('[data-web-remote-input-toolbar]')?.innerText,summary:await window.electronAPI.getAgentSessionPersonalUsage(${quoteJs(session.id)})}))()`); throw new Error(`${error.message}; diagnostic=${JSON.stringify(diagnostic)}`) })
+      const dom = await harness.client.evaluate(`({text:document.querySelector('[data-session-usage-badge]')?.innerText?.trim()||null,sessionId:${quoteJs(session.id)}})`)
+      if (dom.text !== expected) throw new Error(`DOM/Python usage mismatch: ${JSON.stringify({ expected, dom })}`)
+      rounds.push({ requests: row.requests, input: row.input, output: row.output, cacheRead: row.cacheRead, cacheWrite: row.cacheWrite, largeCacheRebuilds: row.largeCacheRebuilds, relativeCostIndex: row.relativeCostIndex, cacheHitRate: row.cacheHitRate, dom: dom.text })
+    }
+    const screenshot = await harness.screenshot('session-usage-badge-desktop'); result.screenshots.push(screenshot)
+    result.preserveHarnessSessionIds = [session.id]; result.usageBadge = { sessionId: session.id, title, rounds, screenshot, viewport: { width: options.width, height: options.height } }
+    if (options.width < 1024 || rounds[1].requests <= rounds[0].requests) throw new Error('Desktop usage badge validation failed')
+  } else {
+    let session; try { session = JSON.parse(readFileSync(marker, 'utf8')) } catch { throw new Error('desktop usage badge suite marker missing') }
+    harness.adoptHarnessSession(session.id)
+    result.explicitCleanupSessionIds = [session.id]
+    await harness.navigate('/app/'); await harness.openSession(session.title)
+    const present = await harness.client.evaluate('Boolean(document.querySelector("[data-session-usage-badge]"))')
+    if (present) throw new Error(`usage badge unexpectedly visible on ${options.userAgent}`)
+    const screenshot = await harness.screenshot(`session-usage-badge-${options.userAgent}-hidden`); result.screenshots.push(screenshot)
+    result.usageBadge = { sessionId: session.id, rendered: present, screenshot }
+    if (options.userAgent === 'iphone') rmSync(marker, { force: true })
+  }
+}
+
 async function runSmoke(harness, options, result) {
   result.steps.push({ name: 'load', ok: true, url: new URL('/app/', options.url).toString() })
   const title = `web-remote-harness-smoke-${Date.now()}`
@@ -2071,7 +2108,8 @@ async function main() {
     result.pageStartupExceptionCategories = harness.exceptions.map((entry) => summarizeHarnessException(entry))
     result.loadMetrics = { first: paired.firstAppLoad, second: secondAppLoad }
     result.sessionManifestBefore = await harness.readSessionManifest()
-    if (options.suite === 'image-budget') await runImageBudget(harness, options, result)
+    if (options.suite === 'usage-badge') await runUsageBadge(harness, options, result)
+    else if (options.suite === 'image-budget') await runImageBudget(harness, options, result)
     else if (options.suite === 'smoke') await runSmoke(harness, options, result)
     else if (options.suite === 'mobile-polish') await runMobilePolishChecks(harness, options, result)
     else if (options.suite === 'heavy-session' || options.suite === 'cellular') await runHeavySession(harness, options, result, (path) => { syntheticFileCleanupPath = path })
@@ -2170,7 +2208,8 @@ async function main() {
         }
       }
       const createdIds = harness.getCreatedSessionIds()
-      const createdBeforeDelete = beforeDelete.filter((session) => createdIds.has(session.id)).map((session) => session.id)
+      const preserveForFollowup = options.suite === 'usage-badge' && options.userAgent === 'desktop' ? new Set(result.preserveHarnessSessionIds ?? []) : new Set()
+      const createdBeforeDelete = beforeDelete.filter((session) => createdIds.has(session.id) && !preserveForFollowup.has(session.id)).map((session) => session.id)
       const acceptDeleteConfirm = (event) => {
         if (event.type === 'confirm') void harness.client.command('Page.handleJavaScriptDialog', { accept: true }).catch((error) => harnessSessionCleanup.errors.push(String(error)))
       }
