@@ -248,17 +248,19 @@ def check_usage_cost_report(root: Path):
     (sessions_dir/f'{old_id}.jsonl').write_text(assistant('outside-response',now-8*86400,'anthropic','old-model',{'input_tokens':999})+'\n')
     report=module.summarize(sessions_dir,index_path,auto_path,7,now)
     assert report['overview']['requests']==4, report['overview']
-    assert report['overview']['requestsWithoutUsage']==1 and report['overview']['input']==37, report['overview']
+    assert report['overview']['requestsWithoutUsage']==1 and report['overview']['input']==34, report['overview']
     assert report['overview']['output']==7 and report['overview']['cacheRead']==10 and report['overview']['cacheWrite']==300004, report['overview']
-    assert report['overview']['largeCacheRebuilds']==1 and report['overview']['relativeCostIndex']==375078.0, report['overview']
-    assert abs(report['overview']['cacheHitRate']-(10/(37+10+300004))) < 1e-12
+    assert report['overview']['largeCacheRebuilds']==1 and report['overview']['relativeCostIndex']==375075.0, report['overview']
+    assert abs(report['overview']['cacheHitRate']-(10/(34+10+300004))) < 1e-12
     assert report['scan']['requests']==4
     task=report['byAutomation'][0]
     assert task['name']=='Nightly Run' and task['requests']==2 and task['requestsWithoutUsage']==1 and task['input']==10
     root=next(x for x in report['bySession'] if x['sessionId']==root_id[:8])
-    assert root['requests']==2 and root['input']==27 and root['title'].endswith('…')
+    assert root['requests']==2 and root['input']==24 and root['title'].endswith('…')
     assert report['childAgentTotal']['requests']==1 and report['childAgentTotal']['cacheWrite']==300000
     assert len(report['byChannelModel'])==3
+    expected_days={datetime.datetime.fromtimestamp(t).date().isoformat() for t in (now-3600,now-3400,now-1800,now-1700)}
+    assert {row['key'] for row in report['byDay']}==expected_days, report['byDay']  # 本地时区切日
     # Verify emitted output contains no prompt, local paths, or complete session IDs.
     result=subprocess.run(['python3',str(script),'--sessions-dir',str(sessions_dir),'--index',str(index_path),'--automations',str(auto_path),'--days','7','--now',str(now),'--format','json'],text=True,capture_output=True,check=True)
     output=result.stdout
@@ -271,7 +273,7 @@ def check_usage_cost_report(root: Path):
     filtered=module.summarize(sessions_dir,index_path,auto_path,7,now)
     assert filtered['overview']['requests']==4 and filtered['scan']['filesSkippedByMtime']==1
     # Exact provider-specific aliases and cost formula.
-    assert module.usage_values({'prompt_tokens':11,'completion_tokens':3,'prompt_tokens_details':{'cached_tokens':2}})=={'input':11,'output':3,'cacheRead':2,'cacheWrite':0}
+    assert module.usage_values({'prompt_tokens':11,'completion_tokens':3,'prompt_tokens_details':{'cached_tokens':2}})=={'input':9,'output':3,'cacheRead':2,'cacheWrite':0}
     print('USAGE COST REPORT PASS: exact counts, window/result filters, task/root/child attribution, provider aliases, dedupe, costs, and output privacy')
 
 

@@ -1995,3 +1995,12 @@
   - 最近 30 天：25,283 请求（无 usage 15）；input 170,927,668、output 15,647,460、cacheRead 5,731,158,534、cacheWrite 92,720,174 tokens；缓存命中率 95.60%；大额缓存重建 131 次；相对成本指数 938,181,038.9；扫描 398 个文件、mtime 跳过 926 个，耗时 1.564 秒。
 - **已知局限**：usage 没有账单价格与订阅实际成本信息，成本指数只能用于相对比较；provider 字段在本次 30 天目标 provider usage 样本中齐全，但其它历史数据可能缺少 provider，只能按 channel ID/model 分组或标 unknown。仅按可读 JSONL 中的 assistant message ID 与 usage 去重；缺少 message ID 的记录不做推断去重。报告中的 UTC 日期用于跨区稳定对账。
 - **同步文档**：`docs/personal/backlog.md` 新增 #13；本记录追加。
+
+## 2026-11-01: 成本与缓存看板复核修正
+
+- **独立核算**：父会话用独立脚本对正式数据最近 7 天逐行求和（不去重），请求数 3,791、input / output / cacheRead / cacheWrite 四项 token 与 `usage-cost-report.py` 完全一致，大额缓存重建 21 次与 `request-diagnostics-summary.py` 一致。上一条记录的 3,736 请求是执行工运行时的窗口，数字随时间滚动变化。
+- **修正 1：按天改用本机时区**。原实现按 UTC 切日，用户在 GMT+8，日报会在早上 8 点切日；现改为本机时区日期，表头为“本地日期”。上一条记录中“UTC 日期用于跨区稳定对账”的说法作废。新增断言检查按天分组的日期集合。
+- **修正 2：OpenAI 风格字段换算**。`prompt_tokens` 已包含 `cached_tokens`，原映射会把缓存命中部分同时计入 input 与 cacheRead；现只在使用 `prompt_tokens`（没有 `input_tokens`）时扣除 cacheRead。最近 30 天正式数据五类 provider 都用 `input_tokens` 系字段，实际数字不受影响；单测期望值相应更新。
+- **可读性**：markdown 输出数字加千分位，成本指数取整；JSON 保持原始数值。
+- **验证**：`test-personal-scripts.py` 全部通过；两处修正各做一次变异（去掉扣减、改用 UTC−12 切日），测试均失败后还原。
+- **同步文档**：本记录追加于 changelog。

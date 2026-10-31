@@ -39,6 +39,9 @@ def usage_values(usage):
         if val is None and key == 'cacheRead' and isinstance(details, dict):
             val = details.get('cached_tokens')
         result[key] = number(val)
+    # OpenAI 风格的 prompt_tokens 已包含缓存命中部分；换算成与 Anthropic 一致的“未命中 input”。
+    if 'input_tokens' not in usage and 'inputTokens' not in usage and 'prompt_tokens' in usage:
+        result['input'] = max(0, result['input'] - result['cacheRead'])
     return result
 
 
@@ -144,8 +147,8 @@ def summarize(sessions_dir: Path, index_path: Path, automations_path: Path, days
                     seen_responses.add(fingerprint)
                 requests += 1
                 no_usage += not has_usage
-                when = dt.datetime.fromtimestamp(created / 1000, dt.timezone.utc)
-                day = when.date().isoformat()
+                # 按本机时区切日，与用户查看日报的习惯一致。
+                day = dt.datetime.fromtimestamp(created / 1000).date().isoformat()
                 provider = str(record.get('_channelProvider') or provider_default)
                 model = str(record.get('_channelModelId') or message.get('model') or model_default)
                 channel = str(record.get('_channelId') or channel_default)
@@ -199,8 +202,9 @@ def markdown(report, top):
             lines.append('| ' + ' | '.join(str(row.get(key, '')) for key, _ in columns) + ' |')
         return '\n'.join(lines)
     cols = [('requests','请求'),('requestsWithoutUsage','无用量'),('input','Input'),('output','Output'),('cacheRead','Cache Read'),('cacheWrite','Cache Write'),('cacheHitRate','命中率'),('largeCacheRebuilds','大额重建'),('relativeCostIndex','相对成本指数')]
-    fmtrows = lambda rs: [{**r,'cacheHitRate':f"{r['cacheHitRate']:.1%}",'relativeCostIndex':f"{r['relativeCostIndex']:.1f}"} for r in rs]
-    lines = [f"# 成本与缓存看板（最近 {report['windowDays']} 天）", '', report['costNote'], f"", f"生成耗时：{report['elapsedSeconds']:.2f} 秒；扫描文件 {report['scan']['filesScanned']}，按 mtime 跳过 {report['scan']['filesSkippedByMtime']}。", '', '## 总览', table(fmtrows([report['overview']]), cols), '', '## 按天', table(fmtrows(report['byDay']), [('key','UTC 日期')]+cols), '', '## 定时任务 Top N', table(fmtrows(report['byAutomation'][:top]), [('name','定时任务')]+cols), '', '## 交互会话 Top N（会话按 ID 前 8 位与标题显示）', table(fmtrows(report['bySession'][:top]), [('sessionId','会话 ID 前 8 位'),('title','标题')]+cols), '', '**子 Agent 合计**', table(fmtrows([report['childAgentTotal']]), cols), '', '## 渠道 / 模型', table(fmtrows(report['byChannelModel']), [('key','Provider / 模型 / 渠道 ID 前 8 位')]+cols), '', f"成本权重：input×{COST_WEIGHTS['input']:g} + cacheWrite×{COST_WEIGHTS['cacheWrite']:g} + cacheRead×{COST_WEIGHTS['cacheRead']:g} + output×{COST_WEIGHTS['output']:g}。" ]
+    # 千分位便于阅读；JSON 输出保持原始数值。
+    fmtrows = lambda rs: [{**{k: (f"{v:,}" if isinstance(v, int) and not isinstance(v, bool) else v) for k, v in r.items()},'cacheHitRate':f"{r['cacheHitRate']:.1%}",'relativeCostIndex':f"{r['relativeCostIndex']:,.0f}"} for r in rs]
+    lines = [f"# 成本与缓存看板（最近 {report['windowDays']} 天）", '', report['costNote'], f"", f"生成耗时：{report['elapsedSeconds']:.2f} 秒；扫描文件 {report['scan']['filesScanned']}，按 mtime 跳过 {report['scan']['filesSkippedByMtime']}。", '', '## 总览', table(fmtrows([report['overview']]), cols), '', '## 按天', table(fmtrows(report['byDay']), [('key','本地日期')]+cols), '', '## 定时任务 Top N', table(fmtrows(report['byAutomation'][:top]), [('name','定时任务')]+cols), '', '## 交互会话 Top N（会话按 ID 前 8 位与标题显示）', table(fmtrows(report['bySession'][:top]), [('sessionId','会话 ID 前 8 位'),('title','标题')]+cols), '', '**子 Agent 合计**', table(fmtrows([report['childAgentTotal']]), cols), '', '## 渠道 / 模型', table(fmtrows(report['byChannelModel']), [('key','Provider / 模型 / 渠道 ID 前 8 位')]+cols), '', f"成本权重：input×{COST_WEIGHTS['input']:g} + cacheWrite×{COST_WEIGHTS['cacheWrite']:g} + cacheRead×{COST_WEIGHTS['cacheRead']:g} + output×{COST_WEIGHTS['output']:g}。" ]
     return '\n'.join(lines) + '\n'
 
 
