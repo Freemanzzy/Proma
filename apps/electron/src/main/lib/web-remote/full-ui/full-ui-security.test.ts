@@ -539,6 +539,14 @@ describe('Web Remote full-ui security policy', () => {
     expect(saved).toEqual(base)
   })
 
+  test('personal session usage is read-only and scoped to the authorized session', async () => {
+    const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
+    bridge.registerInvoke('agent:get-personal-session-usage', async (_event, sessionId) => ({ sessionId, requests: 1 }))
+    const ws = client(bridge)
+    expect((await invoke(ws, 'agent:get-personal-session-usage', ['s-1'])).ok).toBe(true)
+    expect((await invoke(ws, 'agent:get-personal-session-usage', ['s-2'])).error.denied).toBe(true)
+  })
+
   test('confirm 通道首次返回挑战，带一次性 token 才执行', async () => {
     const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
     let calls = 0

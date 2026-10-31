@@ -11,6 +11,7 @@ import { realpath, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
 import { recordPersonalInfo } from './lib/personal-log-writer'
+import { getPersonalSessionUsage } from './lib/personal-session-usage'
 import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, SLACK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, VAULT_IPC_CHANNELS, PLANNING_CONFLICT_ERROR, MAX_ATTACHMENT_SIZE, isPromaPermissionMode, normalizePathForCompare, removeMcpServerFromConfig, TERMINAL_IPC_CHANNELS, SIMULATOR_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS, WINDOWS_AGENT_ISLAND_IPC_CHANNELS, TRAY_IPC_CHANNELS } from '../types'
 import type {
@@ -2566,6 +2567,11 @@ export function registerIpcHandlers(): void {
   )
 
 
+
+  ipcMain.handle(AGENT_IPC_CHANNELS.GET_PERSONAL_SESSION_USAGE, async (_event, id: unknown) => {
+    if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{8,}$/.test(id)) throw new Error('会话 ID 无效')
+    return getPersonalSessionUsage(id)
+  })
 
   // 获取 Agent 会话 SDKMessage（Phase 4 新格式）
   ipcMain.handle(

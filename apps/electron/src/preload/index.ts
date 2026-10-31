@@ -603,6 +603,7 @@ export interface ElectronAPI {
   listActiveAgentSessionSnapshots: () => Promise<AgentActiveSessionSnapshot[]>
 
   /** 获取 Agent 会话 SDKMessage（Phase 4 新格式） */
+  getAgentSessionPersonalUsage: (id: string) => Promise<import('@proma/shared').PersonalSessionUsageSummary>
   getAgentSessionSDKMessages: (id: string) => Promise<SDKMessage[]>
   /** 桌面端按完整轮次加载消息历史窗口。 */
   getAgentSessionSDKMessagesWindow: (id: string, options?: { endIndex?: number; startIndex?: number; budgetBytes?: number }) => Promise<AgentSessionSDKMessagesWindow>
@@ -1900,6 +1901,8 @@ const electronAPI = {
   listActiveAgentSessionSnapshots: () => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.ACTIVE_SESSIONS_SNAPSHOT)
   },
+
+  getAgentSessionPersonalUsage: (id: string) => ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_PERSONAL_SESSION_USAGE, id),
 
   getAgentSessionSDKMessages: (id: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_SDK_MESSAGES, id)
