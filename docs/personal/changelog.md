@@ -1937,3 +1937,10 @@
 - 措施：规则从“开工前”收紧为“每次提交前”都检查 handoff 目录，看是否有尚未出结果的 install-request。已写进工作区 `.context/proma-personal/新会话入口.md` 和 Proma 侧工作说明记忆。
 - 新增 `.context/proma-personal/新会话入口.md`（工作区内，不进仓库），只列出新会话需要按什么顺序读哪些 SSOT，并附当前快照。backlog 顶部同步为当前安装 `a6f962cd`。
 
+
+## 2026-10-31: 处理 a6f962cd 安装结果中的待办
+
+- **单写者（待办 1）**：把“每次提交或推送前都要查看交接单目录，有未出结果的安装申请就不提交、不推送（包括只改文档的提交）”写进 `docs/personal/maintenance.md` §2。之前这条只写在工作区的新会话入口和 Proma 侧工作说明记忆里，没有进双方共用的规则文件。
+- **草稿预演（待办 2）**：这是 Claude Code 安装前复核的步骤，Proma 侧无需改动。
+- **dev smoke 走 OAuth 渠道（待办 3）**：在 `docs/personal/backlog.md` 的“用户反馈收集”表登记。fixture 模式只含 clipproxyapi 一个渠道，不受影响。对 `.proma-dev` 运行时，smoke、interactions、abort、attachments、push 会在新建会话里沿用默认渠道发消息；recovery 和 extra 会在 `--session` 指定的已有会话里发送，用的是该会话的渠道。目前只有 `image-budget` 会先锁定 API Key 渠道。登记了两种候选方案，等用户说“开工”再定。
+- **同步文档**：`maintenance.md` §2、`backlog.md`、本记录。
