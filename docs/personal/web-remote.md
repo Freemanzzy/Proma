@@ -94,7 +94,7 @@ Android 等触屏设备切换会话时，程序触发的输入框 autofocus 不�
 
 - 网络：只监听回环地址；只经 Tailscale Serve（不使用 Funnel）；Serve 注入 `Tailscale-User-Login` 并剥离客户端伪造的同名头。
 - 身份：配对设备用 32 字节随机令牌（服务端只存 SHA-256，Cookie `HttpOnly; Secure; SameSite=Strict`，可撤销）；连续超过 30 天未使用时按 `lastUsedAt`（无则 `createdAt`）惰性撤销，撤销超过 30 天的记录自动清理；受信 `tailnet:*` 身份不受期限影响。受信设备须同时满足：账号在允许列表、来源 IP 属于 tailnet、`tailscale whois` 返回同一账号且设备名在受信列表。本机其他进程理论上可伪造回环请求头，但本机进程本就拥有同等权限。
-- IPC 分级：`full-ui/channel-policy.ts` 为全部 IPC 通道的显式分级表，**未分级即拒绝**，启动时校验覆盖率（当前 100%）。级别：`read`、`session`、`workspace`、`write`、`confirm`（手机端二次确认，如删除会话/Todo、定时任务立即运行）、`denied`（凭据、终端、设置写入、原生窗口等）。历史媒体读取使用 `web-remote:get-history-media`，为 session 范围只读；请求须解析到已授权会话，并在读取前校验 UUID/索引、消息 SHA-256 与块路径。
+- IPC 分级：`full-ui/channel-policy.ts` 为全部 IPC 通道的显式分级表，**未分级即拒绝**，启动时校验覆盖率（当前 100%）。`agent:get-personal-session-usage` 为只读 session 级通道，仅返回授权会话的 token/cache 汇总，调用参数中的 sessionId 必须解析并校验在允许范围内。级别：`read`、`session`、`workspace`、`write`、`confirm`（手机端二次确认，如删除会话/Todo、定时任务立即运行）、`denied`（凭据、终端、设置写入、原生窗口等）。历史媒体读取使用 `web-remote:get-history-media`，为 session 范围只读；请求须解析到已授权会话，并在读取前校验 UUID/索引、消息 SHA-256 与块路径。
 - 过滤：列表类返回与流事件按会话所属工作区过滤；文件类通道对目标路径做 realpath 范围校验；设置、渠道、MCP 配置返回前掩码密钥字段。
 
 ## 7. 维护与排错

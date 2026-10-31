@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Read-only token, cache and relative-cost report for local Proma sessions."""
+"""Read-only token, cache and relative-cost report for local Proma sessions.
+
+统计口径须与 apps/electron/src/main/lib/personal-session-usage.ts 同步。
+"""
 from __future__ import annotations
 import argparse
 import datetime as dt

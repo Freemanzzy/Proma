@@ -2004,3 +2004,29 @@
 - **可读性**：markdown 输出数字加千分位，成本指数取整；JSON 保持原始数值。
 - **验证**：`test-personal-scripts.py` 全部通过；两处修正各做一次变异（去掉扣减、改用 UTC−12 切日），测试均失败后还原。
 - **同步文档**：本记录追加于 changelog。
+
+## 2026-11-01: 桌面输入框会话用量指示器
+
+- 在压缩按钮之后、工具栏渠道/模型区之前新增会话用量标签；hover 展示本会话累计请求与四类 token、命中率、大额重建、成本指数、最近请求以及子 Agent 合计。Web Remote 触屏设备和窄屏隐藏；Web Remote 桌面宽度仍可见。
+- 主进程按 JSONL 文件 inode/字节偏移增量读取，仅对完整行计数；跨增量保留响应去重集合与未完成尾行。截断、替换/大小异常时重算。子 Agent 通过会话索引中 `parentSessionId` 或 `rootSessionId` 汇总。统计严格同步 `scripts/personal/usage-cost-report.py`，两边均注明口径须同步；不读取 channels.json，不向 renderer 暴露消息正文或文件路径。
+- 新增 `agent:get-personal-session-usage` 只读 session-scoped IPC；参数为 sessionId，由 Web Remote policy 按会话授权范围检查，响应仅含聚合用量。生成器输出包含该通道，安全测试覆盖授权/越权。
+- **单测**：主进程 9 项覆盖追加只读、截断与 inode 替换重算、半行延迟、跨增量去重、result/无 usage 排除、OpenAI 缓存换算、子 Agent、最近请求/大额重建及 TS/Python 同 JSONL 一致性；组件 4 项覆盖 k/M 与百分比、空态、琥珀色、触屏/窄屏条件。Web Remote security 定向测试 34 pass。
+- **变异检验**：分别破坏命中率分母、响应去重、增量偏移、触屏隐藏条件；四处替换均先确认唯一命中，测试全部变红后还原。
+- **全量验证**：`bun test` 843 pass / 0 fail（136 files）；`bun run typecheck` 全部 workspace 通过；`python3 scripts/personal/test-personal-scripts.py` 通过；Electron `build:main`、`build:renderer`、`build:web-preload` 通过；`git diff --check`、harness JS/shell 语法检查及 IPC policy 生成器通道核对通过。
+- **fixture dev 验证**（`.proma-dev-fixture`，桌面 1280×900，clipproxyapi API Key 渠道）：第一条消息按 Python 报告为 1 请求、input/output/cacheRead/cacheWrite=`2/4/18146/11518`，成本指数 `16234.1`、命中率 `61.168%`，DOM `缓存 61% · 16.2k`；第二条累计为 2 请求、`6/8/36581/22868`，成本指数 `32289.1`、命中率 `61.527%`，DOM `缓存 62% · 32.3k`。iphone 同会话断言 DOM 不存在；iphone 与 Android `smoke` 均通过。截图：`/tmp/session-usage-badge-desktop-20261101.png`、`/tmp/session-usage-badge-iphone-20261101.png`。harness 会话、配对设备、Chrome/profile 均清理；`mobile-preview.sh stop` 后 17889/5173/8443 无监听，未发现残留 harness Chrome。重复回归期间 dev Electron 曾因堆内存耗尽导致 Android harness 清理超时；重启隔离 fixture 后单独重跑 `android:smoke` 通过，端口与 Chrome 清理检查通过。
+- 本分支待父会话复核；未合并、未推送。
+
+## 2026-11-01: 会话用量指示器复核修正
+
+- **问题**：执行工版本首次读取时用 `Buffer.alloc(文件大小)` + `readSync` 把整个 JSONL 一次读进主进程，再对每一行 `JSON.parse`（包括带 base64 图片的超大 user/tool 行）。用正式数据只读实测，最大的 337 MB 会话首次读取使进程 RSS 增加约 **1.86 GB**、同步阻塞约 **0.44 s**。执行工回报中 fixture Electron 的一次 OOM 与此一致（fixture 含 335 MB 合成大会话）。
+- **修正**（`personal-session-usage.ts`）：
+  - 改为 `fs/promises` 异步分块读取（4 MiB/块），只读新增字节，不阻塞主进程事件循环；
+  - 行状态机只缓冲以 `{"type":"assistant"` 开头的行，其余行看前缀后直接跳过、不复制；单行缓冲上限 8 MiB（正式数据最大 assistant 行约 48 KB）；
+  - 同一会话的读取按 Promise 链串行，避免并发调用交错推进同一偏移；
+  - 会话索引按 size + mtime 缓存解析结果；文件状态缓存按 LRU 保留最多 64 个会话；
+  - IPC 处理函数本就是 async，接口形状不变。
+- **实测**（只读正式数据）：337 MB 会话首次 77–144 ms、RSS 增加约 94–98 MB（含 bun 运行时开销），再次读取约 2 ms；`f6872fd2` 首次约 92–146 ms。两个会话本会话 + 子 Agent 的请求数与 `usage-cost-report.py --days 3650` 的根会话请求数之差，恰为 Python 计入的“无 usage 请求”（4、1），口径一致。说明：指示器的“请求数”只统计带 usage 的请求。
+- **测试**：主进程单测改为 async，并新增 3 项：7 字节分块下跨块行 + 200 KB 非 assistant 行（断言最大缓冲 < 1 KB）、已有缓存状态后的并发读取（无 message.id 的行，不能靠去重掩盖重复推进）、LRU 上限 64。变异检验：去掉串行化、去掉前缀跳过、去掉 LRU 淘汰，各自使测试失败后还原。
+- **完整验证**：全量 `bun test` 846 pass / 0 fail（136 files），全仓 typecheck、`test-personal-scripts.py`、`build:main` / `build:renderer` / `build:web-preload`、`git diff --check` 通过。fixture dev：`desktop:usage-badge` PASS（两轮 DOM `缓存 61% · 16.2k` → `缓存 62% · 32.3k`，与按脚本口径计算一致），`iphone:usage-badge` PASS（不渲染），iphone/android `smoke` PASS；`mobile-preview.sh stop` 退出码 0，17889/5173 无监听，Serve 只剩 443。
+- **观察**：执行工截图中（1280×900，左侧栏与右侧文件面板都展开），输入框较窄，标签被工具栏收进“更多工具（…）”菜单，不在压缩按钮旁直接显示；这是现有工具栏按宽度溢出的行为。待用户在常用窗口宽度下体验后决定是否需要让它优先保持在外。
+- **同步文档**：`docs/personal/backlog.md` 待合入分支表状态，本记录。

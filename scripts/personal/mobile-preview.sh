@@ -238,7 +238,9 @@ run_tests() {
     local test_log="/tmp/proma-mobile-preview-${ua}-${name}.log"
     if [[ "$name" == "image-budget" ]]; then echo "图片预算真实请求套件：仅新建会话并在消息前锁定 clipproxyapi/claude-opus-5-5（ID 精确匹配）。"; fi
     echo "=== ${ua} / ${name} ==="
-    if ! (cd "$ROOT" && perl -e 'alarm 600; exec @ARGV' env -u http_proxy -u https_proxy -u all_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u HTTP_ALL_PROXY -u HTTPS_ALL_PROXY bun "$agent" --url "$origin" --suite "$name" --user-agent "$ua" --expected-workspace-count "${PROMA_WEB_REMOTE_EXPECTED_WORKSPACE_COUNT:-1}") >"$test_log" 2>&1; then
+    local viewport_args=(--width 412 --height 915 --device-scale-factor 3)
+    if [[ "$ua" == "desktop" ]]; then viewport_args=(--width 1280 --height 900 --device-scale-factor 1); fi
+    if ! (cd "$ROOT" && perl -e 'alarm 600; exec @ARGV' env -u http_proxy -u https_proxy -u all_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u HTTP_ALL_PROXY -u HTTPS_ALL_PROXY bun "$agent" --url "$origin" --suite "$name" --user-agent "$ua" "${viewport_args[@]}" --expected-workspace-count "${PROMA_WEB_REMOTE_EXPECTED_WORKSPACE_COUNT:-1}") >"$test_log" 2>&1; then
       echo "FAIL ${ua}/${name}（日志：${test_log}）"
       tail -n 16 "$test_log" || true
       failed=1
@@ -310,6 +312,7 @@ NODE
       fi
     fi
   done
+  if [[ " ${suites[*]} " == *"usage-badge"* ]]; then rm -f "${TMPDIR:-/tmp}/proma-session-usage-badge-session.json"; fi
   chrome_pids="$(ps -axo pid=,command= | awk '/proma-mobile-chrome-/ && /--user-data-dir=/ && !/awk/ {print $1}')"
   if [[ -n "$chrome_pids" ]]; then
     echo "残留 proma-mobile-chrome 进程：$chrome_pids" >&2

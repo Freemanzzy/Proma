@@ -132,6 +132,16 @@ export interface AgentDefinition {
  *
  * SDK 0.2.53 新增，用于发现和列出历史会话。
  */
+export interface PersonalSessionUsageTotals {
+  requests: number; input: number; output: number; cacheRead: number; cacheWrite: number
+  largeCacheRebuilds: number; relativeCostIndex: number; cacheHitRate: number
+}
+export interface PersonalSessionUsageSummary {
+  session: PersonalSessionUsageTotals
+  lastRequest: { cacheWrite: number; cacheHitRate: number; largeCacheRebuild: boolean } | null
+  children: PersonalSessionUsageTotals | null
+}
+
 export interface SDKSessionInfo {
   /** 会话 ID */
   sessionId: string
@@ -1854,6 +1864,8 @@ export const AGENT_IPC_CHANNELS = {
   GET_QUEUED_MESSAGES: 'agent:get-queued-messages',
   /** 批量读取指定会话的 deferred queue 快照，供 renderer 一次恢复。 */
   GET_QUEUED_MESSAGES_BATCH: 'agent:get-queued-messages-batch',
+  /** 读取指定会话的 token/cache 汇总，不返回消息内容。 */
+  GET_PERSONAL_SESSION_USAGE: 'agent:get-personal-session-usage',
   /** 获取会话 SDKMessage（Phase 4 新格式） */
   GET_SDK_MESSAGES: 'agent:get-sdk-messages',
   /** 桌面端按完整轮次读取 SDKMessage 历史窗口；Web Remote 策略默认拒绝。 */

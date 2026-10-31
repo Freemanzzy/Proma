@@ -29,6 +29,7 @@ import { AskUserBanner } from './AskUserBanner'
 import { ExitPlanModeBanner } from './ExitPlanModeBanner'
 import { PlanModeDashedBorder } from './PlanModeDashedBorder'
 import { ModelSelector } from '@/components/chat/ModelSelector'
+import { SessionUsageBadge } from '@/components/agent/SessionUsageBadge'
 import { AttachmentPreviewItem } from '@/components/chat/AttachmentPreviewItem'
 import { QuotedSelectionChip } from '@/components/diff/QuotedSelectionChip'
 import { RichTextInput, type RichTextInputHandle } from '@/components/ai-elements/rich-text-input'
@@ -3021,6 +3022,7 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
         />
       ),
     },
+    { key: 'session-usage', node: <SessionUsageBadge sessionId={sessionId} /> },
   ], [
     planQuotaChannelId,
     planQuotaChannelUpdatedAt,
