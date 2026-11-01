@@ -2080,3 +2080,10 @@
 - **新增/修改**：新增 `docs/personal/review-rules.md`（版本号规则防误报、Web Remote 聚合授权、主进程大文件读取、数据与隐私、上游改动面）；`maintenance.md` 新增 §4.3，§1 分工表与 §3 安装申请模板各加一行，§5 登记规则文件位置；`backlog.md` 新增 #16。
 - **未涉及**：应用代码、版本号、打包与安装。
 - **同步文档**：`docs/personal/maintenance.md`、`docs/personal/review-rules.md`、`docs/personal/backlog.md`、本记录。
+
+## 2026-11-01: 预装个人 Skill 清单补充 Codex 审查相关 Skill
+
+- 用户要求 `codex-code-review` 与 `proma-cli-dispatch` 在所有工作区及以后新建的工作区可用。已放入 `~/.proma/default-skills/` 并同步到全部 5 个工作区（本机操作，不入库；记录见 Skill 自身 `CHANGELOG.md`）。
+- 按代码核对：新建工作区由 `copyDefaultSkills` 复制模板全部目录；启动时 `upgradeDefaultSkillsInWorkspaces` 对模板中版本更高的 Skill 覆盖升级、对缺失的注入。两个 slug 都不是应用内置，也不在 `RETIRED_DEFAULT_SKILL_SLUGS`。
+- `backlog.md`「个人自建 Skill 预装」更新清单，并写明修改个人 Skill 必须递增版本、同步模板与各工作区。
+- **同步文档**：`docs/personal/backlog.md`、本记录。
