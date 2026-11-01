@@ -5,7 +5,7 @@
 ## 待合入分支（已验证、未发布）
 
 - 当前安装：`a6f962cd`（2026-10-31，含手机复制修复、慢测试超时、图片上下文预算与请求诊断），之前已合入的分支均已包含。下表三个分支都已发布，保留作记录（2026-10-31 核对：均为 `a6f962cd` 的祖先）。
-- 已合入、未安装：`fix/web-remote-shiki-engine-20261031`（手机端代码块语法高亮，见下表），待下次打包安装；其余仅文档。
+- 已合入、待安装（2026-11-01 打包，见 install-request-2026-11-01）：`fix/web-remote-shiki-engine-20261031`（手机端代码块语法高亮）、`feat/session-usage-badge-20261101`（桌面会话用量指示器）、`fix/usage-badge-yield-20261101`（工具栏折叠与旧会话压缩按钮）；另有只读脚本 `usage-cost-report.py`。
 - 待用户日常实测：桌面排队消息（运行中再发、Cmd+R 恢复）；会话内搜索与 minimap（窗口化加载后）。用户 2026-10-31：保持现状，不主动安排，有问题再反馈。
 - 观察：手机 PDF 预览页“省流量”胶囊压住缩放控件（用户 10-19 决定先不做）。
 
@@ -15,7 +15,8 @@
 | `fix/batch-20261019`（已合入 2026-10-19） | `personal` 47daaaae | Web Remote 手机正文/表格布局与占位文案、队列恢复批量 IPC 和快照顺序；新增移动端重命名显式回调、输入框焦点守卫与顶栏标题同步。桌面布局和单会话队列恢复路径不变。 | **785 pass / 0 fail**、六 workspace typecheck 通过；iPhone/Android CDP touch 验证 rename 输入/保存/取消与标题同步；build:main/renderer/web-preload 通过。Android 表格横向触摸仍未验收；OS 虚拟键盘未在 headless CDP 中观察。 | ✅ 已提交 `9cc8b14b`，随 2026-10-24 安装的 `3d33fab5` 发布。详见 changelog 2026-10-19 两条记录。 |
 | `feat/image-context-budget-20261031`（已合入并安装 2026-10-31） | `personal` 66820eff | Read 新图缩放、请求前历史图片重压缩/粘性移出、请求级诊断日志；第二轮修复稳定移出 key、请求级统计与错误分类，并增加手动 `iphone:image-budget` harness。 | 全量 `bun test` 826 pass / 0 fail（133 files），全仓 typecheck 通过；dev 环境阈值在 NodeService utility 读回，启停退出码均为 0。用户确认改用已启用的 `clipproxyapi/claude-opus-5-5` 后，harness 精确读回渠道/模型并完成 6 图、两条消息、两次回复；JSONL 6 个 JPEG 均约 554–555 KB，`image-budget` 从 6 图 / 3,327,580 B 移至 1 图 / 554,164 B，后续 `provider-request` 对应降至 554,164 B；`inputLimitsImageResize=false`。`.proma-dev/channels.json` SHA-256 前后不变，harness/设备/Chrome/profile/fixture 均清理，JSONL 与 harness 结果保存在临时证据目录。 | ✅ 中控审核后合入，随 2026-10-31 安装的 `a6f962cd` 发布。Pi SDK 内部 HTTP retry 日志可见性见后续待办 12e。详见 changelog 2026-10-31。 |
 | `fix/web-remote-shiki-engine-20261031`（已合入 2026-10-31，待安装） | `personal` d2b91e27 | 手机端 Web Remote 下 Shiki 改用 JavaScript 正则引擎，修复 CSP 拒绝 WebAssembly 导致代码块无语法着色；CSP 不变，桌面仍用 Oniguruma。harness `copy` 套件新增代码块着色检查。 | 新增 3 个单测（子进程模拟禁止 WebAssembly 的 CSP，含非 Web Remote 对照），去掉引擎选择的变异会使测试失败；全量 `bun test` 829 pass / 0 fail（134 files），全仓 typecheck 通过。dev fixture：修复前构建 `iphone:copy` 代码块 0 个着色 span 且出现 WebAssembly CSP CompileError；修复后 iphone/android `copy` 均 3 种颜色、复制正确，iphone/android `smoke`、iphone `layout`/`session-sync`/`interactions` 全部 PASS，WASM-CSP 异常计数 0。 | 已合入并推送；用户 2026-10-31 16:27 在 iOS 模拟器验收通过。待随下一批打包安装（时机由用户决定）。详见 changelog 2026-10-31。 |
-| `feat/session-usage-badge-20261101` | `personal` 9126c70f | 桌面会话输入框用量标签，包含增量 JSONL 统计、session-scoped 只读 IPC、Web Remote 桌面展示与触屏/窄屏隐藏；口径同步 `usage-cost-report.py`。 | 全量 `bun test` 846 pass / 0 fail（含复核新增 3 项）、全仓 typecheck、三项构建通过；fixture dev `desktop:usage-badge`、`iphone:usage-badge`（不渲染）、iphone/android `smoke` 通过。 | 已合入并推送（2026-11-01）；父会话复核时把主进程读取改为分块异步，见 changelog 2026-11-01「会话用量指示器复核修正」。待用户在 dev 桌面窗口体验后随下一批打包。 |
+| `feat/session-usage-badge-20261101` | `personal` 9126c70f | 桌面会话输入框用量标签，包含增量 JSONL 统计、session-scoped 只读 IPC、Web Remote 桌面展示与触屏/窄屏隐藏；口径同步 `usage-cost-report.py`。 | 全量 `bun test` 846 pass / 0 fail（含复核新增 3 项）、全仓 typecheck、三项构建通过；fixture dev `desktop:usage-badge`、`iphone:usage-badge`（不渲染）、iphone/android `smoke` 通过。 | 已合入并推送（2026-11-01）；父会话复核时把主进程读取改为分块异步，见 changelog 2026-11-01「会话用量指示器复核修正」。用户 2026-11-01 19:35 dev 体验确认（含下一行修正），随 install-request-2026-11-01 安装。 |
+| `fix/usage-badge-yield-20261101`（已合入 2026-11-01，待安装） | `personal` 584174fb | 用户 dev 体验反馈后修正：用量标签放不下时直接隐藏（`InputToolbarOverflow` 新增 `hideWhenOverflow`），压缩按钮折叠宽度与加标签前一致；压缩按钮在本次启动后无实时用量时用会话记录兜底显示（上次请求后已压缩时仍显示按钮、不显示过时数值）；新会话显示占位 `缓存 — · 0`。改动两个上游文件。 | 全量 `bun test` 854 pass / 0 fail、全仓 typecheck；fixture `desktop:usage-badge` PASS；用户 2026-11-01 19:35 在 dev 窗口确认。 | 已合入并推送，随 install-request-2026-11-01 安装。详见 changelog 2026-11-01。 |
 
 已归档、不合入：开发进程安全完整方案（原 `fix/dev-process-safety-20260930`，约 2,000 行 launchd 托管），以 git bundle 存档于本机会话工作台 `archive/dev-process-safety-20260930.bundle`；评估结论为过重，改走下方“开发启动小修复”。
 
@@ -97,3 +98,4 @@
 - **已安装（2026-10-29，`57afeaff`）**：飞书安装后续 + 桌面大会话窗口化加载（正式数据主会话首开 0.40 s、再开 0.07 s）。待用户反馈：会话内搜索、minimap。10-24 被旧逻辑改写的飞书绑定 `modelId`：用户 2026-10-31 决定不恢复，保持现状（现按“会话→binding→…”分级，小R 实际用会话模型，影响很小）。
 - **已安装（2026-10-31，`a6f962cd`）**：`fix/test-timeouts-20261029`（两个慢测试放宽单测超时，避免打包误报）。
 - 决定（2026-10-30）：不做 Grok Bot 式“岗位/bot 模式”。工作区 + AGENTS.md + 子 Agent + 定时任务已经能覆盖岗位这类用法；巴西面霜的岗位试点暂不开展，起草的岗位卡与状态文件已删除。以后需要时再用“岗位卡 + 状态文件”的约定方式实现，不开发产品功能。
+- 决定（2026-11-01）：商业版与个人版共存方案暂时搁置。等商业版推出可用的手机端、用户决定切回时再下载切换；届时按“个人版保持 `~/.proma` 与开源上游数据格式兼容、Claude Code 备份后安装商业版直接读取原目录”的思路制定迁移计划。在此之前仍不下载、不安装官方/商业版（§4 不变）。商业版手机端进展由定时任务“Proma 商业版 · 手机客户端与远程访问周检”跟踪。

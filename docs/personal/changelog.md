@@ -2045,3 +2045,9 @@
   - `SessionUsageBadge`：会话尚无请求时显示占位 `缓存 — · 0`。
 - **验证**：主进程单测新增 2 项（上下文与压缩标记、无请求时为空），组件单测新增占位文案 1 项；全量 `bun test` 854 pass / 0 fail，全仓 typecheck 通过；337 MB 会话首次读取约 119 ms、RSS 增加约 94 MB，与改动前一致。dev fixture `desktop:usage-badge` PASS。旧会话上压缩按钮的显示待用户在 dev 窗口目视确认。
 - **改动面**：本次修改了两个上游文件 `InputToolbarOverflow.tsx`、`ContextUsageBadge.tsx`，同步官方版本时需留意。
+
+## 2026-11-01: 用量指示器修正用户验收；商业版共存方案搁置
+
+- 用户在 dev 桌面窗口确认：旧会话的压缩按钮、用量标签与新会话占位均正常（19:35），`fix/usage-badge-yield-20261101` 合入 `personal`。
+- 用户决定：商业版与个人版共存方案暂时搁置，等商业版有可用的手机端、决定切回时再下载切换；届时再定迁移计划。`maintenance.md` §4“不下载、不安装官方版”不变。记录于 `docs/personal/backlog.md` 末尾。
+- 同步文档：`docs/personal/backlog.md`（待合入分支表、待安装说明、决定）、本记录。
