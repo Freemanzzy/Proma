@@ -2051,3 +2051,12 @@
 - 用户在 dev 桌面窗口确认：旧会话的压缩按钮、用量标签与新会话占位均正常（19:35），`fix/usage-badge-yield-20261101` 合入 `personal`。
 - 用户决定：商业版与个人版共存方案暂时搁置，等商业版有可用的手机端、决定切回时再下载切换；届时再定迁移计划。`maintenance.md` §4“不下载、不安装官方版”不变。记录于 `docs/personal/backlog.md` 末尾。
 - 同步文档：`docs/personal/backlog.md`（待合入分支表、待安装说明、决定）、本记录。
+
+## 2026-11-01: 安装 46909718（Claude Code）
+
+- **结果**：安装成功，保留 `46909718`，未回滚。标准 `install-update.sh` EXIT=0；备份 BACKUP VERIFY PASS（38,301 条目）；启动后 SNAPSHOT MATCH；草稿清理 `removed=0`（预演 `isDraft` 0）。钥匙串弹 1 次（20:06:02 → 20:06:22）。
+- **安装前复核**：包内 commit = `personal` = `origin/personal`；同一证书 leaf `d993d52c…`，`codesign --verify --deep --strict` 通过；无 `app-update.yml`；打包日志 854 pass / 0 fail；包内可见项 7 项计数与申请一致；新 IPC `agent:get-personal-session-usage` 参数正则限制、只读、Web Remote `session` 级。
+- **健康检查**：PID 56548 只监听 `127.0.0.1:17888`，无 CDP 端口；Serve 仅 443 → 17888；`scheduler-start enabledTasks=20` 在 `web-remote-start` 后 3 ms，20:16 首个 heartbeat；`[FATAL]`/`[ERROR]` 0；定时任务 20 → 20、ID 一致；会话 1344、渠道 7。
+- **用户验收**：桌面主会话用量标签与 hover 浮层、重开会话的压缩按钮、新会话占位 `缓存 — · 0`；两台手机代码块语法着色、不显示用量标签、复制正常——“测试通过”。打开 `f6872fd2` `totalMs=256`，主进程 RSS 382 → 421 MB。
+- **版本**：previous = `a6f962cd`；`57afeaff` 移入废纸篓；`20261031-140444-74428` 归档外置硬盘并复核 SNAPSHOT MATCH。
+- 详见交接单 `install-result-2026-11-01.md`。
