@@ -1,8 +1,20 @@
 import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, expect, test } from 'bun:test'
-import { isPersonalSharedSkillsMode, resolvePersonalSharedSkillsDir, startPersonalSharedSkillsWatcher, stopPersonalSharedSkillsWatcher } from './personal-shared-skills'
+import { afterEach, expect, mock, test } from 'bun:test'
+import * as nodeFs from 'node:fs'
+
+const openedWatchers: nodeFs.FSWatcher[] = []
+const realWatch = nodeFs.watch.bind(nodeFs)
+mock.module('node:fs', () => ({
+  ...nodeFs,
+  watch: (...args: Parameters<typeof nodeFs.watch>) => {
+    const watcher = realWatch(...args)
+    openedWatchers.push(watcher)
+    return watcher
+  },
+}))
+const { isPersonalSharedSkillsMode, resolvePersonalSharedSkillsDir, startPersonalSharedSkillsWatcher, stopPersonalSharedSkillsWatcher } = await import('./personal-shared-skills')
 
 const roots: string[] = []
 function fixture(): string { const root = mkdtempSync(join(tmpdir(), 'personal-shared-skills-')); roots.push(root); return root }
@@ -21,6 +33,16 @@ test('incomplete directory warning is emitted only once and names no full path',
   const warn = console.warn; const warnings: string[] = []; console.warn = (...args: unknown[]) => warnings.push(args.join(' '))
   try { isPersonalSharedSkillsMode(root); isPersonalSharedSkillsMode(root) } finally { console.warn = warn }
   expect(warnings).toHaveLength(1); expect(warnings[0]).toContain('shared-skills'); expect(warnings[0]).not.toContain(root)
+})
+
+test('watcher error is handled without throwing', () => {
+  const root = fixture(); mkdirSync(join(root, 'shared-skills')); mkdirSync(join(root, 'shared-skills-inactive'))
+  openedWatchers.length = 0
+  startPersonalSharedSkillsWatcher(root, () => {})
+  expect(openedWatchers).toHaveLength(2)
+  const error = console.error; console.error = () => {}
+  try { expect(() => openedWatchers[0]!.emit('error', new Error('fixture watcher failure'))).not.toThrow() }
+  finally { console.error = error; stopPersonalSharedSkillsWatcher() }
 })
 
 test('watcher notifies on changes and stop prevents future callbacks', async () => {
