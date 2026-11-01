@@ -3022,7 +3022,7 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
         />
       ),
     },
-    { key: 'session-usage', node: <SessionUsageBadge sessionId={sessionId} /> },
+    { key: 'session-usage', node: <SessionUsageBadge sessionId={sessionId} />, hideWhenOverflow: true },
   ], [
     planQuotaChannelId,
     planQuotaChannelUpdatedAt,
