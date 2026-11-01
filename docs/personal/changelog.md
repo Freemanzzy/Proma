@@ -2094,3 +2094,13 @@
 - 已安装正式版 `app.asar` 核对：启动调用 `seedDefaultSkills` 与 `upgradeDefaultSkillsInWorkspaces`，新建工作区调用 `copyDefaultSkills`，与仓库源码一致。
 - `backlog.md`「个人自建 Skill 预装」：两个 Skill 不再写死版本号（以模板为准，避免每次升版本后过时），并补充同步后运行检查脚本。
 - **同步文档**：`docs/personal/backlog.md`、本记录。
+
+## 2026-11-02: 本机所有工作区改为共用一套 Skill
+
+- **决定（用户 2026-11-02）**：取消按工作区分区的 Skill 副本。起因：分发 `codex-code-review` 需要维护模板 + 5 个工作区共 6 份副本；合并分析发现 17 个 Skill 已“版本相同、内容不同”，而启动同步（只比较版本）发现不了。
+- **做法**（本机操作，不入库）：合并为 `~/.proma/shared-skills/`（45 个）与 `~/.proma/shared-skills-inactive/`（2 个），以 default 为基准；各工作区的 `skills/`、`skills-inactive/` 改为相对符号链接，原目录移到 `~/.proma/skill-backups-20261102/`。
+- **依据的代码事实**：`createPromaSkillsOverride` 只保留 realpath 位于工作区 `skills/` 真实路径之内的 Skill，整个目录链接后根目录解析到共享目录，可正常加载；Pi 加载器跟随符号链接。`skills-inactive/` 必须一起共享，否则 `upgradeDefaultSkillsInWorkspaces` 会把在某工作区停用的模板 Skill 经其他工作区重新注入。备份 `zip -y`、`install-update.sh` 的 `cp -a`、`verify-backup.py` 的 `lstat` 均保留符号链接。
+- **验证**：Pi `loadSkills` + 同一 realpath 过滤模拟，5 个工作区各 45 个、诊断 0；模拟启动同步无注入、无覆盖。新 Skill `shared-skills` 提供检查/接入脚本，临时目录模拟新建工作区通过。
+- **影响 Claude Code**：安装与回滚流程不变；`~/.proma` 快照对比会看到上述目录结构变化（属预期）。
+- `backlog.md`「个人自建 Skill 预装」改写为共享结构说明，删除旧的同步要求与 `check-skill-sync.sh` 引用。
+- **同步文档**：`docs/personal/backlog.md`、本记录。
