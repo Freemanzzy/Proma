@@ -12,6 +12,7 @@
 | 开发实例验证（桌面对话、EgoBrowser、手机回归 17889 + 临时 8443 转发，见 `CLAUDE.md` §6） | ✅ | — |
 | 打包 `bash scripts/personal/package-personal.sh` | ✅ | — |
 | 小功能、文档、`PERSONAL.md` 记录、推送 | ✅ | — |
+| 合并或写安装申请前的 Codex 独立代码审查（§4.3） | ✅ | — |
 | 写安装申请（§3） | ✅ | — |
 | 安装 `install-update.sh`、安装后本机实测与安装版手机验收、写安装结果 | — | ✅ |
 | 应用打不开、白屏、数据异常、回滚与恢复（`fallback-runbook.md`） | — | ✅ |
@@ -41,6 +42,7 @@
 - 改动类型：应用代码 是/否；数据格式变化 是/否（CONFIG_VERSION 等）；运行时依赖变化 是/否
 - 打包日志：/tmp/…log；测试 pass/fail/error：…（基线见 PERSONAL.md）
 - 开发实例验证结果：桌面…；手机回归（android/iphone/attachments）…
+- Codex 独立审查（§4.3）：发现 N 条，各条处理结论…（详见 changelog）；或跳过原因…
 - 安装后需重点验证：…（如新增路由、IPC 通道、图标、定时任务）
 - 已知风险与回滚要点：…
 ```
@@ -80,9 +82,16 @@ Claude Code 接手安装时只做必要复核：包内 marker commit 等于 `per
   - 脚本从不删除文件。
 - 备份目录位于外置硬盘（具体路径不写入仓库，见 Proma 自动化“个人版源码备份”）。外置硬盘未挂载时只推 `archive`。
 
+## 4.3 独立代码审查（Proma 专用，用户 2026-11-01 决定）
+
+- **何时做**：Proma 改动 `apps/`、`packages/` 或 `scripts/personal/` 下的代码时，在开发实例验证之后、合并进 `personal` 或写安装申请之前做一次。纯文档改动可跳过。
+- **怎么做**：用 Proma 工作区 Skill `codex-code-review`（`~/.proma/agent-workspaces/default/skills/codex-code-review/`）；功能分支用 `--base personal`，并传入 `--rules docs/personal/review-rules.md`。审查在临时快照中只读进行，不切换、不写入本仓库，不影响单写者规则。
+- **处理**：Proma 逐条核实，结论（采纳/反驳/暂缓及理由）写入 `docs/personal/changelog.md`，暂缓项进 `backlog.md`；修复后针对性复审最多 2 轮。安装申请中写一行审查结论（§3 模板）。
+- **Claude Code 不使用该 Skill**：它的安装复核（§3）和自身审查方式不变。
+
 ## 5. 文档规则（SSOT）
 
-- 每类事实只有一个权威位置：当前基线、与上游差异、同步规则 → `PERSONAL.md`；完整变更历史 → `docs/personal/changelog.md`；共同维护规则 → 本文件；Claude Code 的职责细节 → `CLAUDE.md`；操作步骤 → `docs/personal/*-runbook.md`；手机访问 → `docs/personal/web-remote.md`；待合入分支、后续待办、真实负载测试触发条件与 dev 数据约定 → `docs/personal/backlog.md`。其他文档引用，不复制。
+- 每类事实只有一个权威位置：当前基线、与上游差异、同步规则 → `PERSONAL.md`；完整变更历史 → `docs/personal/changelog.md`；共同维护规则 → 本文件；Claude Code 的职责细节 → `CLAUDE.md`；操作步骤 → `docs/personal/*-runbook.md`；手机访问 → `docs/personal/web-remote.md`；待合入分支、后续待办、真实负载测试触发条件与 dev 数据约定 → `docs/personal/backlog.md`；代码审查关注点 → `docs/personal/review-rules.md`（审查流程本身在 Proma Skill `codex-code-review`，不在仓库内）。其他文档引用，不复制。
 - 变更记录只追加（`## YYYY-MM-DD: ...`），不改写历史；旧记录有误用新记录更正并写明更正了什么。
 - 改动影响权威内容时，同一提交内同步更新对应文档，并在 `docs/personal/changelog.md` 追加记录，写明改了哪些文档。
 - 验证、审查、故障处理结果直接写入变更记录，无需询问：方法、实测证据、通过项、缺陷项、待办。

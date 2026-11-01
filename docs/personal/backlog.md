@@ -84,6 +84,7 @@
 13. **成本与缓存看板**：只读脚本 `python3 scripts/personal/usage-cost-report.py`，默认统计最近 7 天；可用 `--days 30`、`--format json`、`--top 20` 调整窗口、格式与 Top N。按天、定时任务、交互/root 会话、渠道/模型汇总 token、缓存与相对成本指数。只读、手动运行；是否加入周检由用户决定。
 14. **`file:resolve-path` 目录路径的 WARN**（install-result-2026-11-01 遗留，未开工）：输入框引用文件夹（如 `proma-personal`）时，上游 `ipc.ts` 的 `file:resolve-path` 把目录当文件注册失败，降级返回 null 并记 `[WARN]`，功能正常。该行把解析后的完整路径写进 main.log。可选做法：目录时提前返回 null、不记日志，或只记目录名；属上游文件改动，随下一批小修一并处理。
 15. **`DEP0169 url.parse()` 弃用警告**（install-result-2026-11-01 遗留，仅观察）：main.log 出现 1 次 Node 弃用警告，来源未定位（可能在依赖中）。同步上游或升级依赖时留意，不单独处理。
+16. **会话用量 IPC 汇总子会话时未逐个校验远程授权**（2026-11-01 Codex 独立审查试跑发现，未开工）：`personal-session-usage.ts` 按 `parentSessionId/rootSessionId` 汇总子会话用量；Web Remote 对 `agent:get-personal-session-usage` 只校验入参的父会话（`web-remote-ipc.ts` 的 session 作用域）。子会话可以单独迁移到另一工作区（上游 `moveSessionToWorkspace` 保留父子关系，迁移 IPC 不拦截子会话），此后限定了工作区（`allowedWorkspaceIds`）的远程客户端仍能看到该子会话的 token/缓存聚合数字（不含消息正文）。三个前提已按代码核实，未在真机复现。Codex 标 P1；中控核实后定为 P2：只泄露聚合数字，且需同时满足“远程限定工作区”与“单独迁移过子会话”。修复方向：把远程授权范围传入聚合过程逐个过滤子会话（优先，改动在个人版模块内），并补跨工作区子会话的安全测试。随下一批小修处理。证据见 changelog 2026-11-01「引入 Proma 专用的 Codex 独立代码审查」。
 
 ## 测试与开发数据约定
 
