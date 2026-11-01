@@ -85,6 +85,11 @@
 14. **`file:resolve-path` 目录路径的 WARN**（install-result-2026-11-01 遗留，未开工）：输入框引用文件夹（如 `proma-personal`）时，上游 `ipc.ts` 的 `file:resolve-path` 把目录当文件注册失败，降级返回 null 并记 `[WARN]`，功能正常。该行把解析后的完整路径写进 main.log。可选做法：目录时提前返回 null、不记日志，或只记目录名；属上游文件改动，随下一批小修一并处理。
 15. **`DEP0169 url.parse()` 弃用警告**（install-result-2026-11-01 遗留，仅观察）：main.log 出现 1 次 Node 弃用警告，来源未定位（可能在依赖中）。同步上游或升级依赖时留意，不单独处理。
 16. **会话用量 IPC 汇总子会话时未逐个校验远程授权**（2026-11-01 Codex 独立审查试跑发现，未开工）：`personal-session-usage.ts` 按 `parentSessionId/rootSessionId` 汇总子会话用量；Web Remote 对 `agent:get-personal-session-usage` 只校验入参的父会话（`web-remote-ipc.ts` 的 session 作用域）。子会话可以单独迁移到另一工作区（上游 `moveSessionToWorkspace` 保留父子关系，迁移 IPC 不拦截子会话），此后限定了工作区（`allowedWorkspaceIds`）的远程客户端仍能看到该子会话的 token/缓存聚合数字（不含消息正文）。三个前提已按代码核实，未在真机复现。Codex 标 P1；中控核实后定为 P2：只泄露聚合数字，且需同时满足“远程限定工作区”与“单独迁移过子会话”。修复方向：把远程授权范围传入聚合过程逐个过滤子会话（优先，改动在个人版模块内），并补跨工作区子会话的安全测试。随下一批小修处理。证据见 changelog 2026-11-01「引入 Proma 专用的 Codex 独立代码审查」。
+17. **新建工作区自动接入共享 Skill 目录**（用户 2026-11-02 选定方案 C：改个人版代码；先登记，择机实施）：
+    - **背景**：2026-11-02 起本机所有工作区共用一套 Skill（各工作区 `skills/`、`skills-inactive/` 是指向 `~/.proma/shared-skills*` 的相对符号链接，见「个人自建 Skill 预装」）。但 `createAgentWorkspace`（`agent-workspace-manager.ts`）仍调用 `copyDefaultSkills` 建真实目录并复制模板，新工作区不会自动接入，目前需手动运行 Skill `shared-skills` 的 `scripts/check-shared-skills.sh --fix`，且没有提醒。
+    - **改法方向**：新建工作区时，若 `~/.proma/shared-skills/` 与 `shared-skills-inactive/` 存在，则直接创建两个相对链接，不复制模板；不存在时保持原行为（开源上游兼容、`~/.proma` 数据格式不变）。逻辑放在个人版独立模块，上游文件只留一处调用，降低同步冲突。`upgradeDefaultSkillsInWorkspaces`、`createPromaSkillsOverride` 的 realpath 过滤、Skills 页面的启用/停用/删除需确认在链接下行为正确（现状已人工验证可用）。
+    - **验收**：单测覆盖“共享目录存在→建链接”“不存在→复制模板”“目标已存在”；dev 实例新建工作区后 Skill 列表与 Skills 页面正常；按 maintenance §4.3 做 Codex 独立审查；随下一批打包，由 Claude Code 安装。
+    - **实施后**：`check-shared-skills.sh --fix` 保留为修复工具；更新 `shared-skills` Skill 的「新建工作区后」一节。
 
 ## 测试与开发数据约定
 
