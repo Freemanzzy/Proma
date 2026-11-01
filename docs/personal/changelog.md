@@ -2087,3 +2087,10 @@
 - 按代码核对：新建工作区由 `copyDefaultSkills` 复制模板全部目录；启动时 `upgradeDefaultSkillsInWorkspaces` 对模板中版本更高的 Skill 覆盖升级、对缺失的注入。两个 slug 都不是应用内置，也不在 `RETIRED_DEFAULT_SKILL_SLUGS`。
 - `backlog.md`「个人自建 Skill 预装」更新清单，并写明修改个人 Skill 必须递增版本、同步模板与各工作区。
 - **同步文档**：`docs/personal/backlog.md`、本记录。
+
+## 2026-11-02: 预装个人 Skill 增加一致性检查
+
+- 启动时的模板同步只做“版本更高才覆盖、缺失才注入”，直接改某个工作区副本而不升版本、或升版本却未同步模板时，差异不会被纠正也没有提示。`codex-code-review` 1.0.2 新增只读脚本 `scripts/check-skill-sync.sh`，逐文件比较模板与所有已注册工作区；当前 2 个 Skill × 5 个工作区全部一致（本机操作，不入库；详见 Skill 自身 `CHANGELOG.md`）。
+- 已安装正式版 `app.asar` 核对：启动调用 `seedDefaultSkills` 与 `upgradeDefaultSkillsInWorkspaces`，新建工作区调用 `copyDefaultSkills`，与仓库源码一致。
+- `backlog.md`「个人自建 Skill 预装」：两个 Skill 不再写死版本号（以模板为准，避免每次升版本后过时），并补充同步后运行检查脚本。
+- **同步文档**：`docs/personal/backlog.md`、本记录。
