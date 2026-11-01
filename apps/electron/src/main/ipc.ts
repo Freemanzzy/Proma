@@ -4265,6 +4265,8 @@ export function registerIpcHandlers(): void {
       const options = normalizeFileAccessOptions(access)
       const result = await resolveAuthorizedPreviewPath(filePath, options)
       if (!result) return null
+      // registerPromaFilePath 对目录路径会抛「不是文件」。渲染端（如悬浮预览解析 markdown
+      // 链接）可能传入目录路径，此处优雅降级为 null，而不是让异常冒泡成未捕获的 handler 错误。
       try {
         if (statSync(result).isDirectory()) return null
       } catch { return null }
