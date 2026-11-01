@@ -2110,3 +2110,13 @@
 - 共享 Skill 结构上线后，新建工作区仍会建独立 `skills/` 目录，需手动运行 `check-shared-skills.sh --fix`。比较了 launchd 监听索引、Proma 定时任务、改个人版代码三种自动化方案后，用户选择改代码（方案 C），但不立即实施，登记为 backlog #17，含改法方向与验收标准。
 - 在此之前仍按 Skill `shared-skills` 手动接入。
 - **同步文档**：`docs/personal/backlog.md`、本记录。
+
+## 2026-11-02: Skill 全局统一（共享目录路径重定向）
+
+- **设计**：`shared-skills/` 与 `shared-skills-inactive/` 同时为目录时启用共享模式；两个工作区 Skill 路径直接重定向，新建工作区跳过模板复制。缺少任一目录时保持原逻辑；单边目录仅警告一次且不记录完整路径。共享目录变更通过递归 watcher 通知 `CAPABILITIES_CHANGED`。
+- **个人版实现**：新增 `apps/electron/src/main/lib/personal-shared-skills.ts`（解析、模式判定、监听及 error 降级）；`personal-shared-skills.test.ts` 覆盖双目录判定、链接、单边目录警告、监听变更和 stop；`personal-session-usage.test.ts` 覆盖子会话逐个过滤、全部拒绝时 `children: null`，默认桌面汇总仍包含子会话。
+- **上游改动清单**：`config-paths.ts` 的两个路径函数各加 2 行，共享时返回路径且不创建工作区目录；`agent-workspace-manager.ts` 的 `copyDefaultSkills` 加 1 行早返回；`workspace-watcher.ts` start/stop 各接入共享目录 watcher；`ipc.ts` 的 `file:resolve-path` 增加目录检测，目录直接返回 `null`，不输出带完整路径的 WARN。Web Remote 在 `web-remote-ipc.ts` 特判用量通道，校验 session ID 并逐个授权子会话；桌面 IPC 未改。未改 `upgradeDefaultSkillsInWorkspaces`、导入逻辑或 renderer。
+- **#14 / #16**：#14 已改为目录提前返回 `null`；#16 的 Web Remote 子会话聚合逐个按工作区授权过滤。两项均待父会话复核。
+- **验证**：全仓 `bun run typecheck` 通过；Python `scripts/personal/test-personal-scripts.py` 通过；Electron `build:main`、`build:renderer`、`build:web-preload` 通过；`git diff --check` 待提交前复验。定向测试（4 个新增用例）通过。全量 `bun test` 为 857 pass，因 worktree `node_modules/electron/path.txt` 缺失，`planning-manager.test.ts` 无法启动 Electron 子进程（1 error / 1 fail）；未执行依赖安装或网络下载。变异检验完成 2/5：共享模式双目录判断、子会话授权过滤被移除时对应测试均变红；路径早返回、模板复制早返回、#14 目录判断尚未完成变异验证。
+- **dev fixture**：按要求以 `.proma-dev-fixture` 尝试启动，失败于 Electron binary 缺失且网络 `fetch failed`。随后 `mobile-preview.sh stop` 报 `tree[@]: unbound variable`；独立核对未发现 17889/5173 监听或记录 PID/PGID 进程。未能完成 UI、harness、截图或共享模式手工验证。`make-fixture-data.py` 成功重置 fixture，旧目录保留为带时间戳的 `.prev` 备份。截图：无。
+- **限制与偏差**：测试未覆盖工作区创建/删除、启停移动、`file:resolve-path` 实际 IPC；环境缺失导致 dev 验证不可用。试验配置路径测试时调用路径函数创建了本机 `~/.proma-dev/agent-workspaces/created-workspace`（未触碰正式 `~/.proma`），该临时路径未删除以避免擅自清理用户数据。
