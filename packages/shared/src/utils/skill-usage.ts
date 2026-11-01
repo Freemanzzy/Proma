@@ -58,9 +58,20 @@ function normalizeActivation(value: unknown): SkillActivation | null {
   }
 }
 
-/** Return the Skill directory slug when a path points at skills/<slug>/SKILL.md. */
+function getSkillEntryPathParts(path: string): { root: string; slug: string } | null {
+  const match = path.replace(/\\/g, '/').match(/^(.*\/)?((?:shared-)?skills)\/([^/]+)\/SKILL\.md$/i)
+  if (!match) return null
+  return { root: `${match[1] ?? ''}${match[2]}`, slug: match[3]! }
+}
+
+/** Return the Skill directory slug for an active workspace or shared entry path. */
 export function getSkillSlugFromEntryPath(path: string): string | null {
-  return path.replace(/\\/g, '/').match(/(?:^|\/)skills\/([^/]+)\/SKILL\.md$/i)?.[1] ?? null
+  return getSkillEntryPathParts(path)?.slug ?? null
+}
+
+/** Return the active Skills root for a legacy Skill entry path, preserving its directory root. */
+export function getSkillRootFromEntryPath(path: string): string | null {
+  return getSkillEntryPathParts(path)?.root ?? null
 }
 
 /** Build activation metadata for a successfully loaded Skill entry file. */

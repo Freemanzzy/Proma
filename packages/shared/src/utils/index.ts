@@ -91,6 +91,7 @@ export {
 } from './agent-system-message'
 export {
   getSkillSlugFromEntryPath,
+  getSkillRootFromEntryPath,
   createSkillActivationFromPath,
   mergeSkillActivations,
   collectSuccessfulSkillReadActivations,

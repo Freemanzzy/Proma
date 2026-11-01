@@ -5,6 +5,7 @@
  * 用于工具活动行的收起态展示和 Loading 态展示。
  */
 
+import { getSkillSlugFromEntryPath } from '@proma/shared'
 import { computeDiffStats } from './tool-utils'
 
 const INTERNAL_TOOL_INPUT_PREFIX = '_'
@@ -80,18 +81,6 @@ function filename(path: string): string {
   return path.split(/[/\\]/).pop() || path
 }
 
-/**
- * 从 Proma Skill 入口文件路径中提取 Skill 名称。
- *
- * Pi Agent 以普通 Read 工具加载 Skill，因此需在展示层识别
- * `<workspace>/skills/<skill-name>/SKILL.md`，避免标题只显示泛化的 SKILL.md。
- */
-function skillNameFromEntryPath(path: string): string | null {
-  const normalizedPath = path.replace(/\\/g, '/')
-  const match = normalizedPath.match(/(?:^|\/)skills\/([^/]+)\/SKILL\.md$/i)
-  return match?.[1] ?? null
-}
-
 /** 截断文本 */
 function truncate(text: string, max: number): string {
   return text.length > max ? text.slice(0, max) + '…' : text
@@ -112,7 +101,7 @@ export function getToolPhrase(toolName: string, input: Record<string, unknown>):
     case 'Read': {
       const fp = input.file_path ?? input.filePath
       if (typeof fp === 'string') {
-        const skillName = skillNameFromEntryPath(fp)
+        const skillName = getSkillSlugFromEntryPath(fp)
         if (skillName) return phrase(`读取技能 ${skillName}`)
 
         const name = filename(fp)
