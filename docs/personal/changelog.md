@@ -2030,3 +2030,18 @@
 - **完整验证**：全量 `bun test` 846 pass / 0 fail（136 files），全仓 typecheck、`test-personal-scripts.py`、`build:main` / `build:renderer` / `build:web-preload`、`git diff --check` 通过。fixture dev：`desktop:usage-badge` PASS（两轮 DOM `缓存 61% · 16.2k` → `缓存 62% · 32.3k`，与按脚本口径计算一致），`iphone:usage-badge` PASS（不渲染），iphone/android `smoke` PASS；`mobile-preview.sh stop` 退出码 0，17889/5173 无监听，Serve 只剩 443。
 - **观察**：执行工截图中（1280×900，左侧栏与右侧文件面板都展开），输入框较窄，标签被工具栏收进“更多工具（…）”菜单，不在压缩按钮旁直接显示；这是现有工具栏按宽度溢出的行为。待用户在常用窗口宽度下体验后决定是否需要让它优先保持在外。
 - **同步文档**：`docs/personal/backlog.md` 待合入分支表状态，本记录。
+
+## 2026-11-01: 用户体验反馈：压缩按钮与用量标签的显示
+
+- **用户反馈**（dev 桌面窗口）：打开旧会话时没有手动压缩按钮；新会话里有压缩按钮，但没有用量标签。
+- **原因**：
+  1. 压缩按钮（上游 `ContextUsageBadge`）只读本次启动后的实时用量，不从历史恢复；本次启动后没发过消息的会话一律不显示。这是上游原有行为，与用量标签无关。
+  2. 用量标签原先在会话没有请求时不渲染。
+  3. 另外，窗口偏窄时，用量标签占位会让工具栏为“…”按钮腾位置，把压缩按钮也收进菜单。
+- **修正**：
+  - `InputToolbarOverflow`：工具栏项新增 `hideWhenOverflow`；放不下时用量标签直接隐藏，不进“…”菜单、不为它预留“…”按钮，其余按钮的折叠宽度与未添加标签时一致。可见数量计算抽成纯函数 `computeVisibleToolbarCount`，新增 5 个单测（含逐个宽度比对“加标签前后压缩按钮是否同时折叠”）。
+  - `personal-session-usage.ts`：汇总新增 `context`，即最近一次请求的上下文占用（input + cacheRead + cacheWrite）、按模型推断的窗口大小，以及最近一次请求之后是否出现过 `compact_boundary`。压缩边界行只按前缀识别，不缓冲、不解析其 summary。
+  - `ContextUsageBadge`：本次启动后尚无实时用量时，用该 `context` 兜底显示压缩按钮，浮层注明“显示会话记录中的上次数值”；上次请求之后已压缩时仍显示按钮，浮层注明“下一次请求后更新”，不显示过时的 token 数。有实时用量后照旧以实时数据为准。
+  - `SessionUsageBadge`：会话尚无请求时显示占位 `缓存 — · 0`。
+- **验证**：主进程单测新增 2 项（上下文与压缩标记、无请求时为空），组件单测新增占位文案 1 项；全量 `bun test` 854 pass / 0 fail，全仓 typecheck 通过；337 MB 会话首次读取约 119 ms、RSS 增加约 94 MB，与改动前一致。dev fixture `desktop:usage-badge` PASS。旧会话上压缩按钮的显示待用户在 dev 窗口目视确认。
+- **改动面**：本次修改了两个上游文件 `InputToolbarOverflow.tsx`、`ContextUsageBadge.tsx`，同步官方版本时需留意。
