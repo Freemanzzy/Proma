@@ -9,7 +9,8 @@ import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { getUserProfile } from './user-profile-service'
 import { getAgentWorkspaceBySlug, getProjectFilesPath, getWorkspaceMcpConfig, type WorkspaceMemoryGuidance } from './agent-workspace-manager'
-import { getConfigDirName } from './config-paths'
+import { getConfigDir, getConfigDirName } from './config-paths'
+import { resolvePersonalSharedSkillsDir } from './personal-shared-skills'
 import { buildGitAttributionPromptSection, isGitAttributionEnabled } from './agent-git-attribution'
 import { getSettings } from './settings-service'
 import { hasRootProjectAgentsInstruction, type ProjectInstructionManifest } from './project-instruction-resolver'
@@ -72,7 +73,7 @@ function buildWorkspacePaths(
     autoMemoryDir: join(workspaceRoot, 'memory'),
     autoMemoryIndex: join(workspaceRoot, 'memory', 'MEMORY.md'),
     mcpConfig: join(workspaceRoot, 'mcp.json'),
-    skillsDir: join(workspaceRoot, 'skills'),
+    skillsDir: resolvePersonalSharedSkillsDir(getConfigDir(), 'active') ?? join(workspaceRoot, 'skills'),
     workspaceAgentsExists: isRegularFile(join(workspaceRoot, 'AGENTS.md')),
     projectAgentsExists,
   }
