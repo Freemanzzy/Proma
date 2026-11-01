@@ -2104,3 +2104,9 @@
 - **影响 Claude Code**：安装与回滚流程不变；`~/.proma` 快照对比会看到上述目录结构变化（属预期）。
 - `backlog.md`「个人自建 Skill 预装」改写为共享结构说明，删除旧的同步要求与 `check-skill-sync.sh` 引用。
 - **同步文档**：`docs/personal/backlog.md`、本记录。
+
+## 2026-11-02: 登记“新建工作区自动接入共享 Skill”待办
+
+- 共享 Skill 结构上线后，新建工作区仍会建独立 `skills/` 目录，需手动运行 `check-shared-skills.sh --fix`。比较了 launchd 监听索引、Proma 定时任务、改个人版代码三种自动化方案后，用户选择改代码（方案 C），但不立即实施，登记为 backlog #17，含改法方向与验收标准。
+- 在此之前仍按 Skill `shared-skills` 手动接入。
+- **同步文档**：`docs/personal/backlog.md`、本记录。
