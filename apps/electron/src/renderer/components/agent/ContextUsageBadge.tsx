@@ -212,6 +212,21 @@ export function ContextUsageBadge({
     }
   }
 
+  // 个人版：本次启动后尚无实时用量时，用会话记录里最近一次请求的上下文占用兜底，保证打开旧会话也能手动压缩
+  const [persisted, setPersisted] = React.useState<{ tokens: number; contextWindow: number | null; compacted: boolean } | null>(null)
+  React.useEffect(() => {
+    setPersisted(null)
+    const api = (window as Window & { electronAPI?: { getAgentSessionPersonalUsage?: (id: string) => Promise<{ context: { tokens: number; contextWindow: number | null; compactedSinceLastRequest: boolean } | null }> } }).electronAPI
+    if (!sessionId || !api?.getAgentSessionPersonalUsage) return
+    let active = true
+    api.getAgentSessionPersonalUsage(sessionId)
+      .then((summary) => {
+        if (active && summary?.context) setPersisted({ tokens: summary.context.tokens, contextWindow: summary.context.contextWindow, compacted: summary.context.compactedSinceLastRequest })
+      })
+      .catch(() => {})
+    return () => { active = false }
+  }, [sessionId])
+
   const [open, setOpen] = React.useState(false)
   const closeTimerRef = React.useRef<number | null>(null)
   const popoverReceivedFocusRef = React.useRef(false)
@@ -283,26 +298,29 @@ export function ContextUsageBadge({
   // 使用稳定值：优先当前数据，回退到上次有效数据
   const stable = stableRef.current
   const hasCurrent = displayInputTokens != null && displayInputTokens > 0
-  const displayTokens = hasCurrent ? displayInputTokens : stable?.inputTokens
-  const displayWindow = hasCurrent ? displayContextWindow : stable?.contextWindow
+  const usePersisted = !hasCurrent && !stable && persisted != null
+  const persistedStale = usePersisted && persisted.compacted
+  const displayTokens = hasCurrent ? displayInputTokens : stable?.inputTokens ?? (usePersisted && !persisted.compacted ? persisted.tokens : undefined)
+  const displayWindow = hasCurrent ? displayContextWindow : stable?.contextWindow ?? (usePersisted ? persisted.contextWindow ?? undefined : undefined)
   const displayOutput = hasCurrent ? displayOutputTokens : stable?.outputTokens
   const displayCacheRead = hasCurrent ? displayCacheReadTokens : stable?.cacheReadTokens
   const displayCacheCreation = hasCurrent ? displayCacheCreationTokens : stable?.cacheCreationTokens
 
-  // 从未有过 usage 数据 → 不显示
-  if (!displayTokens || displayTokens <= 0) return null
+  // 从未有过 usage 数据 → 不显示（个人版：最近请求后已压缩时仍显示按钮，便于再次手动压缩）
+  if ((!displayTokens || displayTokens <= 0) && !persistedStale) return null
 
   // 警告阈值：Pi 在自动压缩阈值的 80% 时预警。
   const compactThreshold = displayWindow
     ? calculatePiAutoCompactionThresholdTokens(displayWindow)
     : undefined
+  const tokensForRatio = displayTokens ?? 0
   const isWarning = compactThreshold
-    ? displayTokens / compactThreshold >= WARNING_RATIO
+    ? tokensForRatio / compactThreshold >= WARNING_RATIO
     : false
 
-  const ratio = displayWindow ? displayTokens / displayWindow : 0
+  const ratio = displayWindow ? tokensForRatio / displayWindow : 0
 
-  const percent = displayWindow
+  const percent = displayWindow && displayTokens
     ? Math.round((displayTokens / displayWindow) * 100)
     : undefined
 
@@ -349,10 +367,15 @@ export function ContextUsageBadge({
         }}
       >
         <div className="flex flex-col gap-1.5">
-          {displayIsEstimated ? (
+          {usePersisted ? (
+            <div className="text-[11px] text-foreground/50">
+              {persistedStale ? '上次请求后已压缩，下一次请求后更新' : '本次启动后尚未请求，显示会话记录中的上次数值'}
+            </div>
+          ) : null}
+          {persistedStale ? null : displayIsEstimated ? (
             <DetailRow
               label="压缩后"
-              value={`预估 ${formatTokens(displayTokens)} tokens${percent != null ? `（${percent}%）` : ''}`}
+              value={`预估 ${formatTokens(displayTokens ?? 0)} tokens${percent != null ? `（${percent}%）` : ''}`}
               emphasized
             />
           ) : (
@@ -365,7 +388,7 @@ export function ContextUsageBadge({
                 <>
                   <DetailRow
                     label="上下文"
-                    value={`${formatTokens(displayTokens)} / ${formatTokens(displayWindow)}`}
+                    value={`${formatTokens(displayTokens ?? 0)} / ${formatTokens(displayWindow)}`}
                     emphasized
                   />
                   {percent != null && (

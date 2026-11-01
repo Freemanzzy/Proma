@@ -3,13 +3,13 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { badgePresentation, formatUsageNumber, SessionUsageBadge, shouldHideSessionUsageBadge } from './SessionUsageBadge'
 import type { PersonalSessionUsageSummary } from '@proma/shared'
 
-const base: PersonalSessionUsageSummary = { session: { requests: 2, input: 10, output: 2, cacheRead: 96, cacheWrite: 0, largeCacheRebuilds: 0, relativeCostIndex: 34_300_000, cacheHitRate: 0.96 }, lastRequest: { cacheWrite: 0, cacheHitRate: 0.96, largeCacheRebuild: false }, children: null }
+const base: PersonalSessionUsageSummary = { session: { requests: 2, input: 10, output: 2, cacheRead: 96, cacheWrite: 0, largeCacheRebuilds: 0, relativeCostIndex: 34_300_000, cacheHitRate: 0.96 }, lastRequest: { cacheWrite: 0, cacheHitRate: 0.96, largeCacheRebuild: false }, children: null, context: null }
 describe('SessionUsageBadge formatting and responsive policy', () => {
   test('formats compact k/M values and percentages', () => {
     expect(formatUsageNumber(999)).toBe('999'); expect(formatUsageNumber(1200)).toBe('1.2k'); expect(formatUsageNumber(34_300_000)).toBe('34.3M')
     expect(badgePresentation(base)).toEqual({ label: '缓存 96% · 34.3M', warning: false })
   })
-  test('renders nothing before this session has usage', () => {
+  test('renders nothing before the summary has loaded', () => {
     const previous = globalThis.window
     const previousNavigator = globalThis.navigator
     Object.defineProperty(globalThis, 'window', { configurable: true, value: { __PROMA_WEB_REMOTE__: false, innerWidth: 1200, matchMedia: () => ({ matches: false }) } })
@@ -19,6 +19,10 @@ describe('SessionUsageBadge formatting and responsive policy', () => {
       Object.defineProperty(globalThis, 'window', { configurable: true, value: previous })
       Object.defineProperty(globalThis, 'navigator', { configurable: true, value: previousNavigator })
     }
+  })
+  test('shows a placeholder label for a session without requests yet', () => {
+    const empty = { ...base, session: { ...base.session, requests: 0, input: 0, output: 0, cacheRead: 0, relativeCostIndex: 0, cacheHitRate: 0 }, lastRequest: null }
+    expect(badgePresentation(empty)).toEqual({ label: '缓存 — · 0', warning: false })
   })
   test('marks the label amber only for a latest large rebuild', () => {
     const warning = { ...base, lastRequest: { cacheWrite: 300_000, cacheHitRate: 0.5, largeCacheRebuild: true } }

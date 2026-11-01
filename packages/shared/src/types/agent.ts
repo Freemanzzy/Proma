@@ -140,6 +140,8 @@ export interface PersonalSessionUsageSummary {
   session: PersonalSessionUsageTotals
   lastRequest: { cacheWrite: number; cacheHitRate: number; largeCacheRebuild: boolean } | null
   children: PersonalSessionUsageTotals | null
+  /** 最近一次请求的上下文占用；之后发生过压缩时 compactedSinceLastRequest=true */
+  context: { tokens: number; contextWindow: number | null; compactedSinceLastRequest: boolean } | null
 }
 
 export interface SDKSessionInfo {
