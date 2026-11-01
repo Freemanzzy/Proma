@@ -14,6 +14,8 @@ export function formatUsageNumber(value: number): string { return value >= 1_000
 export function shouldHideSessionUsageBadge(isWebRemote: boolean, touchPoints: number, coarsePointer: boolean, width: number): boolean { return isWebRemote && (touchPoints > 0 || coarsePointer || width < 768) }
 function hiddenOnTouch(): boolean { return shouldHideSessionUsageBadge(Boolean((window as Window & { __PROMA_WEB_REMOTE__?: boolean }).__PROMA_WEB_REMOTE__), navigator.maxTouchPoints, window.matchMedia?.('(pointer: coarse)').matches ?? false, window.innerWidth) }
 export function badgePresentation(summary: PersonalSessionUsageSummary): { label: string; warning: boolean } {
+  // 新会话尚无请求时也显示，便于确认位置；数值在首次请求完成后出现
+  if (summary.session.requests === 0) return { label: '缓存 — · 0', warning: false }
   return { label: `缓存 ${Math.round(summary.session.cacheHitRate * 100)}% · ${formatUsageNumber(summary.session.relativeCostIndex)}`, warning: Boolean(summary.lastRequest?.largeCacheRebuild) }
 }
 export function SessionUsageBadge({ sessionId }: { sessionId?: string }): React.ReactElement | null {
@@ -35,7 +37,7 @@ export function SessionUsageBadge({ sessionId }: { sessionId?: string }): React.
     clearTimeout(timer.current); timer.current = setTimeout(() => void refresh(), 250)
     return () => { active = false; clearTimeout(timer.current); clearTimeout(closeTimer.current) }
   }, [sessionId, usageSignature])
-  if (hidden || !summary || summary.session.requests === 0) return null
+  if (hidden || !summary) return null
   const s = summary.session
   const hit = Math.round(s.cacheHitRate * 100)
   const { warning, label } = badgePresentation(summary)

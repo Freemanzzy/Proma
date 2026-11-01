@@ -31,6 +31,11 @@ export interface ToolbarItem {
   key: string
   /** 行内渲染的节点（建议是 36px 圆角矩形按钮或带文本的紧凑按钮） */
   node: React.ReactNode
+  /**
+   * 个人版：空间不足时直接隐藏、不进入「更多」菜单，也不为它预留「更多」按钮。
+   * 仅用于排在最右侧的附加指示器，保证其他按钮的折叠行为与未添加它时一致。
+   */
+  hideWhenOverflow?: boolean
 }
 
 interface InputToolbarOverflowProps {
@@ -48,6 +53,40 @@ interface InputToolbarOverflowProps {
 
 const DEFAULT_GAP_PX = 6
 const DEFAULT_MORE_BUTTON_PX = 36
+
+/** 计算主行可见项数量（纯函数，便于测试） */
+export function computeVisibleToolbarCount(
+  items: Pick<ToolbarItem, 'key' | 'hideWhenOverflow'>[],
+  itemWidths: Record<string, number>,
+  containerWidth: number,
+  gapPx: number,
+  moreButtonPx: number,
+): number {
+  if (containerWidth === 0) return items.length
+  // 可隐藏项未测量（如返回 null 时宽度为 0）按 0 处理，不阻止其余项的折叠计算
+  if (!items.every((it) => it.hideWhenOverflow || itemWidths[it.key] !== undefined)) return items.length
+
+  let total = 0
+  for (let i = 0; i < items.length; i++) {
+    const w = itemWidths[items[i]!.key] ?? 0
+    const next = total + w + (i > 0 ? gapPx : 0)
+    if (next > containerWidth) {
+      // 放不下的只剩可隐藏项：直接隐藏，不出现「更多」按钮
+      if (items.slice(i).every((it) => it.hideWhenOverflow)) return i
+      const reserved = moreButtonPx + gapPx
+      let fit = i
+      let acc = total
+      while (fit > 0 && acc + reserved > containerWidth) {
+        fit -= 1
+        const fitW = itemWidths[items[fit]!.key] ?? 0
+        acc -= fitW + (fit > 0 ? gapPx : 0)
+      }
+      return Math.max(0, fit)
+    }
+    total = next
+  }
+  return items.length
+}
 
 export function InputToolbarOverflow({
   items,
@@ -126,32 +165,13 @@ export function InputToolbarOverflow({
    * 再为「更多」按钮预留空间倒推出最终能放下的 item 数。
    * 缺失测量数据时返回 items.length，让所有 item 先显示再测量。
    */
-  const visibleCount = React.useMemo(() => {
-    if (containerWidth === 0) return items.length
-    if (!items.every((it) => itemWidths[it.key] !== undefined)) return items.length
-
-    let total = 0
-    for (let i = 0; i < items.length; i++) {
-      const w = itemWidths[items[i]!.key]!
-      const next = total + w + (i > 0 ? gapPx : 0)
-      if (next > containerWidth) {
-        const reserved = moreButtonPx + gapPx
-        let fit = i
-        let acc = total
-        while (fit > 0 && acc + reserved > containerWidth) {
-          fit -= 1
-          const fitW = itemWidths[items[fit]!.key]!
-          acc -= fitW + (fit > 0 ? gapPx : 0)
-        }
-        return Math.max(0, fit)
-      }
-      total = next
-    }
-    return items.length
-  }, [containerWidth, itemWidths, items, gapPx, moreButtonPx])
+  const visibleCount = React.useMemo(
+    () => computeVisibleToolbarCount(items, itemWidths, containerWidth, gapPx, moreButtonPx),
+    [containerWidth, itemWidths, items, gapPx, moreButtonPx],
+  )
 
   const visibleItems = items.slice(0, visibleCount)
-  const overflowItems = items.slice(visibleCount)
+  const overflowItems = items.slice(visibleCount).filter((it) => !it.hideWhenOverflow)
   const hasOverflow = overflowItems.length > 0
 
   const setItemRef = (key: string) => (el: HTMLDivElement | null): void => {

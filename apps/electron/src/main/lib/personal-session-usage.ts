@@ -6,6 +6,7 @@
  * 开头的行，其余行（含 base64 图片等超大 user/tool 行）逐块跳过，内存占用与文件大小无关。
  */
 import { open, stat } from 'node:fs/promises'
+import { inferContextWindow } from '@proma/shared'
 import { getAgentSessionMessagesPath, getAgentSessionsIndexPath } from './config-paths'
 
 export interface SessionUsageTotals {
@@ -16,11 +17,18 @@ export interface SessionUsageSummary {
   session: SessionUsageTotals
   lastRequest: { cacheWrite: number; cacheHitRate: number; largeCacheRebuild: boolean } | null
   children: SessionUsageTotals | null
+  /**
+   * 最近一次请求的上下文占用（input + cacheRead + cacheWrite），用于启动后尚无实时用量时
+   * 让压缩按钮仍可显示。最近一次请求之后发生过压缩时 compactedSinceLastRequest=true，tokens 不再可信。
+   */
+  context: { tokens: number; contextWindow: number | null; compactedSinceLastRequest: boolean } | null
 }
-interface RequestRecord { input: number; output: number; cacheRead: number; cacheWrite: number }
+interface RequestRecord { input: number; output: number; cacheRead: number; cacheWrite: number; model?: string }
 interface FileState {
   offset: number; identity: string; size: number; mtimeMs: number
   records: RequestRecord[]; seen: Set<string>
+  /** 最近一条带 usage 的 assistant 之后出现过 compact_boundary */
+  compactedAfterLast: boolean
   /** 当前未结束行：null 表示正在跳过非 assistant 行 */
   pending: Buffer[] | null; pendingBytes: number; atLineStart: boolean
 }
@@ -30,6 +38,9 @@ const MAX_CACHED_FILES = 64
 /** assistant 行实测最大约 48 KB；超过此上限的行视为异常并丢弃，避免无界缓冲 */
 const MAX_ASSISTANT_LINE_BYTES = 8 * 1024 * 1024
 const ASSISTANT_PREFIX = Buffer.from('{"type":"assistant"')
+/** 压缩边界行只需识别前缀，不解析（其 summary 可能很长） */
+const COMPACT_PREFIX = Buffer.from('{"type":"system","subtype":"compact_boundary"')
+const DECIDE_BYTES = Math.max(ASSISTANT_PREFIX.length, COMPACT_PREFIX.length)
 const NEWLINE = 0x0a
 let chunkBytes = 4 * 1024 * 1024
 /** 测试观测：缓冲过的最大未结束行字节数 */
@@ -55,7 +66,7 @@ function usageValues(usage: Record<string, unknown>): RequestRecord {
 }
 
 function resetState(identity: string): FileState {
-  return { offset: 0, identity, size: 0, mtimeMs: 0, records: [], seen: new Set(), pending: [], pendingBytes: 0, atLineStart: true }
+  return { offset: 0, identity, size: 0, mtimeMs: 0, records: [], seen: new Set(), compactedAfterLast: false, pending: [], pendingBytes: 0, atLineStart: true }
 }
 
 function acceptLine(state: FileState, line: Buffer): void {
@@ -70,7 +81,22 @@ function acceptLine(state: FileState, line: Buffer): void {
     if (state.seen.has(key)) return
     state.seen.add(key)
   }
-  state.records.push(v)
+  const model = typeof row._channelModelId === 'string' ? row._channelModelId : typeof message.model === 'string' ? message.model : undefined
+  state.records.push(model ? { ...v, model } : v)
+  state.compactedAfterLast = false
+}
+
+function startsWith(buf: Buffer, prefix: Buffer): boolean {
+  return buf.length >= prefix.length && buf.subarray(0, prefix.length).equals(prefix)
+}
+
+/** 行首判定：assistant 行继续缓冲；压缩边界只记标记；其余行跳过 */
+function decideLine(state: FileState, head: Buffer): void {
+  state.atLineStart = false
+  if (startsWith(head, ASSISTANT_PREFIX)) return
+  if (startsWith(head, COMPACT_PREFIX)) state.compactedAfterLast = true
+  state.pending = null
+  state.pendingBytes = 0
 }
 
 /** 把一段新字节喂给行状态机：只缓冲 assistant 候选行，其余字节直接跳过 */
@@ -81,27 +107,22 @@ function feed(state: FileState, chunk: Buffer): void {
     const end = nl === -1 ? chunk.length : nl
     const segment = chunk.subarray(pos, end)
     // 行首且本段已够长：直接判前缀，非 assistant 行不复制任何字节
-    if (state.pending && state.atLineStart && state.pendingBytes === 0 && segment.length >= ASSISTANT_PREFIX.length) {
-      if (!segment.subarray(0, ASSISTANT_PREFIX.length).equals(ASSISTANT_PREFIX)) state.pending = null
-      state.atLineStart = false
+    if (state.pending && state.atLineStart && state.pendingBytes === 0 && segment.length >= DECIDE_BYTES) {
+      decideLine(state, segment)
     }
     if (state.pending) {
       // 行首尚未判定或已判定为候选：继续缓冲（复制，避免引用整块 chunk）
       state.pending.push(Buffer.from(segment))
       state.pendingBytes += segment.length
       if (state.pendingBytes > peakPendingBytes) peakPendingBytes = state.pendingBytes
-      if (state.atLineStart && state.pendingBytes >= ASSISTANT_PREFIX.length) {
-        const head = Buffer.concat(state.pending, state.pendingBytes).subarray(0, ASSISTANT_PREFIX.length)
-        if (!head.equals(ASSISTANT_PREFIX)) { state.pending = null; state.pendingBytes = 0 }
-        state.atLineStart = false
-      }
+      if (state.atLineStart && state.pendingBytes >= DECIDE_BYTES) decideLine(state, Buffer.concat(state.pending, state.pendingBytes))
       if (state.pending && state.pendingBytes > MAX_ASSISTANT_LINE_BYTES) { state.pending = null; state.pendingBytes = 0 }
     }
     if (nl === -1) break
-    // 行结束：短于前缀但完整的行也按前缀规则判断
+    // 行结束：短于判定长度的完整行（压缩边界行一定更长）按 assistant 前缀判断
     if (state.pending) {
       const line = Buffer.concat(state.pending, state.pendingBytes)
-      if (line.length >= ASSISTANT_PREFIX.length && line.subarray(0, ASSISTANT_PREFIX.length).equals(ASSISTANT_PREFIX)) acceptLine(state, line)
+      if (startsWith(line, ASSISTANT_PREFIX)) acceptLine(state, line)
     }
     state.pending = []
     state.pendingBytes = 0
@@ -182,22 +203,28 @@ function totals(records: RequestRecord[]): SessionUsageTotals {
   return value
 }
 
-function summarize(own: RequestRecord[], childRecords: RequestRecord[]): SessionUsageSummary {
+function summarize(own: RequestRecord[], childRecords: RequestRecord[], compactedAfterLast = false): SessionUsageSummary {
   const last = own.at(-1)
   const lastDenom = last ? last.input + last.cacheRead + last.cacheWrite : 0
   return {
     session: totals(own),
     lastRequest: last ? { cacheWrite: last.cacheWrite, cacheHitRate: lastDenom ? last.cacheRead / lastDenom : 0, largeCacheRebuild: last.cacheWrite >= CACHE_REBUILD_MIN_TOKENS } : null,
     children: childRecords.length ? totals(childRecords) : null,
+    context: last ? {
+      tokens: last.input + last.cacheRead + last.cacheWrite,
+      contextWindow: (last.model && inferContextWindow(last.model)) || null,
+      compactedSinceLastRequest: compactedAfterLast,
+    } : null,
   }
 }
 
 /** Test seam for isolated fixture files; caller supplies no data outside its own fixture. */
 export async function getPersonalSessionUsageFromPaths(sessionId: string, messagesPath: string, indexPath: string, messagesPathFor: (id: string) => string = getAgentSessionMessagesPath): Promise<SessionUsageSummary> {
   const own = await recordsForPath(sessionId, messagesPath)
+  const compactedAfterLast = states.get(sessionId)?.compactedAfterLast === true
   const childRecords: RequestRecord[] = []
   for (const childId of await childSessionIds(sessionId, indexPath)) childRecords.push(...await recordsForPath(childId, messagesPathFor(childId)))
-  return summarize(own, childRecords)
+  return summarize(own, childRecords, compactedAfterLast)
 }
 export function resetPersonalSessionUsageCache(): void { states.clear(); inflight.clear(); indexCache = null; peakPendingBytes = 0 }
 export function getPersonalSessionUsagePeakPendingBytesForTest(): number { return peakPendingBytes }

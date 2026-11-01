@@ -94,4 +94,23 @@ describe('personal session usage incremental reader', () => {
     for (let i = 0; i < 70; i++) { const p = paths(`lru-${i}`); writeFileSync(p.file, assistant(`l${i}`, { input_tokens: 1 }) + '\n'); await getPersonalSessionUsageFromPaths(p.id, p.file, p.index) }
     expect(getPersonalSessionUsageCachedFileCount()).toBe(64)
   })
+  test('context: last request tokens, inferred window, and compaction after the last request', async () => {
+    setPersonalSessionUsageChunkBytesForTest(9)
+    const p = paths('ctx'); index()
+    const a = JSON.stringify({ type: 'assistant', _channelModelId: 'claude-opus-4-5', message: { id: 'x1', usage: { input_tokens: 10, cache_read_input_tokens: 1000, cache_creation_input_tokens: 90 } } })
+    writeFileSync(p.file, a + '\n')
+    const first = await getPersonalSessionUsageFromPaths(p.id, p.file, p.index)
+    expect(first.context).toEqual({ tokens: 1100, contextWindow: expect.any(Number), compactedSinceLastRequest: false })
+    expect(first.context!.contextWindow).toBeGreaterThan(0)
+    appendFileSync(p.file, JSON.stringify({ type: 'system', subtype: 'compact_boundary', summary: 'y'.repeat(5000) }) + '\n')
+    expect((await getPersonalSessionUsageFromPaths(p.id, p.file, p.index)).context!.compactedSinceLastRequest).toBe(true)
+    appendFileSync(p.file, JSON.stringify({ type: 'assistant', message: { id: 'x2', usage: { input_tokens: 5, cache_read_input_tokens: 200 } } }) + '\n')
+    expect((await getPersonalSessionUsageFromPaths(p.id, p.file, p.index)).context).toEqual({ tokens: 205, contextWindow: null, compactedSinceLastRequest: false })
+    expect(getPersonalSessionUsagePeakPendingBytesForTest()).toBeLessThan(1_000)
+  })
+  test('no requests means no context', async () => {
+    const p = paths('empty'); index(); writeFileSync(p.file, JSON.stringify({ type: 'user', message: { content: 'hi' } }) + '\n')
+    const summary = await getPersonalSessionUsageFromPaths(p.id, p.file, p.index)
+    expect(summary.session.requests).toBe(0); expect(summary.context).toBeNull()
+  })
 })
