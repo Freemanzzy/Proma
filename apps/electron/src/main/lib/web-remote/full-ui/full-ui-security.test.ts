@@ -9,6 +9,9 @@ const fakeMainWindow = { webContents: { send: () => true } }
 mock.module('../../main-window-store', () => ({
   getMainWindow: () => fakeMainWindow,
 }))
+mock.module('../../personal-session-usage', () => ({
+  getPersonalSessionUsage: async (_sessionId: string, options?: { childAllowed?: (id: string) => boolean }) => ({ children: options?.childAllowed?.('session-2-valid') ? { requests: 1 } : null }),
+}))
 
 const { WebRemoteIpcBridge, getWebRemoteMetricsSnapshot, slimWebRemoteSessionMeta, splitUtf8BufferAtBoundaries, isReconstructibleStreamDelta, serializeBackpressureMetricsSummary, EVENT_BACKPRESSURE_BYTES, EVENT_RESYNC_LOW_WATER_BYTES } = await import('./web-remote-ipc')
 
@@ -88,7 +91,7 @@ describe('Web Remote full-ui security policy', () => {
     expect(chunks.every((chunk) => chunk.byteLength <= 180 * 1024)).toBe(true)
   })
   const resolvers = {
-    getSessionMeta: (id: string) => id === 's-1' ? { workspaceId: 'ws-1' } : id === 's-2' ? { workspaceId: 'ws-2' } : undefined,
+    getSessionMeta: (id: string) => ['s-1', 'session-1-valid'].includes(id) ? { workspaceId: 'ws-1' } : ['s-2', 'session-2-valid'].includes(id) ? { workspaceId: 'ws-2' } : undefined,
     listWorkspaces: () => [{ id: 'ws-1', slug: 'one' }, { id: 'ws-2', slug: 'two' }],
   }
 
@@ -543,8 +546,9 @@ describe('Web Remote full-ui security policy', () => {
     const bridge = new WebRemoteIpcBridge({ allowedWorkspaceIds: ['ws-1'] }, resolvers)
     bridge.registerInvoke('agent:get-personal-session-usage', async (_event, sessionId) => ({ sessionId, requests: 1 }))
     const ws = client(bridge)
-    expect((await invoke(ws, 'agent:get-personal-session-usage', ['s-1'])).ok).toBe(true)
-    expect((await invoke(ws, 'agent:get-personal-session-usage', ['s-2'])).error.denied).toBe(true)
+    expect((await invoke(ws, 'agent:get-personal-session-usage', ['session-1-valid'])).value.children).toBeNull()
+    expect((await invoke(ws, 'agent:get-personal-session-usage', ['session-2-valid'])).error.denied).toBe(true)
+    expect((await invoke(ws, 'agent:get-personal-session-usage', ['s-1'])).ok).toBe(false)
   })
 
   test('confirm 通道首次返回挑战，带一次性 token 才执行', async () => {

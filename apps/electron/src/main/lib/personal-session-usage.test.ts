@@ -49,6 +49,16 @@ describe('personal session usage incremental reader', () => {
     const summary = (await getPersonalSessionUsageFromPaths(p.id, p.file, p.index, id => id === p.id ? p.file : child))
     expect(summary.children).toMatchObject({ requests: 2, input: 4, cacheWrite: 600000, largeCacheRebuilds: 2, relativeCostIndex: 750004 })
   })
+  test('filters child sessions when requested and returns null when all are denied', async () => {
+    const p = paths(); const allowed = join(dir, 'allowed-child.jsonl'); const denied = join(dir, 'denied-child.jsonl')
+    index([{ id: 'allowed-child', parentSessionId: p.id }, { id: 'denied-child', parentSessionId: p.id }])
+    writeFileSync(p.file, assistant('own-filter', { input_tokens: 1 }) + '\n')
+    writeFileSync(allowed, assistant('allowed', { input_tokens: 2 }) + '\n'); writeFileSync(denied, assistant('denied', { input_tokens: 99 }) + '\n')
+    const pathFor = (id: string) => id === p.id ? p.file : id === 'allowed-child' ? allowed : denied
+    expect((await getPersonalSessionUsageFromPaths(p.id, p.file, p.index, pathFor)).children?.input).toBe(101)
+    expect((await getPersonalSessionUsageFromPaths(p.id, p.file, p.index, pathFor, { childAllowed: id => id === 'allowed-child' })).children?.input).toBe(2)
+    expect((await getPersonalSessionUsageFromPaths(p.id, p.file, p.index, pathFor, { childAllowed: () => false })).children).toBeNull()
+  })
   test('ignores assistant messages without usage, and gives latest request cache details', async () => {
     const p = paths(); index(); writeFileSync(p.file, JSON.stringify({ type: 'assistant', message: { id: 'none' } }) + '\n' + assistant('first', { input_tokens: 2, cache_read_input_tokens: 1 }) + '\n' + assistant('last', { input_tokens: 10, cache_read_input_tokens: 5, cache_creation_input_tokens: 300000 }) + '\n')
     const summary = (await getPersonalSessionUsageFromPaths(p.id, p.file, p.index))
