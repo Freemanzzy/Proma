@@ -17,6 +17,7 @@ import { randomUUID } from 'node:crypto'
 import { join, resolve, relative, isAbsolute, dirname, basename } from 'node:path'
 import {
   getAgentWorkspacesIndexPath,
+  getConfigDir,
   getAgentWorkspacesDir,
   getAgentWorkspacePath,
   getWorkspaceMcpPath,
@@ -29,6 +30,7 @@ import {
   isRetiredDefaultSkill,
 } from './config-paths'
 import { findAllGitRoots, normalizeGitRoot } from './git-diff-service'
+import { isPersonalSharedSkillsMode } from './personal-shared-skills'
 import { listBuiltinMcpServers } from './builtin-mcp/catalog'
 import { RESERVED_BUILTIN_KEYS } from './builtin-mcp/baseline'
 import { inferMcpTransportType, normalizeMcpTransportType } from '@proma/shared'
@@ -236,6 +238,7 @@ export function getProjectFilesPath(workspaceSlug: string): string {
 
 /** 将 ~/.proma/default-skills/ 的内容逐个复制到工作区 skills/ 目录 */
 function copyDefaultSkills(workspaceSlug: string, options: { throwOnError?: boolean } = {}): void {
+  if (isPersonalSharedSkillsMode(getConfigDir())) return
   const defaultDir = getDefaultSkillsDir()
   const targetDir = getWorkspaceSkillsDir(workspaceSlug)
 

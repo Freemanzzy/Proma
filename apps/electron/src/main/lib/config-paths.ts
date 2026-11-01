@@ -12,6 +12,7 @@ import { homedir } from 'node:os'
 import { rmSyncWithRetry } from './fs-retry'
 import { readJsonFileSafe, writeJsonFileAtomic } from './safe-file'
 import { resolvePersonalConfigDirName } from './personal-config-dir'
+import { resolvePersonalSharedSkillsDir } from './personal-shared-skills'
 
 /**
  * 获取配置目录名称
@@ -345,6 +346,8 @@ export function getWorkspaceMcpPath(slug: string): string {
  * @returns ~/.proma/agent-workspaces/{slug}/skills/
  */
 export function getWorkspaceSkillsDir(slug: string): string {
+  const sharedDir = resolvePersonalSharedSkillsDir(getConfigDir(), 'active')
+  if (sharedDir) return sharedDir
   const dir = join(getAgentWorkspacePath(slug), 'skills')
 
   if (!existsSync(dir)) {
@@ -410,6 +413,8 @@ export function resolveAgentSessionWorkspacePath(slug: string, sessionId: string
  * @returns ~/.proma/agent-workspaces/{slug}/skills-inactive/
  */
 export function getInactiveSkillsDir(slug: string): string {
+  const sharedDir = resolvePersonalSharedSkillsDir(getConfigDir(), 'inactive')
+  if (sharedDir) return sharedDir
   const dir = join(getAgentWorkspacePath(slug), 'skills-inactive')
 
   if (!existsSync(dir)) {
