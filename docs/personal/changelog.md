@@ -2120,3 +2120,7 @@
 - **验证**：全仓 `bun run typecheck` 通过；Python `scripts/personal/test-personal-scripts.py` 通过；Electron `build:main`、`build:renderer`、`build:web-preload` 通过；`git diff --check` 待提交前复验。定向测试（4 个新增用例）通过。全量 `bun test` 为 857 pass，因 worktree `node_modules/electron/path.txt` 缺失，`planning-manager.test.ts` 无法启动 Electron 子进程（1 error / 1 fail）；未执行依赖安装或网络下载。变异检验完成 2/5：共享模式双目录判断、子会话授权过滤被移除时对应测试均变红；路径早返回、模板复制早返回、#14 目录判断尚未完成变异验证。
 - **dev fixture**：按要求以 `.proma-dev-fixture` 尝试启动，失败于 Electron binary 缺失且网络 `fetch failed`。随后 `mobile-preview.sh stop` 报 `tree[@]: unbound variable`；独立核对未发现 17889/5173 监听或记录 PID/PGID 进程。未能完成 UI、harness、截图或共享模式手工验证。`make-fixture-data.py` 成功重置 fixture，旧目录保留为带时间戳的 `.prev` 备份。截图：无。
 - **限制与偏差**：测试未覆盖工作区创建/删除、启停移动、`file:resolve-path` 实际 IPC；环境缺失导致 dev 验证不可用。试验配置路径测试时调用路径函数创建了本机 `~/.proma-dev/agent-workspaces/created-workspace`（未触碰正式 `~/.proma`），该临时路径未删除以避免擅自清理用户数据。
+
+## 2026-11-02: 修复 `mobile-preview.sh stop` 空进程数组
+
+- macOS Bash 3.2 在 `set -u` 下展开空数组会报 `tree[@]: unbound variable`；停止流程对 `tree` / `candidates` 使用兼容空数组的展开方式。实际空候选 PID/PGID 场景和先前失败的真实 stop 均验证退出码 0，PID 文件清理正常，Tailscale Serve 保留原有 443 → 17888 路由。

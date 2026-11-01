@@ -384,7 +384,7 @@ stop_preview() {
     while IFS= read -r line; do pid="${line%%|*}"; [[ "$pid" =~ ^[0-9]+$ ]] && tree+=("$pid"); done < <(preview_processes_in_group "$group")
   fi
 
-  for pid in "${tree[@]}"; do
+  for pid in ${tree[@]+"${tree[@]}"}; do
     [[ "$(process_pgid "$pid")" == "$group" ]] || continue
     command="$(process_command "$pid")"
     safe_preview_command "$command" || continue
@@ -394,8 +394,8 @@ stop_preview() {
     printf '发送 TERM：PID=%s PGID=%s 命令=%s\n' "$pid" "$group" "$command"
     kill -TERM "$pid" 2>/dev/null || true
   done
-  if ((${#candidates[@]})); then sleep 3; fi
-  for entry in "${candidates[@]}"; do
+  if [[ -n "${candidates[*]-}" ]]; then sleep 3; fi
+  for entry in ${candidates[@]+"${candidates[@]}"}; do
     pid="${entry%%|*}"; start="${entry#*|}"
     [[ "$(process_start_time "$pid")" == "$start" && "$(process_pgid "$pid")" == "$group" ]] || continue
     command="$(process_command "$pid")"
