@@ -82,10 +82,10 @@
     - **暂缓项**：标注“用户决定暂不改动”的子项（当前为 b），周检只列出计数，不单独触发“⚠️ 需要关注”；若计数较上周明显上升（如翻倍）在报告中提示，由用户决定是否重新评估。
     - 共同约束：不修改 Pi SDK（node_modules / patches），除非新设计经用户重新批准。
 13. **成本与缓存看板**：只读脚本 `python3 scripts/personal/usage-cost-report.py`，默认统计最近 7 天；可用 `--days 30`、`--format json`、`--top 20` 调整窗口、格式与 Top N。按天、定时任务、交互/root 会话、渠道/模型汇总 token、缓存与相对成本指数。只读、手动运行；是否加入周检由用户决定。
-14. **`file:resolve-path` 目录路径的 WARN**（已在本分支修复，待父会话复核）：目录路径在注册前直接返回 `null`，不再记录包含完整路径的 WARN；文件路径保持原行为。
+14. **`file:resolve-path` 目录路径的 WARN**（✅ 2026-11-02 修复，`feat/shared-skills-unify-20261102`，父会话复核与 Codex 审查通过，待用户 dev 体验后合并）：目录路径在注册前直接返回 `null`，不再记录包含完整路径的 WARN；文件路径保持原行为。
 15. **`DEP0169 url.parse()` 弃用警告**（install-result-2026-11-01 遗留，仅观察）：main.log 出现 1 次 Node 弃用警告，来源未定位（可能在依赖中）。同步上游或升级依赖时留意，不单独处理。
-16. **会话用量 IPC 汇总子会话时未逐个校验远程授权**（已在本分支修复，待父会话复核）：`personal-session-usage.ts` 按 `parentSessionId/rootSessionId` 汇总子会话用量；Web Remote 对 `agent:get-personal-session-usage` 只校验入参的父会话（`web-remote-ipc.ts` 的 session 作用域）。子会话可以单独迁移到另一工作区（上游 `moveSessionToWorkspace` 保留父子关系，迁移 IPC 不拦截子会话），此后限定了工作区（`allowedWorkspaceIds`）的远程客户端仍能看到该子会话的 token/缓存聚合数字（不含消息正文）。三个前提已按代码核实，未在真机复现。Codex 标 P1；中控核实后定为 P2：只泄露聚合数字，且需同时满足“远程限定工作区”与“单独迁移过子会话”。修复：Web Remote 调用用量模块时传入逐个子会话授权过滤器；桌面行为不变。新增用量汇总过滤单测；`full-ui-security.test.ts` 覆盖 Web Remote 逐个过滤授权回调，待父会话复核。证据见 changelog 2026-11-01「引入 Proma 专用的 Codex 独立代码审查」。
-17. **Skill 全局统一（路径重定向）**（本分支实现，待父会话复核）：配置目录下 `shared-skills/` 与 `shared-skills-inactive/` 同时为目录时，共享模式下所有工作区直接重定向至两目录；新建工作区跳过模板复制；目录变化广播能力刷新。若任一目录缺失/非目录则回退上游行为。涉及上游文件：`config-paths.ts`、`agent-workspace-manager.ts`、`workspace-watcher.ts`；个人版模块提供解析和监听。保留旧工作区链接，不迁移数据。
+16. **会话用量 IPC 汇总子会话时未逐个校验远程授权**（✅ 2026-11-02 修复，`feat/shared-skills-unify-20261102`，父会话复核与 Codex 审查通过，待用户 dev 体验后合并）：`personal-session-usage.ts` 按 `parentSessionId/rootSessionId` 汇总子会话用量；Web Remote 对 `agent:get-personal-session-usage` 只校验入参的父会话（`web-remote-ipc.ts` 的 session 作用域）。子会话可以单独迁移到另一工作区（上游 `moveSessionToWorkspace` 保留父子关系，迁移 IPC 不拦截子会话），此后限定了工作区（`allowedWorkspaceIds`）的远程客户端仍能看到该子会话的 token/缓存聚合数字（不含消息正文）。三个前提已按代码核实，未在真机复现。Codex 标 P1；中控核实后定为 P2：只泄露聚合数字，且需同时满足“远程限定工作区”与“单独迁移过子会话”。修复：Web Remote 调用用量模块时传入逐个子会话授权过滤器；桌面行为不变。新增用量汇总过滤单测；`full-ui-security.test.ts` 覆盖 Web Remote 逐个过滤授权回调，待父会话复核。证据见 changelog 2026-11-01「引入 Proma 专用的 Codex 独立代码审查」。
+17. **Skill 全局统一（路径重定向）**（✅ 2026-11-02 实现，`feat/shared-skills-unify-20261102`，父会话复核与 Codex 两轮审查通过，待用户 dev 体验后合并；方案经用户确认由“新建工作区建链接”改为路径重定向）：配置目录下 `shared-skills/` 与 `shared-skills-inactive/` 同时为目录时，共享模式下所有工作区直接重定向至两目录；新建工作区跳过模板复制；目录变化广播能力刷新。若任一目录缺失/非目录则回退上游行为。涉及的上游文件清单见 `PERSONAL.md`“与上游的差异”；个人版模块提供解析和监听。保留旧工作区链接，不迁移数据。
     - 切回商业版前，`shared-skills` Skill 的 `check-shared-skills.sh --fix` 只用于为共享模式期间新建的工作区补链接；共享模式不需要运行该脚本。
 
 ## 测试与开发数据约定

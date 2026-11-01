@@ -2125,3 +2125,19 @@
 ## 2026-11-02: 修复 `mobile-preview.sh stop` 空进程数组
 
 - macOS Bash 3.2 在 `set -u` 下展开空数组会报 `tree[@]: unbound variable`；停止流程对 `tree` / `candidates` 使用兼容空数组的展开方式。实际空候选 PID/PGID 场景和先前失败的真实 stop 均验证退出码 0，PID 文件清理正常，Tailscale Serve 保留原有 443 → 17888 路由。
+
+## 2026-11-02: Skill 全局统一——父会话复核与 Codex 独立审查
+
+- **方案来源**：用户 2026-11-02 确认，backlog #17 由“新建工作区时建链接”改为“Skill 路径直接重定向到共享目录”；全局目录继续用 `~/.proma/shared-skills*`（不改用默认工作区的 `skills/`，后者需迁移数据并另加开关）。计划见父会话工作台 `plan/shared-skills-unify-20261102.md`。在独立 worktree `.worktrees/shared-skills-unify-20261102` 开发，未动主目录（另一会话的 `docs/backlog-superagent-20261102` 未合并）。
+- **父会话复核**：
+  - worktree 的 `bun install` 走缓存时没有下载 Electron 二进制（`node_modules/electron/dist`、`path.txt` 缺失），导致执行工首轮 1 个测试失败、dev 无法启动；父会话从主目录复制同版本（43.2.0）二进制后解决。以后在 worktree 开发需先确认这一点。
+  - 执行工两次在测试中误把路径函数指向真实 dev 目录，创建了 `~/.proma-dev/agent-workspaces/` 下的空工作区目录（`created-workspace`、`prompt-skills-fixture`），已核实为空并删除；正式 `~/.proma` 未受影响。
+  - 执行工记录的“1280 宽度 `desktop:usage-badge` 未找到标签、原因未确认”：原因是 1280 宽、两侧面板展开时输入框较窄，用量标签按 2026-11-01 的 `hideWhenOverflow` 设计让位隐藏；11-01 该套件在 1280 宽度通过，是因为当时 dev 用的 renderer 构建早于让位修复。harness 已改为该套件用 1920 宽（`52b32f02`），1920 下 desktop/iphone `usage-badge` 均 PASS。
+  - 缩小上游改动面（`65a035d8`）：执行工为识别共享路径把 `tool-phrase.ts` 的本地函数改为引用 shared 包、并给 `ipc.ts` 换用新导出函数；父会话改回各处只改一行正则（`(?:shared-)?skills`），删除新增的 `getSkillRootFromEntryPath` 导出。变异检验：去掉 `shared-` 后 `tool-phrase` 与 `skill-usage` 测试各 2 处失败。
+- **Codex 独立审查第 1 轮**（`--base personal`，报告 `code-review/20261102-054027-base-personal.md`），3 条 P2，父会话核实后**全部采纳**并修复：
+  1. 系统提示词的 Skills 路径仍是 `agent-workspaces/<slug>/skills`，共享模式下新工作区没有该目录，Agent 按提示词新建/维护的 Skill 会落到不生效的位置 → `agent-prompt-builder.ts` 共享模式用共享目录（`d164b95d`）。注意：已有会话的系统提示词中该路径会变化，下一次请求会重建一次 prompt 缓存。
+  2. Skill 激活识别只认 `/skills/<slug>/SKILL.md`，共享路径不记录激活、会话里 Skill 使用标识消失 → `skill-usage.ts` 与 `tool-phrase.ts` 接受 `shared-skills/`，不接受 `shared-skills-inactive/`（`e1928964`，后经 `65a035d8` 收窄为单行正则）。
+  3. 共享目录监听出错后只关闭不恢复 → 5 秒起、指数退避至 60 秒自动重建，stop 时取消待重建，非共享模式不重建（`88674914`）。
+- **Codex 针对性复审第 2 轮**（`--base 52b32f02`，报告 `code-review/20261102-064024-base-52b32f02.md`）：未发现问题。Codex 快照缺依赖未能跑完整测试，完整测试由父会话在 worktree 中执行。
+- **最终验证**（worktree，`65a035d8`）：全仓 typecheck 通过；全量 `bun test` **869 pass / 0 fail**；`test-personal-scripts.py` 通过；fixture dev：执行工逐项验证见上一条记录，修复后抽查共享模式新工作区的新会话加载共享 Skill 并显示 Skill 使用标识（`/tmp/shared-skills-unify-20261102/shared-prompt-usage-badge.png`）。
+- **同步文档**：`PERSONAL.md`（与上游差异补全上游文件清单）、`docs/personal/backlog.md`（#14/#16/#17 状态）、本记录。待用户 dev 体验后合并。
