@@ -2148,3 +2148,13 @@
 - `feat/shared-skills-unify-20261102` 以 `--no-ff` 合入 `personal`（`adbb963e`）并推送；worktree 已移除，dev 已停止（17889/5173 无监听），fixture 已用 `make-fixture-data.py` 重置。
 - 待打包安装。安装后：更新 `shared-skills` Skill 的“新建工作区后”一节与版本号、相关工作区记忆；安装申请中写明审查结论（Codex 两轮：第 1 轮 3 条 P2 已修复，第 2 轮无问题）与“已有会话下一次请求会因系统提示词 Skills 路径变化重建一次 prompt 缓存”。
 - 同步文档：`docs/personal/backlog.md`（已合入未安装、#14/#16/#17 状态）、本记录。
+
+## 2026-11-02: 安装 1286ff19（Claude Code）
+
+- **结果**：安装成功，保留 `1286ff19`，未回滚。标准 `install-update.sh` EXIT=0；备份 BACKUP VERIFY PASS（39,304 条目）；启动后 SNAPSHOT MATCH；草稿清理 `removed=0`（预演：`c0c0242d` 未满 24 h）。钥匙串弹 1 次（12:27:52 → 12:28:06）。
+- **安装前复核**：包内 commit = `personal` = `origin/personal`；同一证书 leaf `d993d52c…`，`codesign --verify --deep --strict` 通过；无 `app-update.yml`；打包日志 869 pass / 0 fail；包内可见项 6 项计数与申请一致。共享 Skill 审阅：仅两目录同时存在时启用；共享模式不复制模板、不建工作区 `skills/`；删除工作区只删其自身目录且不跟随链接；退役 Skill 清理（`brainstorming`、`vault`）不涉及共享目录现有条目。
+- **健康检查**：PID 42468 只监听 `127.0.0.1:17888`，无 CDP 端口；Serve 仅 443 → 17888；`scheduler-start enabledTasks=20` 在 `web-remote-start` 后 3 ms；`[FATAL]`/`[ERROR]` 0；无“共享目录不完整”警告，无 `file:resolve-path` WARN（#14 生效）；定时任务 20 → 20、ID 一致，13:00 “Reddit 养号”按时成功。
+- **共享 Skill**：`shared-skills` 42 / `shared-skills-inactive` 6，安装后及新建并删除测试工作区后名单与安装前逐项一致；5 个工作区链接不变。
+- **用户验收**：两个工作区 Skills 页面一致、测试工作区无 `skills/` 且列表一致、会话内 Skill 使用标识、两台手机 Skill 列表 / 无用量标签 / 代码高亮——“测试通过。”
+- **版本**：previous = `46909718`；`a6f962cd` 移入废纸篓；`20261101-200459-56245` 归档外置硬盘并复核 SNAPSHOT MATCH。
+- 详见交接单 `install-result-2026-11-02.md`。
