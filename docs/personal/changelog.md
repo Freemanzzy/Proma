@@ -2141,3 +2141,10 @@
 - **Codex 针对性复审第 2 轮**（`--base 52b32f02`，报告 `code-review/20261102-064024-base-52b32f02.md`）：未发现问题。Codex 快照缺依赖未能跑完整测试，完整测试由父会话在 worktree 中执行。
 - **最终验证**（worktree，`65a035d8`）：全仓 typecheck 通过；全量 `bun test` **869 pass / 0 fail**；`test-personal-scripts.py` 通过；fixture dev：执行工逐项验证见上一条记录，修复后抽查共享模式新工作区的新会话加载共享 Skill 并显示 Skill 使用标识（`/tmp/shared-skills-unify-20261102/shared-prompt-usage-badge.png`）。
 - **同步文档**：`PERSONAL.md`（与上游差异补全上游文件清单）、`docs/personal/backlog.md`（#14/#16/#17 状态）、本记录。待用户 dev 体验后合并。
+
+## 2026-11-02: Skill 全局统一用户验收与合并
+
+- 用户在 dev 桌面窗口（fixture 共享模式：共享目录 5 个 Skill、停用目录 1 个）确认各工作区 Skill 列表一致、启停跨工作区同步、新建工作区自动统一（11:45）。
+- `feat/shared-skills-unify-20261102` 以 `--no-ff` 合入 `personal`（`adbb963e`）并推送；worktree 已移除，dev 已停止（17889/5173 无监听），fixture 已用 `make-fixture-data.py` 重置。
+- 待打包安装。安装后：更新 `shared-skills` Skill 的“新建工作区后”一节与版本号、相关工作区记忆；安装申请中写明审查结论（Codex 两轮：第 1 轮 3 条 P2 已修复，第 2 轮无问题）与“已有会话下一次请求会因系统提示词 Skills 路径变化重建一次 prompt 缓存”。
+- 同步文档：`docs/personal/backlog.md`（已合入未安装、#14/#16/#17 状态）、本记录。
