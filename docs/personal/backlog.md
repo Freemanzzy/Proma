@@ -82,19 +82,16 @@
     - **暂缓项**：标注“用户决定暂不改动”的子项（当前为 b），周检只列出计数，不单独触发“⚠️ 需要关注”；若计数较上周明显上升（如翻倍）在报告中提示，由用户决定是否重新评估。
     - 共同约束：不修改 Pi SDK（node_modules / patches），除非新设计经用户重新批准。
 13. **成本与缓存看板**：只读脚本 `python3 scripts/personal/usage-cost-report.py`，默认统计最近 7 天；可用 `--days 30`、`--format json`、`--top 20` 调整窗口、格式与 Top N。按天、定时任务、交互/root 会话、渠道/模型汇总 token、缓存与相对成本指数。只读、手动运行；是否加入周检由用户决定。
-14. **`file:resolve-path` 目录路径的 WARN**（install-result-2026-11-01 遗留，未开工）：输入框引用文件夹（如 `proma-personal`）时，上游 `ipc.ts` 的 `file:resolve-path` 把目录当文件注册失败，降级返回 null 并记 `[WARN]`，功能正常。该行把解析后的完整路径写进 main.log。可选做法：目录时提前返回 null、不记日志，或只记目录名；属上游文件改动，随下一批小修一并处理。
+14. **`file:resolve-path` 目录路径的 WARN**（✅ 2026-11-02 修复，`feat/shared-skills-unify-20261102`，父会话复核与 Codex 审查通过，待用户 dev 体验后合并）：目录路径在注册前直接返回 `null`，不再记录包含完整路径的 WARN；文件路径保持原行为。
 15. **`DEP0169 url.parse()` 弃用警告**（install-result-2026-11-01 遗留，仅观察）：main.log 出现 1 次 Node 弃用警告，来源未定位（可能在依赖中）。同步上游或升级依赖时留意，不单独处理。
-16. **会话用量 IPC 汇总子会话时未逐个校验远程授权**（2026-11-01 Codex 独立审查试跑发现，未开工）：`personal-session-usage.ts` 按 `parentSessionId/rootSessionId` 汇总子会话用量；Web Remote 对 `agent:get-personal-session-usage` 只校验入参的父会话（`web-remote-ipc.ts` 的 session 作用域）。子会话可以单独迁移到另一工作区（上游 `moveSessionToWorkspace` 保留父子关系，迁移 IPC 不拦截子会话），此后限定了工作区（`allowedWorkspaceIds`）的远程客户端仍能看到该子会话的 token/缓存聚合数字（不含消息正文）。三个前提已按代码核实，未在真机复现。Codex 标 P1；中控核实后定为 P2：只泄露聚合数字，且需同时满足“远程限定工作区”与“单独迁移过子会话”。修复方向：把远程授权范围传入聚合过程逐个过滤子会话（优先，改动在个人版模块内），并补跨工作区子会话的安全测试。随下一批小修处理。证据见 changelog 2026-11-01「引入 Proma 专用的 Codex 独立代码审查」。
-17. **新建工作区自动接入共享 Skill 目录**（用户 2026-11-02 选定方案 C：改个人版代码；先登记，择机实施）：
-    - **背景**：2026-11-02 起本机所有工作区共用一套 Skill（各工作区 `skills/`、`skills-inactive/` 是指向 `~/.proma/shared-skills*` 的相对符号链接，见「个人自建 Skill 预装」）。但 `createAgentWorkspace`（`agent-workspace-manager.ts`）仍调用 `copyDefaultSkills` 建真实目录并复制模板，新工作区不会自动接入，目前需手动运行 Skill `shared-skills` 的 `scripts/check-shared-skills.sh --fix`，且没有提醒。
-    - **改法方向**：新建工作区时，若 `~/.proma/shared-skills/` 与 `shared-skills-inactive/` 存在，则直接创建两个相对链接，不复制模板；不存在时保持原行为（开源上游兼容、`~/.proma` 数据格式不变）。逻辑放在个人版独立模块，上游文件只留一处调用，降低同步冲突。`upgradeDefaultSkillsInWorkspaces`、`createPromaSkillsOverride` 的 realpath 过滤、Skills 页面的启用/停用/删除需确认在链接下行为正确（现状已人工验证可用）。
-    - **验收**：单测覆盖“共享目录存在→建链接”“不存在→复制模板”“目标已存在”；dev 实例新建工作区后 Skill 列表与 Skills 页面正常；按 maintenance §4.3 做 Codex 独立审查；随下一批打包，由 Claude Code 安装。
-    - **实施后**：`check-shared-skills.sh --fix` 保留为修复工具；更新 `shared-skills` Skill 的「新建工作区后」一节。
+16. **会话用量 IPC 汇总子会话时未逐个校验远程授权**（✅ 2026-11-02 修复，`feat/shared-skills-unify-20261102`，父会话复核与 Codex 审查通过，待用户 dev 体验后合并）：`personal-session-usage.ts` 按 `parentSessionId/rootSessionId` 汇总子会话用量；Web Remote 对 `agent:get-personal-session-usage` 只校验入参的父会话（`web-remote-ipc.ts` 的 session 作用域）。子会话可以单独迁移到另一工作区（上游 `moveSessionToWorkspace` 保留父子关系，迁移 IPC 不拦截子会话），此后限定了工作区（`allowedWorkspaceIds`）的远程客户端仍能看到该子会话的 token/缓存聚合数字（不含消息正文）。三个前提已按代码核实，未在真机复现。Codex 标 P1；中控核实后定为 P2：只泄露聚合数字，且需同时满足“远程限定工作区”与“单独迁移过子会话”。修复：Web Remote 调用用量模块时传入逐个子会话授权过滤器；桌面行为不变。新增用量汇总过滤单测；`full-ui-security.test.ts` 覆盖 Web Remote 逐个过滤授权回调，待父会话复核。证据见 changelog 2026-11-01「引入 Proma 专用的 Codex 独立代码审查」。
+17. **Skill 全局统一（路径重定向）**（✅ 2026-11-02 实现，`feat/shared-skills-unify-20261102`，父会话复核与 Codex 两轮审查通过，待用户 dev 体验后合并；方案经用户确认由“新建工作区建链接”改为路径重定向）：配置目录下 `shared-skills/` 与 `shared-skills-inactive/` 同时为目录时，共享模式下所有工作区直接重定向至两目录；新建工作区跳过模板复制；目录变化广播能力刷新。若任一目录缺失/非目录则回退上游行为。涉及的上游文件清单见 `PERSONAL.md`“与上游的差异”；个人版模块提供解析和监听。保留旧工作区链接，不迁移数据。
+    - 切回商业版前，`shared-skills` Skill 的 `check-shared-skills.sh --fix` 只用于为共享模式期间新建的工作区补链接；共享模式不需要运行该脚本。
 
 ## 测试与开发数据约定
 
 - **真实负载测试触发条件**（父会话在派单前判断，并在交接/安装申请写明做了或没做及原因）：改动涉及手机列表数据内容（字段、投影、瘦身）、历史加载（分页、加载更早、按需媒体）、传输层（WebSocket、压缩、分块、超时、重连同步）、首次加载前端资源明显变大、同步官方版本且上游改了会话存储或 Web Remote、用户反馈手机变慢。其余改动用功能回归 + 打包冒烟即可。
-- **个人自建 Skill 预装**：`~/.proma/default-skills/` 是新建工作区复制 Skill 的模板。Proma 启动时只同步安装包内置的 slug（缺失才复制、版本更高才覆盖），并只删除 `RETIRED_DEFAULT_SKILL_SLUGS` 列出的 slug，因此放入其中的个人 Skill（目前 `cliproxy-image` 1.0.1）不会被更新覆盖。副作用：Skills 页面会把它归入“内置”分组。**2026-11-02 起本机所有工作区共用一套 Skill**：各工作区的 `skills/`、`skills-inactive/` 是指向 `~/.proma/shared-skills/`、`~/.proma/shared-skills-inactive/` 的相对符号链接（加载时 realpath 过滤以工作区 `skills/` 的真实路径为根，所以必须链接整个目录，不能链接单个 Skill）。个人 Skill 直接在共享目录修改，不再需要同步模板与各工作区；模板只影响新建工作区接入前的初始副本。新建工作区后需运行 Skill `shared-skills` 的 `scripts/check-shared-skills.sh --fix` 接入。dev 实例 `~/.proma-dev` 不受影响。若以后上游内置同名 slug，会被上游版本覆盖，届时改名。
+- **个人自建 Skill 预装**：共享模式下所有工作区自动共用共享 Skill 目录，新建工作区直接重定向，不再复制模板或逐工作区维护；共享模式以外仍按上游默认模板行为。切回商业版前，`check-shared-skills.sh --fix` 只用于为共享模式期间新建的工作区补链接。若上游内置同名 slug，版本升级仍可能覆盖共享 Skill，届时改名。
 - **dev 数据**：`~/.proma-dev` 含按 `scripts/personal/import-session-workspace.py` 选择性导入的真实会话（单工作区 allowlist），以及用户 2026-10-01 授权复制的正式渠道 `channels.json`（权限 600，原文件改名保留）。只在本机，不提交仓库；密钥不解密、不打印。dev 中让 Agent 运行只用新建会话，不在导入的旧会话中运行（其附加目录可能指向真实仓库）；dev 对话消耗真实 API 额度。8443 只在测试期间开启。
 - **dev 中禁用 OAuth 渠道**（2026-10-08）：dev 的 `channels.json` 是正式渠道副本，ChatGPT 订阅 (Codex) 等 OAuth 渠道的 access token 过期后，dev 会用正式版已轮换的旧 refresh token 刷新并失败，还可能触发服务端重放检测、影响正式版登录。dev 验收默认只用 API Key 渠道（clipproxyapi、智谱、DeepSeek）；确需验证 OAuth 渠道时，由用户在 dev 中**重新登录**取得 dev 自己的凭据（2026-10-08 验证 GPT-6.1 Sol 时如此操作，正式版登录不受影响），不得使用复制来的过期凭据。2026-10-31 用户确认：dev 现在使用的是自己登录的 Codex 凭据，harness 测试沿用它没有问题；凭据失效时停下并通知用户在 dev 重新登录，不改用复制凭据，也不为此修改 harness。
 
@@ -107,3 +104,6 @@
 - **已安装（2026-10-31，`a6f962cd`）**：`fix/test-timeouts-20261029`（两个慢测试放宽单测超时，避免打包误报）。
 - 决定（2026-10-30）：不做 Grok Bot 式“岗位/bot 模式”。工作区 + AGENTS.md + 子 Agent + 定时任务已经能覆盖岗位这类用法；巴西面霜的岗位试点暂不开展，起草的岗位卡与状态文件已删除。以后需要时再用“岗位卡 + 状态文件”的约定方式实现，不开发产品功能。
 - 决定（2026-11-01）：商业版与个人版共存方案暂时搁置。等商业版推出可用的手机端、用户决定切回时再下载切换；届时按“个人版保持 `~/.proma` 与开源上游数据格式兼容、Claude Code 备份后安装商业版直接读取原目录”的思路制定迁移计划。在此之前仍不下载、不安装官方/商业版（§4 不变）。商业版手机端进展由定时任务“Proma 商业版 · 手机客户端与远程访问周检”跟踪。
+
+
+> 合并提醒（2026-11-02）：`docs/backlog-superagent-20261102` 分支合并时会与本批在 `backlog.md` / `changelog.md` 末尾发生冲突，解决时须保留双方记录。

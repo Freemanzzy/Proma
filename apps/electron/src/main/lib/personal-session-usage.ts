@@ -219,11 +219,14 @@ function summarize(own: RequestRecord[], childRecords: RequestRecord[], compacte
 }
 
 /** Test seam for isolated fixture files; caller supplies no data outside its own fixture. */
-export async function getPersonalSessionUsageFromPaths(sessionId: string, messagesPath: string, indexPath: string, messagesPathFor: (id: string) => string = getAgentSessionMessagesPath): Promise<SessionUsageSummary> {
+export async function getPersonalSessionUsageFromPaths(sessionId: string, messagesPath: string, indexPath: string, messagesPathFor: (id: string) => string = getAgentSessionMessagesPath, options: { childAllowed?: (id: string) => boolean } = {}): Promise<SessionUsageSummary> {
   const own = await recordsForPath(sessionId, messagesPath)
   const compactedAfterLast = states.get(sessionId)?.compactedAfterLast === true
   const childRecords: RequestRecord[] = []
-  for (const childId of await childSessionIds(sessionId, indexPath)) childRecords.push(...await recordsForPath(childId, messagesPathFor(childId)))
+  for (const childId of await childSessionIds(sessionId, indexPath)) {
+    if (options.childAllowed && !options.childAllowed(childId)) continue
+    childRecords.push(...await recordsForPath(childId, messagesPathFor(childId)))
+  }
   return summarize(own, childRecords, compactedAfterLast)
 }
 export function resetPersonalSessionUsageCache(): void { states.clear(); inflight.clear(); indexCache = null; peakPendingBytes = 0 }
@@ -232,6 +235,6 @@ export function getPersonalSessionUsageCachedOffset(sessionId: string): number |
 export function getPersonalSessionUsageCachedFileCount(): number { return states.size }
 /** 测试用：调小分块以覆盖跨块的行边界 */
 export function setPersonalSessionUsageChunkBytesForTest(bytes: number): void { chunkBytes = Math.max(1, Math.trunc(bytes)) }
-export function getPersonalSessionUsage(sessionId: string): Promise<SessionUsageSummary> {
-  return getPersonalSessionUsageFromPaths(sessionId, getAgentSessionMessagesPath(sessionId), getAgentSessionsIndexPath())
+export function getPersonalSessionUsage(sessionId: string, options: { childAllowed?: (id: string) => boolean } = {}): Promise<SessionUsageSummary> {
+  return getPersonalSessionUsageFromPaths(sessionId, getAgentSessionMessagesPath(sessionId), getAgentSessionsIndexPath(), getAgentSessionMessagesPath, options)
 }

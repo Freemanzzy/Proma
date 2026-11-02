@@ -11,6 +11,7 @@
 ## 与上游的差异
 
 - 桌面输入框会话用量指示器。
+- Skill 全局统一：`~/.proma/shared-skills/` 与 `shared-skills-inactive/` 同时存在时，所有工作区共用这两个目录（路径重定向，新建工作区不再复制模板）。逻辑在 `personal-shared-skills.ts`；涉及上游文件（均为 1–3 行级接入）：`apps/electron/src/main/lib/config-paths.ts`（两个 Skill 路径函数）、`agent-workspace-manager.ts`（`copyDefaultSkills` 早返回）、`workspace-watcher.ts`（启停共享目录监听）、`agent-prompt-builder.ts`（系统提示词 Skills 路径）、`packages/shared/src/utils/skill-usage.ts` 与 `renderer/components/agent/tool-phrase.ts`（识别 `shared-skills/<slug>/SKILL.md`）、`apps/electron/src/main/ipc.ts`（旧预览路径识别；另含 `file:resolve-path` 目录直接返回 null）。
 
 个人版以完整跟随官方正式 tag 为默认（方案 A），保留数据格式兼容和回退开源版能力。主要差异：手机 Web Remote（loopback + Tailscale、IPC deny-by-default；代码高亮改用不依赖 WebAssembly 的引擎，CSP 不放宽）、桌面 iOS 模拟器面板、EgoBrowser 原生工具、协作子 Agent 完成后自动唤醒父会话（可在 `personal-settings.json` 关闭）、个人版数据导入/备份/打包/更新脚本、GPT-6.1 Sol Codex 模型支持、Agent 图片上下文预算（Read 缩图、请求前旧图移出）与请求级诊断日志，以及隐藏不使用的桥接、Copilot 新建入口和 Agent Island 初始化；保留旧数据兼容。详细实现和逐次改动见 [`docs/personal/changelog.md`](./docs/personal/changelog.md)，手机访问见 [`docs/personal/web-remote.md`](./docs/personal/web-remote.md)，子任务自动唤醒见 [`docs/personal/delegation-auto-wake.md`](./docs/personal/delegation-auto-wake.md)。
 

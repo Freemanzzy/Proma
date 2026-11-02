@@ -16,7 +16,8 @@ import type { FSWatcher } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import type { BrowserWindow } from 'electron'
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
-import { getAgentWorkspacesDir } from './config-paths'
+import { getAgentWorkspacesDir, getConfigDir } from './config-paths'
+import { startPersonalSharedSkillsWatcher, stopPersonalSharedSkillsWatcher } from './personal-shared-skills'
 import { listAgentSessions } from './agent-session-manager'
 import { invalidateGitDiffCache } from './git-diff-service'
 import { classifyWorkspaceWatchFilename, isHighNoisePath, normalizeWatchFilename, shouldNotifyForWatchFilename } from './workspace-watcher-utils'
@@ -195,6 +196,7 @@ function watchUnavailableDirectoryParent(dirPath: string): void {
 export function startWorkspaceWatcher(win: BrowserWindow): void {
   workspaceWatcherActive = true
   mainWin = win
+  startPersonalSharedSkillsWatcher(getConfigDir(), () => { if (!win.isDestroyed()) win.webContents.send(AGENT_IPC_CHANNELS.CAPABILITIES_CHANGED) })
   // 会话附加目录只需在启动/监听器重启时恢复一次；LIST_SESSIONS 是高频读取路径，
   // 不能随每次列表 IPC 再遍历全部会话并触发同步 stat。
   restoreAgentSessionAttachedDirectoryWatchers()
@@ -273,6 +275,7 @@ export function startWorkspaceWatcher(win: BrowserWindow): void {
  */
 export function stopWorkspaceWatcher(): void {
   workspaceWatcherActive = false
+  stopPersonalSharedSkillsWatcher()
   for (const timer of watcherRestartTimers) clearTimeout(timer)
   watcherRestartTimers.clear()
   if (watcher) {

@@ -88,7 +88,7 @@ function filename(path: string): string {
  */
 function skillNameFromEntryPath(path: string): string | null {
   const normalizedPath = path.replace(/\\/g, '/')
-  const match = normalizedPath.match(/(?:^|\/)skills\/([^/]+)\/SKILL\.md$/i)
+  const match = normalizedPath.match(/(?:^|\/)(?:shared-)?skills\/([^/]+)\/SKILL\.md$/i)
   return match?.[1] ?? null
 }
 

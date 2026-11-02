@@ -58,9 +58,9 @@ function normalizeActivation(value: unknown): SkillActivation | null {
   }
 }
 
-/** Return the Skill directory slug when a path points at skills/<slug>/SKILL.md. */
+/** Return the Skill directory slug when a path points at skills/<slug>/SKILL.md (or personal shared-skills/<slug>/SKILL.md). */
 export function getSkillSlugFromEntryPath(path: string): string | null {
-  return path.replace(/\\/g, '/').match(/(?:^|\/)skills\/([^/]+)\/SKILL\.md$/i)?.[1] ?? null
+  return path.replace(/\\/g, '/').match(/(?:^|\/)(?:shared-)?skills\/([^/]+)\/SKILL\.md$/i)?.[1] ?? null
 }
 
 /** Build activation metadata for a successfully loaded Skill entry file. */

@@ -2110,3 +2110,34 @@
 - 共享 Skill 结构上线后，新建工作区仍会建独立 `skills/` 目录，需手动运行 `check-shared-skills.sh --fix`。比较了 launchd 监听索引、Proma 定时任务、改个人版代码三种自动化方案后，用户选择改代码（方案 C），但不立即实施，登记为 backlog #17，含改法方向与验收标准。
 - 在此之前仍按 Skill `shared-skills` 手动接入。
 - **同步文档**：`docs/personal/backlog.md`、本记录。
+
+## 2026-11-02: Skill 全局统一（共享目录路径重定向）
+
+- **设计**：`shared-skills/` 与 `shared-skills-inactive/` 同时为目录时启用共享模式；两个工作区 Skill 路径直接重定向，新建工作区跳过模板复制。缺少任一目录时保持原逻辑；单边目录仅警告一次且不记录完整路径。共享目录变更通过递归 watcher 通知 `CAPABILITIES_CHANGED`。
+- **个人版实现**：新增 `apps/electron/src/main/lib/personal-shared-skills.ts`（解析、模式判定、监听及 error 降级）；测试覆盖双目录判定、符号链接、单边目录警告、监听写入、error 不抛出与 stop；工作区管理测试覆盖共享模式不复制/不覆盖、非共享模式仍复制模板、路径不建工作区 skills、删除旧链接不影响共享目录、启停移动和同名导入拒绝。`personal-session-usage.test.ts` 覆盖子会话逐个过滤、全拒绝时 `children: null`，默认桌面汇总仍包含子会话；Web Remote 安全测试覆盖授权过滤回调。
+- **上游改动清单**：`config-paths.ts` 的两个路径函数各加 2 行，共享时返回路径且不创建工作区目录；`agent-workspace-manager.ts` 的 `copyDefaultSkills` 加 1 行早返回；`workspace-watcher.ts` start/stop 各接入共享目录 watcher；`ipc.ts` 的 `file:resolve-path` 增加目录检测，目录直接返回 `null`，不输出带完整路径的 WARN。Web Remote 在 `web-remote-ipc.ts` 特判用量通道，校验 session ID 并逐个授权子会话；桌面 IPC 未改。未改 `upgradeDefaultSkillsInWorkspaces`、导入逻辑或 renderer。
+- **#14 / #16**：#14 已改为目录提前返回 `null`；#16 的 Web Remote 子会话聚合逐个按工作区授权过滤。两项均待父会话复核。
+- **验证**：全仓 typecheck、Python `scripts/personal/test-personal-scripts.py`、Electron `build:main` / `build:renderer` / `build:web-preload` 均通过；全量 `bun test` **861 pass / 0 fail**（140 files），`git diff --check` 通过。新增 7 个定向测试，覆盖共享模式、工作区行为、目录预览回退与授权过滤。变异检验 **5/5 检出**：共享模式双目录判定、子会话过滤、`copyDefaultSkills` 早返回、活跃路径早返回、#14 目录判断被移除时，相关测试均变红。
+- **dev fixture**：以 `.proma-dev-fixture` 实测。非共享模式新建工作区获得真实 `skills/` 并复制模板；转入共享模式后 4 个工作区列表一致，新工作区没有 `skills/`。A 停用、B 启用 `fixture-skill` 后所有工作区状态同步；新增 Skill 后 Skills 页面无需重启即刷新；新会话调用共享 Skill 返回精确标记 `SHARED_SKILL_LOADED`；导入页提示其他项目 Skill 均已安装/无可导入项，未出现错误。输入框用 `@项目文件` 引用工作区文件夹并发送新会话消息，Agent 返回 `folder-reference-ok`；`file:resolve-path` WARN 计数保持 0。iPhone 与 Android `smoke` 均 PASS；标准 1280 宽度 `desktop:usage-badge` 未找到徽标（原因未确认），同一 harness 在 1920 宽度 PASS。旧启动失败后 `mobile-preview.sh stop` 先复现 Bash 3.2 空数组错误；修复后空进程组模拟及真实 stop 均退出 0。最终停止后 17889/5173 无监听、无 harness Chrome，Serve 只保留 443 → 17888。fixture 已用 `make-fixture-data.py` 重置。
+- **截图**：`/tmp/shared-skills-unify-20261102/`：`nonshared-before.png`、`shared-before-toggle.png`、`shared-after-disable.png`、`live-skill-refreshed.png`、`agent-loaded-shared-skill.png`、`skills-list-shared.png`、`import-existing.png`、`folder-reference-ipc.png`、`desktop-usage-badge.png`。
+- **偏差与遗留**：1280 宽度 `desktop:usage-badge` 标准脚本失败，1920 宽度相同 harness 已通过，失败原因未确认。较早测试曾误建 dev 数据目录中的空工作区，已由父会话清理；`.proma-dev-fixture.prev-20261102-041646`、`.proma-dev-fixture.prev-20261102-052444` 和最终重置生成的 `.proma-dev-fixture.prev-20261102-053152` 均按要求保留，未删除。
+
+## 2026-11-02: 修复 `mobile-preview.sh stop` 空进程数组
+
+- macOS Bash 3.2 在 `set -u` 下展开空数组会报 `tree[@]: unbound variable`；停止流程对 `tree` / `candidates` 使用兼容空数组的展开方式。实际空候选 PID/PGID 场景和先前失败的真实 stop 均验证退出码 0，PID 文件清理正常，Tailscale Serve 保留原有 443 → 17888 路由。
+
+## 2026-11-02: Skill 全局统一——父会话复核与 Codex 独立审查
+
+- **方案来源**：用户 2026-11-02 确认，backlog #17 由“新建工作区时建链接”改为“Skill 路径直接重定向到共享目录”；全局目录继续用 `~/.proma/shared-skills*`（不改用默认工作区的 `skills/`，后者需迁移数据并另加开关）。计划见父会话工作台 `plan/shared-skills-unify-20261102.md`。在独立 worktree `.worktrees/shared-skills-unify-20261102` 开发，未动主目录（另一会话的 `docs/backlog-superagent-20261102` 未合并）。
+- **父会话复核**：
+  - worktree 的 `bun install` 走缓存时没有下载 Electron 二进制（`node_modules/electron/dist`、`path.txt` 缺失），导致执行工首轮 1 个测试失败、dev 无法启动；父会话从主目录复制同版本（43.2.0）二进制后解决。以后在 worktree 开发需先确认这一点。
+  - 执行工两次在测试中误把路径函数指向真实 dev 目录，创建了 `~/.proma-dev/agent-workspaces/` 下的空工作区目录（`created-workspace`、`prompt-skills-fixture`），已核实为空并删除；正式 `~/.proma` 未受影响。
+  - 执行工记录的“1280 宽度 `desktop:usage-badge` 未找到标签、原因未确认”：原因是 1280 宽、两侧面板展开时输入框较窄，用量标签按 2026-11-01 的 `hideWhenOverflow` 设计让位隐藏；11-01 该套件在 1280 宽度通过，是因为当时 dev 用的 renderer 构建早于让位修复。harness 已改为该套件用 1920 宽（`52b32f02`），1920 下 desktop/iphone `usage-badge` 均 PASS。
+  - 缩小上游改动面（`65a035d8`）：执行工为识别共享路径把 `tool-phrase.ts` 的本地函数改为引用 shared 包、并给 `ipc.ts` 换用新导出函数；父会话改回各处只改一行正则（`(?:shared-)?skills`），删除新增的 `getSkillRootFromEntryPath` 导出。变异检验：去掉 `shared-` 后 `tool-phrase` 与 `skill-usage` 测试各 2 处失败。
+- **Codex 独立审查第 1 轮**（`--base personal`，报告 `code-review/20261102-054027-base-personal.md`），3 条 P2，父会话核实后**全部采纳**并修复：
+  1. 系统提示词的 Skills 路径仍是 `agent-workspaces/<slug>/skills`，共享模式下新工作区没有该目录，Agent 按提示词新建/维护的 Skill 会落到不生效的位置 → `agent-prompt-builder.ts` 共享模式用共享目录（`d164b95d`）。注意：已有会话的系统提示词中该路径会变化，下一次请求会重建一次 prompt 缓存。
+  2. Skill 激活识别只认 `/skills/<slug>/SKILL.md`，共享路径不记录激活、会话里 Skill 使用标识消失 → `skill-usage.ts` 与 `tool-phrase.ts` 接受 `shared-skills/`，不接受 `shared-skills-inactive/`（`e1928964`，后经 `65a035d8` 收窄为单行正则）。
+  3. 共享目录监听出错后只关闭不恢复 → 5 秒起、指数退避至 60 秒自动重建，stop 时取消待重建，非共享模式不重建（`88674914`）。
+- **Codex 针对性复审第 2 轮**（`--base 52b32f02`，报告 `code-review/20261102-064024-base-52b32f02.md`）：未发现问题。Codex 快照缺依赖未能跑完整测试，完整测试由父会话在 worktree 中执行。
+- **最终验证**（worktree，`65a035d8`）：全仓 typecheck 通过；全量 `bun test` **869 pass / 0 fail**；`test-personal-scripts.py` 通过；fixture dev：执行工逐项验证见上一条记录，修复后抽查共享模式新工作区的新会话加载共享 Skill 并显示 Skill 使用标识（`/tmp/shared-skills-unify-20261102/shared-prompt-usage-badge.png`）。
+- **同步文档**：`PERSONAL.md`（与上游差异补全上游文件清单）、`docs/personal/backlog.md`（#14/#16/#17 状态）、本记录。待用户 dev 体验后合并。

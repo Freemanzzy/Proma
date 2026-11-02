@@ -240,6 +240,8 @@ run_tests() {
     echo "=== ${ua} / ${name} ==="
     local viewport_args=(--width 412 --height 915 --device-scale-factor 3)
     if [[ "$ua" == "desktop" ]]; then viewport_args=(--width 1280 --height 900 --device-scale-factor 1); fi
+    # 1280 宽且两侧面板展开时，用量标签按设计让位隐藏（hideWhenOverflow）；该套件用 1920 宽验证标签数值。
+    if [[ "$ua" == "desktop" && "$name" == "usage-badge" ]]; then viewport_args=(--width 1920 --height 1080 --device-scale-factor 1); fi
     if ! (cd "$ROOT" && perl -e 'alarm 600; exec @ARGV' env -u http_proxy -u https_proxy -u all_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u HTTP_ALL_PROXY -u HTTPS_ALL_PROXY bun "$agent" --url "$origin" --suite "$name" --user-agent "$ua" "${viewport_args[@]}" --expected-workspace-count "${PROMA_WEB_REMOTE_EXPECTED_WORKSPACE_COUNT:-1}") >"$test_log" 2>&1; then
       echo "FAIL ${ua}/${name}（日志：${test_log}）"
       tail -n 16 "$test_log" || true
@@ -384,7 +386,7 @@ stop_preview() {
     while IFS= read -r line; do pid="${line%%|*}"; [[ "$pid" =~ ^[0-9]+$ ]] && tree+=("$pid"); done < <(preview_processes_in_group "$group")
   fi
 
-  for pid in "${tree[@]}"; do
+  for pid in ${tree[@]+"${tree[@]}"}; do
     [[ "$(process_pgid "$pid")" == "$group" ]] || continue
     command="$(process_command "$pid")"
     safe_preview_command "$command" || continue
@@ -394,8 +396,8 @@ stop_preview() {
     printf '发送 TERM：PID=%s PGID=%s 命令=%s\n' "$pid" "$group" "$command"
     kill -TERM "$pid" 2>/dev/null || true
   done
-  if ((${#candidates[@]})); then sleep 3; fi
-  for entry in "${candidates[@]}"; do
+  if [[ -n "${candidates[*]-}" ]]; then sleep 3; fi
+  for entry in ${candidates[@]+"${candidates[@]}"}; do
     pid="${entry%%|*}"; start="${entry#*|}"
     [[ "$(process_start_time "$pid")" == "$start" && "$(process_pgid "$pid")" == "$group" ]] || continue
     command="$(process_command "$pid")"

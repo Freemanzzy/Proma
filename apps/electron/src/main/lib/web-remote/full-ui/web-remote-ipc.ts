@@ -11,6 +11,7 @@ import { decodeWebRemoteValue, encodeWebRemoteValue } from './serialization'
 import { WebRemoteRegistrationTable } from './registration-table'
 import { getWebRemoteChannelPolicy, getDeclaredWebRemoteChannels, type WebRemoteChannelPolicyEntry } from './channel-policy'
 import { readWebRemoteHistoryMedia, selectWebRemoteHistoryWindow } from './sdk-history-window'
+import { getPersonalSessionUsage } from '../../personal-session-usage'
 
 const REQUEST_TIMEOUT_MS = 30_000
 const AGENT_SEND_ACCEPT_WINDOW_MS = 1_500
@@ -692,6 +693,20 @@ export class WebRemoteIpcBridge {
     const policy = this.policy(channel)
     const authorization = await this.authorize(client, channel, policy, args, message.confirmToken)
     if (authorization) { this.send(client, { type: 'response', id, ok: false, error: authorization }); return }
+    if (channel === 'agent:get-personal-session-usage') {
+      const usageMetricStart = Date.now()
+      const sessionId = args[0]
+      if (typeof sessionId !== 'string' || !/^[A-Za-z0-9_-]{8,}$/.test(sessionId)) { this.send(client, { type: 'response', id, ok: false, error: 'Error: 会话 ID 无效' }); return }
+      try {
+        const value = await getPersonalSessionUsage(sessionId, { childAllowed: (childId) => this.sessionAllowed(childId) })
+        const result = encodeWebRemoteValue(value)
+        const response = JSON.stringify({ type: 'response', id, ok: true, value: result })
+        const usageMetricBytes = Buffer.byteLength(response)
+        const bufferedPeak = this.sendForClient(client, response)
+        this.recordIpcMetric(client, channel, response, usageMetricBytes, Date.now() - usageMetricStart, bufferedPeak)
+      } catch (error) { this.send(client, { type: 'response', id, ok: false, error: serializeError(error) }) }
+      return
+    }
     this.ensureWrapped()
     const sender = getMainWindow()?.webContents
     if (!sender) { this.send(client, { type: 'response', id, ok: false, error: 'main window unavailable' }); return }
