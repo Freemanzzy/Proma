@@ -68,7 +68,7 @@ import { createOpenAIReasoningRequestExtension } from './pi-openai-reasoning-req
 import { mergeRuntimeEnv, type AgentRuntimeEnv } from '../agent-runtime-env'
 import { sanitizePiMessageImageContent, sanitizeToolResultImageContent } from '../image-content-validation'
 import { classifyProviderErrorKind, createImageContextBudget, PROMA_READ_IMAGE_RESIZE } from '../image-context-budget'
-import { createGoalCompactionExtension, createGoalRunFailLatch, injectGoalTaskData } from '../personal-goal-memory'
+import { buildGoalMemoryTools, createGoalCompactionExtension, createGoalRunFailLatch, injectGoalTaskData } from '../personal-goal-memory'
 import type { GoalMemoryCapability } from '../personal-goal-memory'
 import {
   convertPiMessage,
@@ -941,77 +941,6 @@ function normalizeStringArray(value: unknown): string[] | undefined {
   return items.length > 0 ? items : undefined
 }
 
-function buildGoalMemoryTools(
-  sdk: PiSdk,
-  capability: GoalMemoryCapability,
-  sessionId: string,
-  queryId: string,
-  sessionManager: { getLeafId(): string | null; getBranch(): Array<{id:string}> },
-): ToolDefinition[] {
-  const identity = { ownerId: capability.ownerId, sessionId, workspaceId: capability.workspaceId, queryId }
-  return [
-    sdk.defineTool({
-      name: 'GoalCheckpointRead',
-      label: '读取 Goal checkpoint',
-      description: '读取当前用户合同revision对应的checkpoint。模型报告与宿主观测分开；不能修改合同、授权或标记已验证完成。',
-      promptSnippet: '需要核对Goal进度时，读取当前checkpoint；模型报告不等于验证事实。',
-      parameters: Type.Object({}, { additionalProperties: false }),
-      async execute(_toolCallId, _params, signal) {
-        const response = await capability.request({ ...identity, operation: 'checkpoint_read' }, signal)
-        return createJsonToolResult(response)
-      },
-    }),
-    sdk.defineTool({
-      name: 'GoalEvidenceRead',
-      label: '读取 Goal 历史原文证据',
-      description: '在当前真实Pi branch内按精确entry ID、toolCall ID或字面关键词定位并分页读取原始JSONL entry；不接受任意路径或session。',
-      promptSnippet: '回读证据时选择精确entry、toolCall ID或字面关键词；过大/变更来源须停止并说明，不可摘要冒充原文。',
-      parameters: Type.Object({
-        mode: Type.Union([Type.Literal('entry'),Type.Literal('keyword'),Type.Literal('toolCall')]),
-        query: Type.String({ minLength: 1, maxLength: 500 }),
-        offset: Type.Integer({ minimum: 0 }),
-        limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
-      }, { additionalProperties: false }),
-      async execute(_toolCallId, params, signal) {
-        const leafId = sessionManager.getLeafId()
-        const branchEntryIds = sessionManager.getBranch().map((entry) => entry.id)
-        if (!leafId) return createJsonToolResult({status:'not-found',lines:[]})
-        const response = await capability.request({ ...identity, operation: 'evidence_read', mode:params.mode, query:params.query, offset:params.offset, limit:params.limit, branchEntryIds, leafId }, signal)
-        return createJsonToolResult(response)
-      },
-    }),
-    sdk.defineTool({
-      name: 'GoalCheckpointReport',
-      label: '报告 Goal 进度',
-      description: '以CAS序列更新模型报告、下一步、待用户问题及未知副作用。只能报告，不能写observed、修改合同或声称verified/completed。',
-      promptSnippet: '更新Goal进度只调用此工具；把未核验内容放入modelReported，不得伪造宿主观测。',
-      parameters: Type.Object({
-        status: Type.Union([Type.Literal('active'), Type.Literal('waiting_user'), Type.Literal('blocked'), Type.Literal('claimed_done')]),
-        modelReported: Type.Array(Type.String({ maxLength: 2_000 }), { maxItems: 50 }),
-        nextAction: Type.String({ maxLength: 2_000 }),
-        questions: Type.Array(Type.String({ maxLength: 2_000 }), { maxItems: 50 }),
-        unknownSideEffects: Type.Array(Type.String({ maxLength: 2_000 }), { maxItems: 50 }),
-      }, { additionalProperties: false }),
-      async execute(_toolCallId, params, signal) {
-        const contract = await capability.request({ ...identity, operation: 'checkpoint_read' }, signal)
-        if (!contract.checkpoint) return createJsonToolResult({ error: '当前Goal checkpoint不可用' })
-        const response = await capability.request({
-          ...identity, operation: 'checkpoint_model', input: {
-            goalId: contract.checkpoint.goalId,
-            revision: contract.checkpoint.revision,
-            status: params.status,
-            modelReported: params.modelReported,
-            nextAction: params.nextAction,
-            questions: params.questions,
-            unknownSideEffects: params.unknownSideEffects,
-          },
-        }, signal)
-        return createJsonToolResult(response)
-      },
-    }),
-  ] as ToolDefinition[]
-}
-
 function buildPromaProductToolDefinitions(sdk: PiSdk, canUseTool: PiAgentQueryOptions['canUseTool']): ToolDefinition[] {
   const tasks = new Map<string, PromaTaskItem>()
 
@@ -1540,7 +1469,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
           input.runtimeEnv,
         ),
         ...buildPromaProductToolDefinitions(sdk, input.canUseTool),
-        ...(input.goalMemoryCapability ? buildGoalMemoryTools(sdk, input.goalMemoryCapability, input.sessionId, goalQueryId, sessionManager) : []),
+        ...(input.goalMemoryCapability ? buildGoalMemoryTools(sdk, input.goalMemoryCapability, input.sessionId, goalQueryId, sessionManager, createJsonToolResult) : []),
         ...wrapCustomToolDefinitions(input.customTools, input.canUseTool),
       ]
 

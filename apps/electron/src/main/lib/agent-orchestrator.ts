@@ -83,7 +83,8 @@ import { cleanUserMessageForTitle, createFallbackTitle, sanitizeGeneratedTitle, 
 import { fetchAgentTitleWithFallback } from './agent-title-retry'
 import { claimWorkspaceMemoryRefreshOpportunity } from './agent-memory-refresh-service'
 import { resolveRuntimeAdditionalDirectories } from './agent-orchestrator-vault-access'
-import { buildGoalContextPack, createGoalContract, createGoalMemoryCapability, disableGoalForSession, getGoalCheckpoint, getGoalContract, isGoalMemoryEnabled, parseGoalCommand } from './personal-goal-memory'
+import { buildGoalRestoreReply, createGoalContract, createGoalMemoryCapability, disableGoalForSession, getGoalCheckpoint, getGoalContract, isGoalCommandSourceAllowed, isGoalMemoryEnabled, parseGoalCommand } from './personal-goal-memory'
+import type { GoalMemoryCapability } from './personal-goal-memory'
 
 // ===== 类型定义 =====
 
@@ -684,6 +685,7 @@ export class AgentOrchestrator {
     let userMessagePersisted = false
     let initialUserMessageUuid: string | undefined
     let sessionMeta = getAgentSessionMeta(sessionId)
+    let goalMemoryCapability: GoalMemoryCapability | undefined
 
     const completeBeforeRun = (options: {
       stoppedByUser?: boolean
@@ -763,7 +765,7 @@ export class AgentOrchestrator {
     }
 
     // Goal 指令只在明确启用时由宿主解析；模型从未获得创建/修订合同的工具。
-    if (isGoalMemoryEnabled()) {
+    if (isGoalMemoryEnabled() && isGoalCommandSourceAllowed({ triggeredBy: input.triggeredBy, automationContext, userMessage })) {
       try {
         const command = parseGoalCommand(userMessage)
         if (command) {
@@ -788,7 +790,7 @@ export class AgentOrchestrator {
               reply = checkpoint ? `Goal revision ${contract.revision} · 状态 ${checkpoint.status} · ${contract.hash}` : 'Goal checkpoint 不可用。'
             } else {
               const checkpoint = getGoalCheckpoint(contract.id, contract.revision)
-              reply = checkpoint ? `以下恢复包只提供恢复信息，不会自动执行：\\n\\n${buildGoalContextPack(contract, checkpoint)}` : 'Goal checkpoint 不可用。'
+              reply = checkpoint ? buildGoalRestoreReply(contract, checkpoint) : 'Goal checkpoint 不可用。'
             }
           }
           const assistantMessage: AgentMessage = { id: randomUUID(), role: 'assistant', content: reply, createdAt: Date.now() }
@@ -975,6 +977,7 @@ export class AgentOrchestrator {
     })
 
     const releaseActiveRun = (): void => {
+      goalMemoryCapability?.revoke()
       // 在发送 STREAM_COMPLETE 前释放 active slot，避免渲染进程已进入空闲态、
       // 主进程仍在 finally 前短暂拒绝下一条消息。
       const ownsActiveRun = this.activeSessions.get(sessionId) === runGeneration
@@ -1586,15 +1589,17 @@ export class AgentOrchestrator {
       const { feishuBridgeManager } = await import('./feishu-bridge-manager')
       const hasFeishuBinding = feishuBridgeManager.hasSessionBinding(sessionId)
       const goalWorkspaceId = workspaceId ?? workspaceSlug ?? 'default'
-      const goalMemoryCapability = activeGoal
-        ? createGoalMemoryCapability(sessionId, goalWorkspaceId, async () => {
+      goalMemoryCapability = activeGoal
+        ? createGoalMemoryCapability(sessionId, goalWorkspaceId, async (signal) => {
             const meta = getAgentSessionMeta(sessionId)
-            if (!meta?.sdkSessionId || !meta.piSessionFile) return null
+            if (!meta?.sdkSessionId || !meta.piSessionFile || signal?.aborted) return null
             try {
               const fs = await import('node:fs/promises')
               const pathApi = await import('node:path')
               const canonicalPath = await fs.realpath(meta.piSessionFile)
+              if (signal?.aborted) return null
               const stat = await fs.stat(canonicalPath)
+              if (signal?.aborted) return null
               return {
                 sessionId, workspaceId: meta.workspaceId ?? goalWorkspaceId, artifactId: meta.sdkSessionId,
                 artifactIdentity: `${meta.sdkSessionId}:${stat.dev}:${stat.ino}`,

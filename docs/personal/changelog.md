@@ -2182,3 +2182,13 @@
 - **清理与计划外发现**：只删除本轮会话、Pi 原文、新 sidecar 与临时配对材料；撤销本轮设备、关闭测试空间及标准 dev，开发端口无监听、临时 8443 已撤，正式 443 保留。原有启动逻辑曾把 fixture 的一条既有空草稿清理到自动备份；停机后恢复该备份中的原始 metadata，原 20 个会话 ID 齐全，所有备份保留。未重置整个 fixture，也未覆盖既有业务数据。
 - **局限与待办**：真实模型仅一个合成会话的三轮，不能证明永久遵循或任意模型语义可靠性。手动压缩返回的 usage 是合成零值，摘要生成的实际 token 用量未由该结果暴露，不能宣称摘要无成本。SQLite 同步事务段不能由 Promise deadline 硬抢占。自动 threshold/overflow 与故障取消通过确定性 hook 测试/注入核对，并非真实服务端故障实验。原 transform/图片预算链的接线已按源码核对，但本轮未做图片附件与 Goal 包共存的真实模型回归。Codex 独立审查及最终只读计划验收尚待完成，后续结论另追加，不将本记录视为合入许可。
 - **证据与文档**：脱敏统计、原始实验记录和审查材料保存在执行会话工作台 `verification-final/`，不进入公开 Git。同步 `PERSONAL.md`、`backlog.md` 与功能 SSOT；无需修改共同维护规则。未将阶段性测试流水写为长期协作记忆。
+
+## 2026-11-03: Goal Memory M0 首轮审查修复与最终快照回归
+
+- **审查裁决**：Codex CLI 0.165.0 首轮以 `--base personal --rules docs/personal/review-rules.md` 只读审查，5项P2、1项P3全部采纳，无暂缓：大leaf验证误用正文读取上限→分离hash-only扫描；完整checkpoint索引外泄→有界分页DTO；首次历史EvidenceRead无法初始化→验证持久branch前缀后绑定；水位includes二次复杂度→Set；关键词漏任意参数与数组尾→完整字面搜索、预算到限显式too-large；Goal工具定义侵入adapter→迁入个人模块。报告保存在执行会话私有工作台，不进入Git。
+- **父额外核实与修复**：旧模型报告不可被最新revision重新标记，工具显式提交goalId/revision/expectedModelSequence，独立modelSequence CAS拒绝重放而保留host水位；main精确绑定query并在结束/取消时撤销；automation/delegation等来源不能管理用户合同，保留人类external。restore明确历史快照与本次未核验来源。父跨工具回归又发现每轮turn_end会让分页cursor作废，现用main单query有界progress快照；首次scan中途revoke曾迟到写水位，现由owner生命周期signal取消所有pending工作，嵌套写前检查，调用方不传signal也不例外。
+- **最终快照独立验证**：旧6失败全部转通过；query身份、28页逐轮持久toolResult/turn_end后完整分页及revoke中途无写通过；30×10装载、15证据边界、21压缩hook、4类mutation（控制先过、突变因断言失败）重跑通过。50,000项水位同机单次容量计时由约725.5 ms降至最终约36.8 ms，仅作算法回归，不是UI性能基准。全仓870 pass / 0 fail、2316 assertions；typecheck、personal scripts、main/runtime/preload/renderer/web-preload构建通过，全部改动源码hash在前后相同。
+- **最终短模型回归**：获用户另行批准后，fixture新会话只运行一次短模型run（28,283 ms）；真实utility依次调用GoalEvidenceRead、GoalCheckpointRead、GoalCheckpointReport，4次provider请求各有单份预算内恢复包。实际工具content/details为6,492 / 1,114 / 1,126 bytes；显式revision/modelSequence参数与sidecar一致，waiting_user及待用户问题保留，原文hash/ancestry独立核对。宿主set为16 ms，无provider/utility/标题调用。没有重跑长压缩；此前三轮真实摘要仅属于修复前基线。
+- **清理及范围纠偏**：新会话、设备、live artifact/sidecar与空间已清理，dev/8443关闭、正式443保留。原启动逻辑自动清理一条旧空草稿、生成disabled渠道预设；停机后只恢复该草稿、撤销新预设，原20会话及4份配置hash恢复，备份保留。执行工曾误升版本，父发现后已撤回，package/lock与HEAD一致，未提交或运行误升版。未触正式数据、SDK源码或既有schema；不合并、推送、打包、安装。
+- **状态**：修复后Codex针对性复审和新Proma只读计划验收仍待完成，本条不是可合入结论。最终版没有重新做长压缩、真实自动threshold/overflow故障或图片与恢复包共存测试；同步SQLite事务不可被Promise deadline硬抢占的限制仍在。
+- **文档/记忆**：更新PERSONAL、backlog、功能SSOT及本追加记录；无需修改共同维护规则。未把阶段性验证流水升级为长期协作记忆。
