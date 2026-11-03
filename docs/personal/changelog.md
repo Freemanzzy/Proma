@@ -2168,3 +2168,17 @@
 - **#17 安装后续**：更新共享 Skill `shared-skills`（`~/.proma/shared-skills/shared-skills/`，不在仓库）1.0.2 → 1.0.3：「新建工作区后」改为无需操作；`check-shared-skills.sh` 保留为检查工具，以及切回官方版或回滚到 `1286ff19` 之前版本前为新工作区补链接的工具；注明不要改名或移走共享目录。脚本未改动；真实数据只读检查 rc=0。
 - **backlog**：当前安装改为 `1286ff19`；“已合入、未安装”清空；#14/#16/#17 标为已安装；#15 补 `DEP0180`。
 - **同步文档**：`docs/personal/backlog.md`、本记录。
+
+
+## 2026-11-03: Goal Memory M0 实施与隔离开发验证（审查前快照）
+
+- **范围**：在 `feat/goal-memory-m0-20261103`（基线 `personal` `1c373673`）实现默认关闭的目标合同、checkpoint、证据回读与手动恢复。未合并、推送、打包或安装；不包含 M1 自动续跑、调度、完成控制器或权限授予。功能规范以 `goal-memory.md` 为准。
+- **实现**：独立 `personal-goal-memory.ts` 使用现有 `node:sqlite`、schemaVersion 1、DELETE journal 与 FULL durability。合同保留原文和用户消息引用，revision/hash 不可变、变更必须 CAS；checkpoint 使用独立 sequence CAS。模型只能报告未验证进度，不能改合同、写宿主 observed 或设为 verified/completed。provider-only 单份 task-data 包保留必需字段，UTF-8 预算不足时阻塞；历史证据仅限当前会话、artifact 和 branch，并验证旧 entry hashes、身份与 ancestry。所有压缩原因等待严格 true 的持久化 ack，失败后锁住本 run 的 provider/tool 路径。
+- **上游触点**：`agent-orchestrator.ts`（宿主命令与 capability bootstrap）、`adapters/pi-agent-adapter.ts`（context、Goal 工具、turn/compact hook 接线）、`adapters/pi-utility-adapter.ts`（内部 capability 转发）、`utility/agent-runtime.ts`（可取消 RPC）、`utility/agent-runtime-request-timeout.ts`（该 capability 的限时）与 shared `agent-runtime.ts`（方法名）。策略和存储集中在个人版模块。未修改 SDK/node_modules 源码、patches、依赖、版本号、Pi transcript/索引或 planning schema。
+- **独立确定性验证**：30 个不同语义案例 × 10 次装载/恢复、15 项生产证据 capability、21 项压缩 hook 边界与 4 类核心不变量变异检验通过。实施期发现的旧原文尾部搜索遗漏、旧 hash 被重新 baseline、context 未及时拒绝 artifact/workspace 变化等问题已修复并以生产 facade 回归，不以旧原型测试代替最终证据。30×10 只证明程序装载，不是 300 次模型压缩。
+- **仓库验证**：全仓 `bun test` **870 pass / 0 fail**（2316 assertions）；全仓 typecheck、personal scripts、main / agent-runtime / preload / renderer / web-preload 构建及 diff check 通过。首轮父测试脚本误将 fixture 目录环境变量强加给既有路径断言，造成 harness 环境冲突；保留失败日志，在临时 HOME 下取消该变量后重跑通过，未为此修改产品逻辑。
+- **真实 fixture 实验**：只用新会话与已启用 API Key 模型，未复制正式材料。3 次实际手动摘要耗时约 **34.1 / 43.9 / 51.5 秒**，压缩前估计 **70,945 / 77,736 / 77,446** tokens，压缩后估计 **37,990 / 38,002 / 38,140** tokens；另一次小上下文 noop 未计数。每次模型均经 GoalEvidenceRead 回读同一条压缩前原始 entry，父独立比较确认五条约束与待用户问题逐字保留；sidecar 合同、branch/entry hashes 与 3 个 ack 先于摘要落盘均通过。实际 utility 子进程与主进程归属已观测。
+- **真实请求与回退**：补充 utility 网络传输观察，仅保留合成 Goal 片段与元数据，不记录授权头/密钥；本地 loopback 自测确认观察器不改变请求字节。修订后的两次实际 provider 请求各只有一份恢复包、全部必需字段原样保留，用户输入的相似 marker 未被过滤。revision 2 的首次 checkpoint read 为 sequence 0、observed/modelReported 为空，不继承旧报告。stale revision 拒绝；宿主 set/status/revise/restore/off 不触发 provider 或标题生成。全局环境关闭及会话 off 后普通消息成功、实际请求无 Goal 包/工具，历史保留且普通消息前后数据库字节相同。
+- **清理与计划外发现**：只删除本轮会话、Pi 原文、新 sidecar 与临时配对材料；撤销本轮设备、关闭测试空间及标准 dev，开发端口无监听、临时 8443 已撤，正式 443 保留。原有启动逻辑曾把 fixture 的一条既有空草稿清理到自动备份；停机后恢复该备份中的原始 metadata，原 20 个会话 ID 齐全，所有备份保留。未重置整个 fixture，也未覆盖既有业务数据。
+- **局限与待办**：真实模型仅一个合成会话的三轮，不能证明永久遵循或任意模型语义可靠性。手动压缩返回的 usage 是合成零值，摘要生成的实际 token 用量未由该结果暴露，不能宣称摘要无成本。SQLite 同步事务段不能由 Promise deadline 硬抢占。自动 threshold/overflow 与故障取消通过确定性 hook 测试/注入核对，并非真实服务端故障实验。原 transform/图片预算链的接线已按源码核对，但本轮未做图片附件与 Goal 包共存的真实模型回归。Codex 独立审查及最终只读计划验收尚待完成，后续结论另追加，不将本记录视为合入许可。
+- **证据与文档**：脱敏统计、原始实验记录和审查材料保存在执行会话工作台 `verification-final/`，不进入公开 Git。同步 `PERSONAL.md`、`backlog.md` 与功能 SSOT；无需修改共同维护规则。未将阶段性测试流水写为长期协作记忆。

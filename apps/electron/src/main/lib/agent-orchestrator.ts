@@ -83,6 +83,7 @@ import { cleanUserMessageForTitle, createFallbackTitle, sanitizeGeneratedTitle, 
 import { fetchAgentTitleWithFallback } from './agent-title-retry'
 import { claimWorkspaceMemoryRefreshOpportunity } from './agent-memory-refresh-service'
 import { resolveRuntimeAdditionalDirectories } from './agent-orchestrator-vault-access'
+import { buildGoalContextPack, createGoalContract, createGoalMemoryCapability, disableGoalForSession, getGoalCheckpoint, getGoalContract, isGoalMemoryEnabled, parseGoalCommand } from './personal-goal-memory'
 
 // ===== 类型定义 =====
 
@@ -761,6 +762,51 @@ export class AgentOrchestrator {
       }
     }
 
+    // Goal 指令只在明确启用时由宿主解析；模型从未获得创建/修订合同的工具。
+    if (isGoalMemoryEnabled()) {
+      try {
+        const command = parseGoalCommand(userMessage)
+        if (command) {
+          const userRef = initialUserMessageUuid ?? userMessageUuid ?? randomUUID()
+          let reply: string
+          if (command.command === 'set' || command.command === 'revise') {
+            const contract = createGoalContract({
+              sessionId,
+              workspaceId: requestedWorkspaceId ?? sessionMeta?.workspaceId ?? 'default',
+              ...command.input,
+              userMessageRef: userRef,
+            })
+            reply = `已保存 Goal 合同 revision ${contract.revision}（${contract.hash.slice(0, 12)}）。原文保留；未声明内容不会被推断为授权。`
+          } else if (command.command === 'off') {
+            disableGoalForSession(sessionId)
+            reply = '已在本会话关闭 Goal 恢复；已保存合同与历史数据保留。'
+          } else {
+            const contract = getGoalContract(sessionId, requestedWorkspaceId ?? sessionMeta?.workspaceId ?? 'default')
+            if (!contract) reply = '本会话没有启用中的 Goal。可用 /goal set <JSON合同> 创建。'
+            else if (command.command === 'status') {
+              const checkpoint = getGoalCheckpoint(contract.id, contract.revision)
+              reply = checkpoint ? `Goal revision ${contract.revision} · 状态 ${checkpoint.status} · ${contract.hash}` : 'Goal checkpoint 不可用。'
+            } else {
+              const checkpoint = getGoalCheckpoint(contract.id, contract.revision)
+              reply = checkpoint ? `以下恢复包只提供恢复信息，不会自动执行：\\n\\n${buildGoalContextPack(contract, checkpoint)}` : 'Goal checkpoint 不可用。'
+            }
+          }
+          const assistantMessage: AgentMessage = { id: randomUUID(), role: 'assistant', content: reply, createdAt: Date.now() }
+          const persistedReply: SDKMessage = {
+            type: 'assistant', message: { content: [{ type: 'text', text: reply }] }, parent_tool_use_id: null,
+            uuid: assistantMessage.id, _createdAt: assistantMessage.createdAt,
+          } as unknown as SDKMessage
+          appendSDKMessages(sessionId, [persistedReply])
+          callbacks.onComplete([assistantMessage], { startedAt: streamStartedAt, ...(input.runGeneration != null ? { runGeneration: input.runGeneration } : {}) })
+          return
+        }
+      } catch (error) {
+        callbacks.onError(error instanceof Error ? error.message : 'Goal 命令失败')
+        completeBeforeRun()
+        return
+      }
+    }
+
     // 0.5 清除上一轮中断标记
     try { updateAgentSessionMeta(sessionId, { stoppedByUser: false }) } catch { /* 会话可能已删除 */ }
 
@@ -1121,6 +1167,7 @@ export class AgentOrchestrator {
         console.log(`[Agent 编排] 注入 referenced_planning: ${mentionedTodoIds?.length ?? 0} todos, ${mentionedCalendarEventIds?.length ?? 0} calendar events`)
       }
 
+      const activeGoal = isGoalMemoryEnabled() ? getGoalContract(sessionId, workspaceId ?? workspaceSlug ?? 'default') : null
       const contextualMessage = [dynamicCtx, enrichedMessage].filter(Boolean).join('\n\n')
 
       const isCompactCommand = userMessage.trim() === '/compact'
@@ -1538,8 +1585,27 @@ export class AgentOrchestrator {
       let githubCopilotCredentialsSnapshot = githubCopilotOAuthCredentials
       const { feishuBridgeManager } = await import('./feishu-bridge-manager')
       const hasFeishuBinding = feishuBridgeManager.hasSessionBinding(sessionId)
+      const goalWorkspaceId = workspaceId ?? workspaceSlug ?? 'default'
+      const goalMemoryCapability = activeGoal
+        ? createGoalMemoryCapability(sessionId, goalWorkspaceId, async () => {
+            const meta = getAgentSessionMeta(sessionId)
+            if (!meta?.sdkSessionId || !meta.piSessionFile) return null
+            try {
+              const fs = await import('node:fs/promises')
+              const pathApi = await import('node:path')
+              const canonicalPath = await fs.realpath(meta.piSessionFile)
+              const stat = await fs.stat(canonicalPath)
+              return {
+                sessionId, workspaceId: meta.workspaceId ?? goalWorkspaceId, artifactId: meta.sdkSessionId,
+                artifactIdentity: `${meta.sdkSessionId}:${stat.dev}:${stat.ino}`,
+                path: canonicalPath, sessionsDirectory: pathApi.join(getSdkConfigDir(), 'sessions'),
+              }
+            } catch { return null }
+          })
+        : undefined
       const queryOptions: PiAgentQueryOptions = {
         sessionId,
+        ...(goalMemoryCapability ? { goalMemoryCapability } : {}),
         prompt: finalPrompt,
         // 旧持久化模型 ID 可能带 `[1m]` 上下文后缀；Pi runtime 不支持该变体：
         // 智谱等端点不识别 glm-5.2[1m] 这类后缀，会返回 1211「模型不存在」。

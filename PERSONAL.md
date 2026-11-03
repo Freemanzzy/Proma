@@ -15,6 +15,12 @@
 
 个人版以完整跟随官方正式 tag 为默认（方案 A），保留数据格式兼容和回退开源版能力。主要差异：手机 Web Remote（loopback + Tailscale、IPC deny-by-default；代码高亮改用不依赖 WebAssembly 的引擎，CSP 不放宽）、桌面 iOS 模拟器面板、EgoBrowser 原生工具、协作子 Agent 完成后自动唤醒父会话（可在 `personal-settings.json` 关闭）、个人版数据导入/备份/打包/更新脚本、GPT-6.1 Sol Codex 模型支持、Agent 图片上下文预算（Read 缩图、请求前旧图移出）与请求级诊断日志，以及隐藏不使用的桥接、Copilot 新建入口和 Agent Island 初始化；保留旧数据兼容。详细实现和逐次改动见 [`docs/personal/changelog.md`](./docs/personal/changelog.md)，手机访问见 [`docs/personal/web-remote.md`](./docs/personal/web-remote.md)，子任务自动唤醒见 [`docs/personal/delegation-auto-wake.md`](./docs/personal/delegation-auto-wake.md)。
 
+## 本分支实验（尚未合入）
+
+- **Goal Memory M0**：默认关闭的目标合同、checkpoint、证据回读与手动恢复实验。功能权威说明见 [`docs/personal/goal-memory.md`](./docs/personal/goal-memory.md)，验收状态见 [`docs/personal/backlog.md`](./docs/personal/backlog.md)。本分支尚未完成验收，不代表当前安装版已具备该能力；不加入自动续跑或完成判定。
+  - 上游触点：`agent-orchestrator.ts` 只接宿主命令和 bootstrap；`adapters/pi-agent-adapter.ts` 接 context、工具与压缩 hook；`adapters/pi-utility-adapter.ts`、`utility/agent-runtime.ts`、`utility/agent-runtime-request-timeout.ts` 与 shared `agent-runtime.ts` 接内部 capability/timeout。存储与策略位于独立 `personal-goal-memory.ts`。
+  - 兼容与回退：不修改 Pi transcript、会话索引或 planning schema，不新增依赖；取消 `PROMA_PERSONAL_GOAL_MEMORY=1` 即关闭新路径，独立 sidecar 保留。未获合并、推送、打包或安装授权。
+
 ## 同步规则
 
 - `main` 只用于跟随/对照官方；同步只选官方正式 tag。使用 `sync/YYYY-MM-DD` 分支完成合并、冲突处理、验证；功能开发用 `feature/*`。

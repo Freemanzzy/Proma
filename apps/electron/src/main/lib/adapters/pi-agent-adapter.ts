@@ -68,6 +68,8 @@ import { createOpenAIReasoningRequestExtension } from './pi-openai-reasoning-req
 import { mergeRuntimeEnv, type AgentRuntimeEnv } from '../agent-runtime-env'
 import { sanitizePiMessageImageContent, sanitizeToolResultImageContent } from '../image-content-validation'
 import { classifyProviderErrorKind, createImageContextBudget, PROMA_READ_IMAGE_RESIZE } from '../image-context-budget'
+import { createGoalCompactionExtension, createGoalRunFailLatch, injectGoalTaskData } from '../personal-goal-memory'
+import type { GoalMemoryCapability } from '../personal-goal-memory'
 import {
   convertPiMessage,
   convertResultMessage,
@@ -172,6 +174,10 @@ export interface PiAgentQueryOptions extends AgentQueryInput {
   /** WebSocket 建连超时，单位毫秒；0 表示交给 Pi SDK 禁用超时 */
   websocketConnectTimeoutMs?: number
   runtimeEnv?: AgentRuntimeEnv
+  /** Main-process Goal service capability; utility serialization carries only its owner descriptor. */
+  goalMemoryCapability?: GoalMemoryCapability
+  /** Runtime-generated query owner ID, shared with main process for capability validation. */
+  goalMemoryQueryId?: string
   /** 手动压缩请求：走 pi 原生 session.compact()，而非把 /compact 当普通 prompt 发给模型 */
   compactRequest?: boolean
   /** ChatGPT Codex Fast Mode；仅 openai-codex 的受支持模型实际注入 priority service tier。 */
@@ -935,6 +941,77 @@ function normalizeStringArray(value: unknown): string[] | undefined {
   return items.length > 0 ? items : undefined
 }
 
+function buildGoalMemoryTools(
+  sdk: PiSdk,
+  capability: GoalMemoryCapability,
+  sessionId: string,
+  queryId: string,
+  sessionManager: { getLeafId(): string | null; getBranch(): Array<{id:string}> },
+): ToolDefinition[] {
+  const identity = { ownerId: capability.ownerId, sessionId, workspaceId: capability.workspaceId, queryId }
+  return [
+    sdk.defineTool({
+      name: 'GoalCheckpointRead',
+      label: '读取 Goal checkpoint',
+      description: '读取当前用户合同revision对应的checkpoint。模型报告与宿主观测分开；不能修改合同、授权或标记已验证完成。',
+      promptSnippet: '需要核对Goal进度时，读取当前checkpoint；模型报告不等于验证事实。',
+      parameters: Type.Object({}, { additionalProperties: false }),
+      async execute(_toolCallId, _params, signal) {
+        const response = await capability.request({ ...identity, operation: 'checkpoint_read' }, signal)
+        return createJsonToolResult(response)
+      },
+    }),
+    sdk.defineTool({
+      name: 'GoalEvidenceRead',
+      label: '读取 Goal 历史原文证据',
+      description: '在当前真实Pi branch内按精确entry ID、toolCall ID或字面关键词定位并分页读取原始JSONL entry；不接受任意路径或session。',
+      promptSnippet: '回读证据时选择精确entry、toolCall ID或字面关键词；过大/变更来源须停止并说明，不可摘要冒充原文。',
+      parameters: Type.Object({
+        mode: Type.Union([Type.Literal('entry'),Type.Literal('keyword'),Type.Literal('toolCall')]),
+        query: Type.String({ minLength: 1, maxLength: 500 }),
+        offset: Type.Integer({ minimum: 0 }),
+        limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
+      }, { additionalProperties: false }),
+      async execute(_toolCallId, params, signal) {
+        const leafId = sessionManager.getLeafId()
+        const branchEntryIds = sessionManager.getBranch().map((entry) => entry.id)
+        if (!leafId) return createJsonToolResult({status:'not-found',lines:[]})
+        const response = await capability.request({ ...identity, operation: 'evidence_read', mode:params.mode, query:params.query, offset:params.offset, limit:params.limit, branchEntryIds, leafId }, signal)
+        return createJsonToolResult(response)
+      },
+    }),
+    sdk.defineTool({
+      name: 'GoalCheckpointReport',
+      label: '报告 Goal 进度',
+      description: '以CAS序列更新模型报告、下一步、待用户问题及未知副作用。只能报告，不能写observed、修改合同或声称verified/completed。',
+      promptSnippet: '更新Goal进度只调用此工具；把未核验内容放入modelReported，不得伪造宿主观测。',
+      parameters: Type.Object({
+        status: Type.Union([Type.Literal('active'), Type.Literal('waiting_user'), Type.Literal('blocked'), Type.Literal('claimed_done')]),
+        modelReported: Type.Array(Type.String({ maxLength: 2_000 }), { maxItems: 50 }),
+        nextAction: Type.String({ maxLength: 2_000 }),
+        questions: Type.Array(Type.String({ maxLength: 2_000 }), { maxItems: 50 }),
+        unknownSideEffects: Type.Array(Type.String({ maxLength: 2_000 }), { maxItems: 50 }),
+      }, { additionalProperties: false }),
+      async execute(_toolCallId, params, signal) {
+        const contract = await capability.request({ ...identity, operation: 'checkpoint_read' }, signal)
+        if (!contract.checkpoint) return createJsonToolResult({ error: '当前Goal checkpoint不可用' })
+        const response = await capability.request({
+          ...identity, operation: 'checkpoint_model', input: {
+            goalId: contract.checkpoint.goalId,
+            revision: contract.checkpoint.revision,
+            status: params.status,
+            modelReported: params.modelReported,
+            nextAction: params.nextAction,
+            questions: params.questions,
+            unknownSideEffects: params.unknownSideEffects,
+          },
+        }, signal)
+        return createJsonToolResult(response)
+      },
+    }),
+  ] as ToolDefinition[]
+}
+
 function buildPromaProductToolDefinitions(sdk: PiSdk, canUseTool: PiAgentQueryOptions['canUseTool']): ToolDefinition[] {
   const tasks = new Map<string, PromaTaskItem>()
 
@@ -1383,6 +1460,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
   private activeSessions = new Map<string, ActivePiSession>()
 
   async *query(input: PiAgentQueryOptions): AsyncIterable<SDKMessage> {
+    const goalQueryId = input.goalMemoryQueryId ?? randomUUID()
     const active = createActivePiSession()
     this.activeSessions.set(input.sessionId, active)
     const queue = createAsyncQueue<SDKMessage>()
@@ -1462,6 +1540,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
           input.runtimeEnv,
         ),
         ...buildPromaProductToolDefinitions(sdk, input.canUseTool),
+        ...(input.goalMemoryCapability ? buildGoalMemoryTools(sdk, input.goalMemoryCapability, input.sessionId, goalQueryId, sessionManager) : []),
         ...wrapCustomToolDefinitions(input.customTools, input.canUseTool),
       ]
 
@@ -1501,8 +1580,10 @@ export class PiAgentAdapter implements AgentProviderAdapter {
             initialSources: input.projectInstructionScope.initialSources,
           })
         : undefined
+      const goalRunFailure = createGoalRunFailLatch(() => queue.fail(new Error('Goal checkpoint/压缩前持久确认失败；本次运行已阻止继续请求与工具调用')))
       const extensionFactories = [
         ...(projectInstructionScope ? [projectInstructionScope.createExtension()] : []),
+        ...(input.goalMemoryCapability ? [createGoalCompactionExtension(input.goalMemoryCapability, input.sessionId, goalQueryId, goalRunFailure.fail)] : []),
         ...(openAIReasoningProfile
           ? [createOpenAIReasoningRequestExtension({
               profile: openAIReasoningProfile,
@@ -1557,9 +1638,20 @@ export class PiAgentAdapter implements AgentProviderAdapter {
       const previousTransformContext = session.agent.transformContext
       const applyImageBudget = createImageContextBudget()
       session.agent.transformContext = async (messages, signal) => {
-        const sanitized = sanitizePiMessageImageContent(
-          await previousTransformContext?.(messages, signal) ?? messages,
-        )
+        if (goalRunFailure.isFailed()) throw new Error('Goal durable ack 失败；本次 Agent run 已 fail closed')
+        let transformed = await previousTransformContext?.(messages, signal) ?? messages
+        if (input.goalMemoryCapability) {
+          const capability = input.goalMemoryCapability
+          const currentLeafId=sessionManager.getLeafId()
+          const currentBranchEntryIds=sessionManager.getBranch().map((entry)=>entry.id)
+          const loaded = await capability.request({
+            operation: 'context', ownerId: capability.ownerId, sessionId: input.sessionId,
+            workspaceId: capability.workspaceId, queryId: goalQueryId,
+            artifactId:sessionManager.getSessionId(), leafId:currentLeafId, branchEntryIds:currentBranchEntryIds,
+          }, signal)
+          if (loaded.context) transformed = injectGoalTaskData(transformed, loaded.context)
+        }
+        const sanitized = sanitizePiMessageImageContent(transformed)
         const budgeted = await applyImageBudget(sanitized, async (bytes, mimeType, resizeOptions) => {
           const resized = await sdk.resizeImage(bytes, mimeType, resizeOptions)
           return resized ? { data: Buffer.from(resized.data).toString('base64'), mimeType: resized.mimeType } : null
@@ -1911,6 +2003,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
       })
 
       if (input.compactRequest) {
+        // session_before_compact 扩展覆盖手动、阈值与 overflow 路径，并在 ack 失败时 cancel/abort。
         // 手动压缩：走 pi 原生 session.compact()，而非把 /compact 当普通 prompt 发给模型。
         // compaction_start/end 事件已在上面的 subscribe 中转成 compacting/compact_boundary system 消息；
         // compact() 不发 agent_end，故这里补一个合成 result 消息收束本轮（供 orchestrator 结束消费循环）。
