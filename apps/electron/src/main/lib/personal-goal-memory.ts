@@ -619,9 +619,16 @@ const GOAL_ARTIFACT_SCAN_MAX_BYTES = 128 * 1024 * 1024
 const GOAL_ARTIFACT_MAX_ENTRIES = 50_000
 const GOAL_ARTIFACT_MAX_LINE_BYTES = 256 * 1024
 const GOAL_ARTIFACT_PAGE_BYTES = 512 * 1024
+const GOAL_EVIDENCE_SNAPSHOT_BUDGET_BYTES = 16 * 1024 * 1024
 
 type ArtifactMeta = { id:string; parentId:string|null; offset:number; length:number; tooLarge:boolean; toolCallIds:string[]; sha256?:string }
-type ArtifactScanResult = {status:'ok'|'not-found'|'changed'|'invalid'|'too-large'; lines:string[]; nextOffset?:number; entryHashes?:Record<string,string>; incomplete?:boolean}
+type GoalEvidenceSnapshotEntry = { id:string; sha256:string; matched:boolean }
+type GoalEvidencePageSnapshot = {
+  goalId:string; revision:number; artifactIdentity:string; mode:'entry'|'keyword'|'toolCall'; query:string
+  entries:GoalEvidenceSnapshotEntry[]; nextOffset:number
+}
+type ArtifactScanOptions = { captureEvidenceSnapshot?:boolean; fixedEvidenceMatchIds?:ReadonlySet<string> }
+type ArtifactScanResult = {status:'ok'|'not-found'|'changed'|'invalid'|'too-large'; lines:string[]; nextOffset?:number; entryHashes?:Record<string,string>; snapshotEntries?:GoalEvidenceSnapshotEntry[]; incomplete?:boolean}
 
 type LiteralSearchBudget = { nodes: number; exhausted: boolean }
 
@@ -635,7 +642,7 @@ function containsArtifactLiteral(value:unknown,needle:string,depth=0,budget:Lite
   return false
 }
 
-async function scanBoundArtifact(binding:HostGoalArtifactBinding, branchEntryIds:string[], leafId:string, mode:'entry'|'keyword'|'toolCall', query:string, offset:number, limit:number, signal?:AbortSignal, requiredIds:string[]=[], expectedHashes:Record<string,string>={}, hashOnly=false, allowUnpersistedSuffix=false):Promise<ArtifactScanResult> {
+async function scanBoundArtifact(binding:HostGoalArtifactBinding, branchEntryIds:string[], leafId:string, mode:'entry'|'keyword'|'toolCall', query:string, offset:number, limit:number, signal?:AbortSignal, requiredIds:string[]=[], expectedHashes:Record<string,string>={}, hashOnly=false, allowUnpersistedSuffix=false, options:ArtifactScanOptions={}):Promise<ArtifactScanResult> {
   const fs=await import('node:fs'); const fsp=await import('node:fs/promises'); const pathApi=await import('node:path')
   if (!Array.isArray(branchEntryIds)||branchEntryIds.length<1||branchEntryIds.length>GOAL_ARTIFACT_MAX_ENTRIES||branchEntryIds.at(-1)!==leafId||!Number.isSafeInteger(offset)||offset<0||!query||query.length>500) return {status:'invalid',lines:[]}
   let canonicalPath:string; let before:Awaited<ReturnType<typeof fsp.stat>>; let root:string
@@ -684,10 +691,12 @@ async function scanBoundArtifact(binding:HostGoalArtifactBinding, branchEntryIds
     index.set(row.id,meta)
     if(branchSet.has(row.id)){
       if(oversized)oversizedBranch=true
-      else visit(row)
+      else if(options.fixedEvidenceMatchIds===undefined)visit(row)
       const budget:LiteralSearchBudget={nodes:10_000,exhausted:false}
-      const matched= mode==='entry'?row.id===query:mode==='toolCall'?toolCallIds.includes(query):!oversized&&containsArtifactLiteral(row,query,0,budget)
-      if(budget.exhausted)keywordScanIncomplete=true
+      const matched=options.fixedEvidenceMatchIds!==undefined
+        ? options.fixedEvidenceMatchIds.has(row.id)
+        : mode==='entry'?row.id===query:mode==='toolCall'?toolCallIds.includes(query):!oversized&&containsArtifactLiteral(row,query,0,budget)
+      if(budget.exhausted&&options.fixedEvidenceMatchIds===undefined)keywordScanIncomplete=true
       if(matched)hits.push(row.id)
     }
   }
@@ -709,7 +718,7 @@ async function scanBoundArtifact(binding:HostGoalArtifactBinding, branchEntryIds
   } catch(error){ if(signal?.aborted)return {status:'changed',lines:[]}; throw error }
   finally { signal?.removeEventListener('abort',abortMainStream);stream?.destroy();await sourceHandle.close().catch(() => {}) }
   if(scanFailed)return {status:'too-large',lines:[]}
-  if(keywordScanIncomplete||mode==='toolCall'&&toolCallScanIncomplete)return {status:'too-large',lines:[],incomplete:true}
+  if(options.fixedEvidenceMatchIds===undefined&&(keywordScanIncomplete||mode==='toolCall'&&toolCallScanIncomplete))return {status:'too-large',lines:[],incomplete:true}
   const after=await fsp.stat(canonicalPath)
   if(before.dev!==after.dev||before.ino!==after.ino||before.size!==after.size||before.mtimeMs!==after.mtimeMs)return {status:'changed',lines:[]}
   let missingBranchSuffix=false
@@ -724,11 +733,21 @@ async function scanBoundArtifact(binding:HostGoalArtifactBinding, branchEntryIds
   }
   if(!persistedBranchIds.length&& !allowUnpersistedSuffix)return {status:'invalid',lines:[]}
   for(const [id,expected] of Object.entries(expectedHashes)){const meta=index.get(id);if(!branchSet.has(id)||!meta)return {status:'invalid',lines:[]};if(!meta.sha256||meta.sha256!==expected)return {status:'changed',lines:[]}}
-  if(oversizedBranch&&mode!=='entry'&&!hashOnly)return {status:'too-large',lines:[]}
+  if(oversizedBranch&&mode!=='entry'&&!hashOnly&&options.fixedEvidenceMatchIds===undefined)return {status:'too-large',lines:[]}
   const entryHashes:Record<string,string>={}
   for(const id of requiredIds){const meta=index.get(id);if(!meta){if(allowUnpersistedSuffix&&missingBranchSuffix)continue;return {status:'invalid',lines:[]}}if(!branchSet.has(id)||!meta.sha256)return {status:'invalid',lines:[]};entryHashes[id]=meta.sha256}
   if(hashOnly)return {status:'ok',lines:[],...(requiredIds.length?{entryHashes}:{})}
-  const selected=hits.slice(offset,offset+Math.min(Math.max(limit,1),20)); if(!selected.length)return {status:'not-found',lines:[],...(requiredIds.length?{entryHashes}:{})}
+  let snapshotEntries:GoalEvidenceSnapshotEntry[]|undefined
+  if(options.captureEvidenceSnapshot){
+    const matchedIds=new Set(hits)
+    snapshotEntries=[]
+    for(const id of persistedBranchIds){
+      const sha256=index.get(id)?.sha256
+      if(!sha256)return {status:'invalid',lines:[]}
+      snapshotEntries.push({id,sha256,matched:matchedIds.has(id)})
+    }
+  }
+  const selected=hits.slice(offset,offset+Math.min(Math.max(limit,1),20)); if(!selected.length)return {status:'not-found',lines:[],...(requiredIds.length?{entryHashes}:{}),...(snapshotEntries?{snapshotEntries}:{})}
   for(const id of selected){const meta=index.get(id)!;if(meta.tooLarge)return {status:'too-large',lines:[]};if(expectedHashes[id]&&meta.sha256!==expectedHashes[id])return {status:'changed',lines:[]}}
   const lines:string[]=[];let total=0
   for(const id of selected){const item=index.get(id)!;if(item.tooLarge||item.length>GOAL_ARTIFACT_MAX_LINE_BYTES||total+item.length>GOAL_ARTIFACT_PAGE_BYTES){if(lines.length===0)return {status:'too-large',lines:[]};break}
@@ -746,7 +765,7 @@ async function scanBoundArtifact(binding:HostGoalArtifactBinding, branchEntryIds
     if(read!==item.length)return {status:'changed',lines:[]};const rawLine=Buffer.concat(chunks);if(item.sha256!==createHash('sha256').update(rawLine).digest('hex'))return {status:'changed',lines:[]};const line=rawLine.toString('utf8');lines.push(line);total+=read
   }
   const finalStat=await fsp.stat(canonicalPath);if(before.dev!==finalStat.dev||before.ino!==finalStat.ino||before.size!==finalStat.size||before.mtimeMs!==finalStat.mtimeMs)return {status:'changed',lines:[]}
-  return lines.length?{status:'ok',lines,...(offset+lines.length<hits.length?{nextOffset:offset+lines.length}:{}),...(requiredIds.length?{entryHashes}:{})}:{status:'not-found',lines:[],...(requiredIds.length?{entryHashes}:{})}
+  return lines.length?{status:'ok',lines,...(offset+lines.length<hits.length?{nextOffset:offset+lines.length}:{}),...(requiredIds.length?{entryHashes}:{}),...(snapshotEntries?{snapshotEntries}:{})}:{status:'not-found',lines:[],...(requiredIds.length?{entryHashes}:{}),...(snapshotEntries?{snapshotEntries}:{})}
 }
 
 async function initializeGoalArtifactBinding(
@@ -804,6 +823,7 @@ export function createGoalMemoryCapability(sessionId: string, workspaceId: strin
   let boundQueryId: string | undefined
   let revoked = false
   let checkpointPageSnapshot: GoalCheckpointPageSnapshot | undefined
+  let evidencePageSnapshot: GoalEvidencePageSnapshot | undefined
   const assertActiveQuery = (queryId: string, signal?: AbortSignal): void => {
     if (revoked || (boundQueryId && boundQueryId !== queryId)) throw new Error('Goal capability query 已失效或身份不匹配')
     if (!boundQueryId) boundQueryId = queryId
@@ -813,6 +833,7 @@ export function createGoalMemoryCapability(sessionId: string, workspaceId: strin
     if (revoked) return
     revoked = true
     checkpointPageSnapshot = undefined
+    evidencePageSnapshot = undefined
     lifecycleAbortController.abort(new Error('Goal capability query 已撤销'))
   }
   return {
@@ -825,11 +846,12 @@ export function createGoalMemoryCapability(sessionId: string, workspaceId: strin
       const signal = callerSignal ? AbortSignal.any([lifecycleAbortController.signal, callerSignal]) : lifecycleAbortController.signal
       assertActiveQuery(request.queryId, signal)
       let response: { context?: string; checkpoint?: GoalCheckpointModelDto; acknowledged?: boolean; evidence?: ArtifactScanResult }
-      if (!isGoalMemoryEnabled()) { checkpointPageSnapshot = undefined; throw new Error('Goal Memory 当前已关闭') }
+      if (!isGoalMemoryEnabled()) { checkpointPageSnapshot = undefined; evidencePageSnapshot = undefined; throw new Error('Goal Memory 当前已关闭') }
       if (request.operation === 'compact_ack') {
         const contract=getGoalContract(sessionId,workspaceId);const checkpoint=contract?getGoalCheckpoint(contract.id,contract.revision):null
-        if(!contract||!checkpoint){checkpointPageSnapshot=undefined;throw new Error('Goal checkpoint unavailable before compact')}
+        if(!contract||!checkpoint){checkpointPageSnapshot=undefined;evidencePageSnapshot=undefined;throw new Error('Goal checkpoint unavailable before compact')}
         if(checkpointPageSnapshot&&(checkpointPageSnapshot.goalId!==contract.id||checkpointPageSnapshot.revision!==contract.revision))checkpointPageSnapshot=undefined
+        if(evidencePageSnapshot&&(evidencePageSnapshot.goalId!==contract.id||evidencePageSnapshot.revision!==contract.revision))evidencePageSnapshot=undefined
         const binding=await awaitWithAbort(Promise.resolve(resolveArtifactBinding?.(signal)??null),signal)
         assertActiveQuery(request.queryId, signal)
         if(binding&&(binding.sessionId!==sessionId||binding.workspaceId!==workspaceId))throw new Error('Goal compact workspace/session binding changed')
@@ -842,9 +864,11 @@ export function createGoalMemoryCapability(sessionId: string, workspaceId: strin
         const checkpoint = contract ? getGoalCheckpoint(contract.id, contract.revision) : null
         if (!contract || !checkpoint) {
           checkpointPageSnapshot = undefined
+          evidencePageSnapshot = undefined
           response = {}
         } else {
           if (checkpointPageSnapshot && (checkpointPageSnapshot.goalId !== contract.id || checkpointPageSnapshot.revision !== contract.revision)) checkpointPageSnapshot = undefined
+          if (evidencePageSnapshot && (evidencePageSnapshot.goalId !== contract.id || evidencePageSnapshot.revision !== contract.revision)) evidencePageSnapshot = undefined
           if (request.operation === 'context') {
             const binding = await awaitWithAbort(Promise.resolve(resolveArtifactBinding?.(signal) ?? null), signal)
             assertActiveQuery(request.queryId, signal)
@@ -889,17 +913,80 @@ export function createGoalMemoryCapability(sessionId: string, workspaceId: strin
             })
             response = { checkpoint: toGoalCheckpointModelDto(nextCheckpoint) }
           } else if (request.operation === 'evidence_read') {
-            const binding = await awaitWithAbort(Promise.resolve(resolveArtifactBinding?.(signal) ?? null), signal)
+            const requestedLimit = request.limit ?? 20
+            if (!Number.isSafeInteger(request.offset) || request.offset < 0 || !Number.isSafeInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 20) throw new Error('Goal evidence offset/limit 无效')
+            const isRootRead = request.offset === 0
+            if (isRootRead) evidencePageSnapshot = undefined
+            else {
+              const snapshot = evidencePageSnapshot
+              if (!snapshot) throw new Error('Goal evidence cursor snapshot unavailable; restart from offset 0')
+              if (snapshot.goalId !== contract.id || snapshot.revision !== contract.revision || snapshot.mode !== request.mode || snapshot.query !== request.query || snapshot.nextOffset !== request.offset) {
+                evidencePageSnapshot = undefined
+                throw new Error('Goal evidence cursor snapshot expired or selector changed; restart from offset 0')
+              }
+            }
+            let binding:HostGoalArtifactBinding|null
+            try { binding = await awaitWithAbort(Promise.resolve(resolveArtifactBinding?.(signal) ?? null), signal) }
+            catch(error) { if(!isRootRead)evidencePageSnapshot=undefined; throw error }
             assertActiveQuery(request.queryId, signal)
-            if (!binding || binding.sessionId !== sessionId || binding.workspaceId !== workspaceId) throw new Error('Goal evidence artifact binding changed')
-            if (request.branchEntryIds.at(-1) !== request.leafId) throw new Error('Goal evidence branch leaf mismatch')
+            if (!binding || binding.sessionId !== sessionId || binding.workspaceId !== workspaceId) {
+              evidencePageSnapshot = undefined
+              throw new Error('Goal evidence artifact binding changed')
+            }
+            if (request.branchEntryIds.at(-1) !== request.leafId) {
+              evidencePageSnapshot = undefined
+              throw new Error('Goal evidence branch leaf mismatch')
+            }
             let currentCheckpoint = checkpoint
             if (!currentCheckpoint.artifactId) currentCheckpoint = await initializeGoalArtifactBinding(contract, currentCheckpoint, binding, binding.artifactId, request.leafId, request.branchEntryIds, signal)
-            if (currentCheckpoint.artifactId && binding.artifactIdentity !== currentCheckpoint.artifactId) throw new Error('Goal evidence artifact binding changed')
-            if (currentCheckpoint.leafId && !request.branchEntryIds.includes(currentCheckpoint.leafId)) throw new Error('Goal evidence branch rewind or leaf mismatch')
-            const result = await scanBoundArtifact(binding, request.branchEntryIds, request.leafId, request.mode, request.query, request.offset, request.limit ?? 20, signal, [], currentCheckpoint.entryHashes, false, true)
+            if (currentCheckpoint.artifactId && binding.artifactIdentity !== currentCheckpoint.artifactId) {
+              evidencePageSnapshot = undefined
+              throw new Error('Goal evidence artifact binding changed')
+            }
+            if (currentCheckpoint.leafId && !request.branchEntryIds.includes(currentCheckpoint.leafId)) {
+              evidencePageSnapshot = undefined
+              throw new Error('Goal evidence branch rewind or leaf mismatch')
+            }
+            let expectedHashes:Record<string,string> = currentCheckpoint.entryHashes
+            let scanOptions:ArtifactScanOptions = {captureEvidenceSnapshot:true}
+            if (!isRootRead) {
+              const snapshot = evidencePageSnapshot!
+              if (snapshot.artifactIdentity !== binding.artifactIdentity || snapshot.entries.some((entry,index)=>request.branchEntryIds[index]!==entry.id)) {
+                evidencePageSnapshot = undefined
+                throw new Error('Goal evidence root branch is no longer an ancestor of the current branch')
+              }
+              expectedHashes = { ...currentCheckpoint.entryHashes }
+              for (const entry of snapshot.entries) {
+                const existingHash = expectedHashes[entry.id]
+                if (existingHash && existingHash !== entry.sha256) {
+                  evidencePageSnapshot = undefined
+                  throw new Error('Goal evidence root source hash changed')
+                }
+                expectedHashes[entry.id] = entry.sha256
+              }
+              scanOptions = {fixedEvidenceMatchIds:new Set(snapshot.entries.filter((entry)=>entry.matched).map((entry)=>entry.id))}
+            }
+            const result = await scanBoundArtifact(binding, request.branchEntryIds, request.leafId, request.mode, request.query, request.offset, requestedLimit, signal, [], expectedHashes, false, true, scanOptions)
             assertActiveQuery(request.queryId, signal)
-            response = { evidence: result }
+            if (isRootRead && result.snapshotEntries && result.nextOffset !== undefined && result.status === 'ok') {
+              const snapshot:GoalEvidencePageSnapshot = {
+                goalId:contract.id, revision:contract.revision, artifactIdentity:binding.artifactIdentity,
+                mode:request.mode, query:request.query, entries:result.snapshotEntries, nextOffset:result.nextOffset,
+              }
+              if (Buffer.byteLength(JSON.stringify(snapshot),'utf8') > GOAL_EVIDENCE_SNAPSHOT_BUDGET_BYTES) {
+                evidencePageSnapshot = undefined
+                throw new Error('Goal evidence pagination snapshot exceeds the 16 MiB main-process budget')
+              }
+              evidencePageSnapshot = snapshot
+            } else if (!isRootRead && result.status === 'ok' && result.nextOffset !== undefined) {
+              evidencePageSnapshot!.nextOffset = result.nextOffset
+            } else {
+              evidencePageSnapshot = undefined
+            }
+            const publicEvidence = { ...result }
+            delete publicEvidence.entryHashes
+            delete publicEvidence.snapshotEntries
+            response = { evidence: publicEvidence }
           } else throw new Error('未知 Goal capability operation')
         }
       }
@@ -933,8 +1020,8 @@ export function buildGoalMemoryTools(
     }),
     sdk.defineTool({
       name: 'GoalEvidenceRead', label: '读取 Goal 历史原文证据',
-      description: '在当前真实Pi branch内按精确entry ID、toolCall ID或字面关键词定位并分页读取原始JSONL entry；不接受任意路径或session。超限/变更来源须停止说明，不可摘要冒充原文。',
-      promptSnippet: '回读证据时选择精确entry、toolCall ID或字面关键词；只读取返回的完整原文，不推断不可见内容。',
+      description: '在当前真实Pi branch内按精确entry ID、toolCall ID或字面关键词定位并分页读取原始JSONL entry；offset=0开启有界main-only检索快照，后续nextOffset只分页该次固定命中集，不会把本工具新写入的receipt递归加入当前检索。每页仍校验当前branch是快照branch的后代，并校验合同revision、artifact及来源hash；root/检索selector改变、revision变化、功能关闭、revoke、source变化或rewind都会使旧快照失效。新offset=0会按当前branch重新检索；不忽略toolResult。超限/变更来源须停止说明，不可摘要冒充原文。',
+      promptSnippet: '回读证据时选择精确entry、toolCall ID或字面关键词；offset=0开始新检索，按返回nextOffset逐页读完同一快照。receipt仅不参与当前快照；新root仍会搜索当时的当前branch。只读取返回的完整原文，不推断不可见内容。',
       parameters: Type.Object({
         mode: Type.Union([Type.Literal('entry'),Type.Literal('keyword'),Type.Literal('toolCall')]),
         query: Type.String({ minLength: 1, maxLength: 500 }),
@@ -981,6 +1068,11 @@ export function buildGoalRestoreReply(contract: GoalContract, checkpoint: GoalCh
 }
 
 export type GoalCommand = { command: 'set' | 'revise'; input: GoalContractInput } | { command: 'status' | 'restore' | 'off' }
+
+/** Active streaming injection must never forward a Goal management command to the model. */
+export function isGoalManagementCommandMessage(message: string): boolean {
+  return /^\/goal(?:\s|$)/i.test(message.trimStart())
+}
 
 export function parseGoalCommand(message: string): GoalCommand | null {
   const match = /^\/goal(?:\s+([a-z-]+))?(?:\s+([\s\S]*))?\s*$/.exec(message)

@@ -1,6 +1,6 @@
 # Goal Memory（M0）功能 SSOT 草稿
 
-状态：**实现仍在未合入分支；此前 review 修复与本轮分页生命周期修复已完成，定向生命周期测试、全仓 typecheck 与 diff-check 已通过；修复后真实模型压缩尚未重跑，Codex独立复审与最终计划验收待完成**。本文件只描述当前代码实际具备的能力，不代表 M1 Goal 控制器或可合入结论。
+状态（2026-11-04）：**实现仍在未合入分支；新增三项P2修复后，父级完整矩阵、870测试、全仓typecheck、五目标构建和第二次真实utility短回归通过；最后一轮Codex复审与新会话独立计划验收待完成**。本文件只描述当前代码实际具备的能力，不代表 M1 Goal 控制器或可合入结论。
 
 ## 范围与启用
 
@@ -16,7 +16,7 @@ Goal Memory 将本会话用户明确提交的目标作为版本化恢复合同�
 - `/goal restore`：只返回当前恢复包，不发起模型请求或继续执行。
 - `/goal off`：解除本会话当前合同绑定，数据库中的历史合同与 checkpoint 保留。
 
-命令由主进程编排器解析。`set`/`revise` 的 JSON schema 要求 `expectedRevision`（非负整数）、`originalText`（字符串）、`scope`、`nonGoals`、`hardConstraints`、`acceptance`（均为字符串数组，可为空）；未知字段拒绝而非忽略。`expectedRevision` 必须等于已存最新版本，CAS 在 SQLite `BEGIN IMMEDIATE` 事务内完成。命令来源 gate 拒绝 automation、delegation、带 `automationContext` 的运行及已知子任务自动唤醒通知；保留手动用户和人类 web-remote `external` 入口，不把所有 `external` 一概拒绝。模型没有创建或修订合同的工具。合同字段另含用户消息引用与 hash。`/goal restore` 会把 `userMessageRef` 标为历史来源，说明 checkpoint 只是历史快照、本命令未核验当前artifact/branch，待下次query验证，并明确不构成本轮新授权。
+命令由主进程编排器解析。`set`/`revise` 的 JSON schema 要求 `expectedRevision`（非负整数）、`originalText`（字符串）、`scope`、`nonGoals`、`hardConstraints`、`acceptance`（均为字符串数组，可为空）；未知字段拒绝而非忽略。`expectedRevision` 必须等于已存最新版本，CAS 在 SQLite `BEGIN IMMEDIATE` 事务内完成。命令来源 gate 拒绝 automation、delegation、带 `automationContext` 的运行及已知子任务自动唤醒通知；保留手动用户和人类 web-remote `external` 入口，不把所有 `external` 一概拒绝。模型没有创建或修订合同的工具。Goal 相关 workspace 统一先取持久会话 metadata 的 `workspaceId`；仅缺失时才回退请求 workspace，最终使用 `default`，不能由后续请求改写会话归属。功能启用时，活跃轮次中的 `queueMessage` 在 adapter 注入、enrichment 与 JSONL 持久化前拒绝所有 `/goal` 管理命令（含未知子命令），提示等待当前轮结束或停止后再发；普通queued文本不受影响，功能关闭时保留既有路径。合同字段另含用户消息引用与 hash。`/goal restore` 会把 `userMessageRef` 标为历史来源，说明 checkpoint 只是历史快照、本命令未核验当前artifact/branch，待下次query验证，并明确不构成本轮新授权。
 
 ## 存储与一致性
 
@@ -28,7 +28,7 @@ Goal Memory 将本会话用户明确提交的目标作为版本化恢复合同�
 
 每次provider请求的 transformContext 从主进程 capability 重载一份恢复包；默认 UTF-8 字节预算 12,000。用户原文、合同 hash、scope、non-goals、硬约束、验收字段为必需内容。必需部分超预算时抛出阻塞错误，不截断约束；可选进度字段在预算不足时省略，并指向有界分页的 `GoalCheckpointRead`。恢复包明确把模型报告标为未验证，并将其作为任务数据而非系统指令。
 
-Pi `turn_end` hook只提交SDK提供的持久`messageEntryId/toolResultEntryIds`、当前branch entry IDs和leaf；主进程从当前会话metadata解析Pi artifact路径，校验session/workspace/sdkSessionId、规范session目录、symlink及文件身份，并扫描有界JSONL artifact验证branch的ID/parent链与已有hash。超大leaf可走hash-only水位校验，不读取/返回正文；正文读取仍受单行上限约束并明确返回too-large，绝不截断。新合同在首次有持久历史的context/evidence读取前，绑定当前已验证artifact与branch的持久前缀；尚无持久entry时不伪称已建立水位。后续context、compact ack、turn_end/evidence read验证旧entry hashes，防止替换、迁移、rewind或篡改后重新baseline。`GoalEvidenceRead`只接受当前SessionManager branch，支持entry ID、toolCall ID和字面关键词定位，可分页读取完整entry。扫描上限128 MiB、最多50,000 entries（只在内存保留ID、parent、toolCall定位元数据，不建立无界文本索引）、单行256 KiB、输出页512 KiB/最多20条；关键词遍历完整对象值与数组，在16层/10,000节点预算内字面匹配，预算耗尽明确返回不完整/too-large，不误报not-found。超大媒体行只解析有界ID/parent前缀并完整流式hash。越限、文件变化、错误branch/session均返回明确too-large/changed/invalid/not-found，不会静默声称没有证据。旧branch不继承；不支持跨session读取。
+Pi `turn_end` hook只提交SDK提供的持久`messageEntryId/toolResultEntryIds`、当前branch entry IDs和leaf；主进程从当前会话metadata解析Pi artifact路径，校验session/workspace/sdkSessionId、规范session目录、symlink及文件身份，并扫描有界JSONL artifact验证branch的ID/parent链与已有hash。超大leaf可走hash-only水位校验，不读取/返回正文；正文读取仍受单行上限约束并明确返回too-large，绝不截断。新合同在首次有持久历史的context/evidence读取前，绑定当前已验证artifact与branch的持久前缀；尚无持久entry时不伪称已建立水位。后续context、compact ack、turn_end/evidence read验证旧entry hashes，防止替换、迁移、rewind或篡改后重新baseline。`GoalEvidenceRead`只接受当前SessionManager branch，支持entry ID、toolCall ID和字面关键词定位，可分页读取完整entry。`offset=0`建立单次有界main-only快照，固定当时的branch ID、source hash与命中集合；后续`nextOffset`页沿用命中集合，不会把当前工具产生的新receipt纳入原查询。每页仍重新解析当前artifact，验证session/workspace/artifact identity、当前branch ancestry、已有hash及合同revision；新root或mode/query selector变化、source变化、branch rewind、合同revision变化、功能关闭或query revoke会清空/失效旧快照。新`offset=0`会对当前branch重新搜索。快照JSON不超过16 MiB，不通过utility/工具结果暴露。扫描上限128 MiB、最多50,000 entries（只在内存保留ID、parent、toolCall定位元数据，不建立无界文本索引）、单行256 KiB、输出页512 KiB/最多20条；关键词遍历完整对象值与数组，在16层/10,000节点预算内字面匹配，预算耗尽明确返回不完整/too-large，不误报not-found。超大媒体行只解析有界ID/parent前缀并完整流式hash。越限、文件变化、错误branch/session均返回明确too-large/changed/invalid/not-found，不会静默声称没有证据。旧branch不继承；不支持跨session读取。
 
 ## 压缩行为与未实现项
 
@@ -48,10 +48,14 @@ Pi `session_before_compact`扩展覆盖`manual`、`threshold`、`overflow`三类
 - 修复前的Codex round 1 独立代码审查与父级复现发现了reader、DTO、source binding、查询身份、模型CAS与来源门禁等问题；前述原始结果不覆盖这些问题。
 - 此前review修复后的定向验证：`bun test apps/electron/src/main/lib/personal-goal-memory.test.ts` 通过（1个Bun test通过；内部Electron临时HOME断言覆盖超大hash-only leaf、超限正文、最大50,000项水位、关键词嵌套/数组第4,001项、DTO分页与32 KiB结果上限、modelSequence/旧revision CAS、query撤销/迟到请求、首次历史证据绑定、来源门禁与restore来源提示等）。此前全仓 `bun run typecheck` 通过；不等于重跑全仓测试或构建。
 - 本轮分页生命周期修复后再次运行同一定向测试通过（1个Bun test）。该回归通过 `buildGoalMemoryTools` 实际工具定义构造Read/Report循环；每页后向临时JSONL追加toolResult并调用真实main capability `turn_end`，断言host sequence每轮递增、Report cursor与root Read cursor均跨轮次完整重建Unicode/反斜杠长值；还覆盖旧modelSequence拒绝、新root刷新、revision变化、功能关闭与revoke时游标失效。`bun run typecheck` 与 `git diff --check` 本轮通过。以上不等于重跑全仓测试或构建。
-- 最终修复快照由父会话重新验证：旧6项缺陷、query身份、28页跨tool-round分页及首次扫描中途revoke无迟到写通过；30×10装载、15项evidence、21项hook及4类mutation全部重跑通过。全仓870 pass / 0 fail（2316 assertions），typecheck、personal scripts和五目标构建通过；源码hash在验证前后相同，版本与lock未改。
-- 最终快照另获准完成一次短模型run（28,283 ms，不重复长压缩）：真实utility依次调用EvidenceRead、CheckpointRead和Report；4次provider请求均各带单份预算内恢复包，工具content/details结果为6,492 / 1,114 / 1,126 bytes。Report实际提交goalId/revision/expectedModelSequence，sidecar为waiting_user、保留待用户问题；父核对持久原文、全部hash及branch ancestry，不靠模型自述。宿主set耗时16 ms，无provider/utility或标题调用。原三轮真实压缩仍仅是修复前证据；最终版未重跑长压缩，不推断长期语义可靠性。
-- 短回归结束已删本轮新会话、撤销新设备、清理新原文/sidecar并关闭测试空间与dev/8443，正式443保留。启动时既有逻辑又清理空草稿并生成disabled预设，停机后仅恢复原草稿、撤回本轮自动预设；20个原会话ID及4份无关配置hash恢复，备份保留。索引迁移/排序不声称字节相同。原始合成审计材料仅保留于私有工作台，不进Git。
-- 修复后的Codex独立复审与父级最终计划验收尚未完成；以上验证不构成可合入、发布或长期语义遵循证明。
+- 2026-11-03本轮复审追加：EvidenceRead使用≤16 MiB的main-only固定命中快照，新增实际工具definition跨receipt/turn_end分页不递归扩张测试，并覆盖selector重置/失效、revision/off/revoke、源hash篡改与branch rewind；定向测试再次通过（1个Bun test）。活跃queue路径新增`queueMessage`函数体顺序probe与管理命令识别测试；workspace优先级通过宿主命令、query contract lookup与capability bootstrap的源码接线probe验证。该轮全仓`bun run typecheck`与`git diff --check`通过；未运行模型/开发实例。
+- 前一修复快照（`f568c35c`）由父会话重新验证：旧6项缺陷、query身份、28页跨tool-round分页及首次扫描中途revoke无迟到写通过；30×10装载、15项evidence、21项hook及4类mutation全部重跑通过。全仓870 pass / 0 fail（2316 assertions），typecheck、personal scripts和五目标构建通过；源码hash在验证前后相同，版本与lock未改。
+- 前一快照另获准完成一次短模型run（28,283 ms，不重复长压缩）：真实utility依次调用EvidenceRead、CheckpointRead和Report；4次provider请求均各带单份预算内恢复包，工具content/details结果为6,492 / 1,114 / 1,126 bytes。Report实际提交goalId/revision/expectedModelSequence，sidecar为waiting_user、保留待用户问题；父核对持久原文、全部hash及branch ancestry，不靠模型自述。宿主set耗时16 ms，无provider/utility或标题调用。原三轮真实压缩仍仅是修复前证据；最终版未重跑长压缩，不推断长期语义可靠性。
+- 前次短回归结束已删当轮新会话、撤销新设备、清理新原文/sidecar并关闭测试空间与dev/8443，正式443保留。启动时既有逻辑又清理空草稿并生成disabled预设，停机后仅恢复原草稿、撤回本轮自动预设；20个原会话ID及4份无关配置hash恢复，备份保留。索引迁移/排序不声称字节相同。原始合成审计材料仅保留于私有工作台，不进Git。
+- 最新三项P2修复快照：父独立复现从失败转通过，Evidence固定查询在两页后终止，实际orchestrator方法探针的活跃命令/metadata归属共10项通过；旧6项、query绑定、28页checkpoint、撤销无迟到写及30×10/15/21/4矩阵全部重跑通过。全仓870 pass / 0 fail、2316 assertions，typecheck、personal scripts和五目标构建通过；改动源码hash在测试与模型实验前后核对一致。
+- 2026-11-04另获准的第二次真实短run为33,230 ms：同一utility依次执行EvidenceRead两页、CheckpointRead、Report，共5次provider请求，每次单份≤12,000-byte包且必需约束齐全；两页只包含检索开始时的user和assistant原文，没有递归加入新receipt，第二页无nextOffset。实际工具content/details为8,606 / 2,226 / 1,114 / 1,128 bytes。活跃期间经真实远程IPC发送管理命令被拒绝，未入Pi原文或provider；sidecar仍启用且仅waiting_user/modelSequence 1。请求workspace为过时值时，宿主set/status仍绑定持久metadata归属，耗时21/9 ms且无utility/provider/标题调用。父独立核对原文、hash、ancestry和模型CAS参数，不依赖模型自述。
+- 第二次新会话通过应用删除，新增设备撤销、测试空间结束、own live artifact/sidecar及配对材料清理，dev/8443关闭而正式443保留。恢复20个原会话ID和4配置hash；草稿metadata与本次启动备份完全相同。原备份及本次恢复前的index/channel备份保留，不重建整个fixture。所有合成审计材料仅在私有工作台。
+- 最后一轮Codex独立复审与新会话计划验收尚未完成；最新源码仍未重跑长压缩、真实自动threshold/overflow故障或图片共存测试。以上验证不构成合入、发布许可或长期语义遵循证明。
 
 ## 回滚
 

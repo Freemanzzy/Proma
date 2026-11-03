@@ -17,7 +17,7 @@
 
 ## 本分支实验（尚未合入）
 
-- **Goal Memory M0**：默认关闭的目标合同、checkpoint、证据回读与手动恢复实验。功能权威说明见 [`docs/personal/goal-memory.md`](./docs/personal/goal-memory.md)，验收状态见 [`docs/personal/backlog.md`](./docs/personal/backlog.md)。最终修复快照已通过确定性与一次短模型回归，独立审查/计划验收尚待收敛；不代表当前安装版已具备该能力，不加入自动续跑或完成判定。
+- **Goal Memory M0**：默认关闭的目标合同、checkpoint、证据回读与手动恢复实验。功能权威说明见 [`docs/personal/goal-memory.md`](./docs/personal/goal-memory.md)，验收状态见 [`docs/personal/backlog.md`](./docs/personal/backlog.md)。新增分页自引用、活跃命令及 workspace 修复后已重跑完整确定性矩阵，并完成第二次短模型回归；最后一轮独立复审与计划验收尚待收敛；不代表当前安装版已具备该能力，不加入自动续跑或完成判定。
   - 上游触点：`agent-orchestrator.ts` 只接宿主命令和 bootstrap；`adapters/pi-agent-adapter.ts` 接 context、工具与压缩 hook；`adapters/pi-utility-adapter.ts`、`utility/agent-runtime.ts`、`utility/agent-runtime-request-timeout.ts` 与 shared `agent-runtime.ts` 接内部 capability/timeout。存储与策略位于独立 `personal-goal-memory.ts`。
   - 兼容与回退：不修改 Pi transcript、会话索引或 planning schema，不新增依赖；取消 `PROMA_PERSONAL_GOAL_MEMORY=1` 即关闭新路径，独立 sidecar 保留。未获合并、推送、打包或安装授权。
 

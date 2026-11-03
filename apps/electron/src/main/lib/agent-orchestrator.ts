@@ -83,7 +83,7 @@ import { cleanUserMessageForTitle, createFallbackTitle, sanitizeGeneratedTitle, 
 import { fetchAgentTitleWithFallback } from './agent-title-retry'
 import { claimWorkspaceMemoryRefreshOpportunity } from './agent-memory-refresh-service'
 import { resolveRuntimeAdditionalDirectories } from './agent-orchestrator-vault-access'
-import { buildGoalRestoreReply, createGoalContract, createGoalMemoryCapability, disableGoalForSession, getGoalCheckpoint, getGoalContract, isGoalCommandSourceAllowed, isGoalMemoryEnabled, parseGoalCommand } from './personal-goal-memory'
+import { buildGoalRestoreReply, createGoalContract, createGoalMemoryCapability, disableGoalForSession, getGoalCheckpoint, getGoalContract, isGoalCommandSourceAllowed, isGoalManagementCommandMessage, isGoalMemoryEnabled, parseGoalCommand } from './personal-goal-memory'
 import type { GoalMemoryCapability } from './personal-goal-memory'
 
 // ===== 类型定义 =====
@@ -767,6 +767,7 @@ export class AgentOrchestrator {
     // Goal 指令只在明确启用时由宿主解析；模型从未获得创建/修订合同的工具。
     if (isGoalMemoryEnabled() && isGoalCommandSourceAllowed({ triggeredBy: input.triggeredBy, automationContext, userMessage })) {
       try {
+        const goalWorkspaceId = sessionMeta?.workspaceId ?? requestedWorkspaceId ?? 'default'
         const command = parseGoalCommand(userMessage)
         if (command) {
           const userRef = initialUserMessageUuid ?? userMessageUuid ?? randomUUID()
@@ -774,7 +775,7 @@ export class AgentOrchestrator {
           if (command.command === 'set' || command.command === 'revise') {
             const contract = createGoalContract({
               sessionId,
-              workspaceId: requestedWorkspaceId ?? sessionMeta?.workspaceId ?? 'default',
+              workspaceId: goalWorkspaceId,
               ...command.input,
               userMessageRef: userRef,
             })
@@ -783,7 +784,7 @@ export class AgentOrchestrator {
             disableGoalForSession(sessionId)
             reply = '已在本会话关闭 Goal 恢复；已保存合同与历史数据保留。'
           } else {
-            const contract = getGoalContract(sessionId, requestedWorkspaceId ?? sessionMeta?.workspaceId ?? 'default')
+            const contract = getGoalContract(sessionId, goalWorkspaceId)
             if (!contract) reply = '本会话没有启用中的 Goal。可用 /goal set <JSON合同> 创建。'
             else if (command.command === 'status') {
               const checkpoint = getGoalCheckpoint(contract.id, contract.revision)
@@ -1170,7 +1171,7 @@ export class AgentOrchestrator {
         console.log(`[Agent 编排] 注入 referenced_planning: ${mentionedTodoIds?.length ?? 0} todos, ${mentionedCalendarEventIds?.length ?? 0} calendar events`)
       }
 
-      const activeGoal = isGoalMemoryEnabled() ? getGoalContract(sessionId, workspaceId ?? workspaceSlug ?? 'default') : null
+      const activeGoal = isGoalMemoryEnabled() ? getGoalContract(sessionId, workspaceId ?? 'default') : null
       const contextualMessage = [dynamicCtx, enrichedMessage].filter(Boolean).join('\n\n')
 
       const isCompactCommand = userMessage.trim() === '/compact'
@@ -1588,7 +1589,7 @@ export class AgentOrchestrator {
       let githubCopilotCredentialsSnapshot = githubCopilotOAuthCredentials
       const { feishuBridgeManager } = await import('./feishu-bridge-manager')
       const hasFeishuBinding = feishuBridgeManager.hasSessionBinding(sessionId)
-      const goalWorkspaceId = workspaceId ?? workspaceSlug ?? 'default'
+      const goalWorkspaceId = workspaceId ?? 'default'
       goalMemoryCapability = activeGoal
         ? createGoalMemoryCapability(sessionId, goalWorkspaceId, async (signal) => {
             const meta = getAgentSessionMeta(sessionId)
@@ -2428,6 +2429,10 @@ export class AgentOrchestrator {
   ): Promise<string> {
     if (!this.activeSessions.has(sessionId)) {
       throw new Error(`[Agent 编排] 会话未运行，无法追加消息: ${sessionId}`)
+    }
+
+    if (isGoalMemoryEnabled() && isGoalManagementCommandMessage(text)) {
+      throw new Error('Goal 管理命令不能在当前运行中执行；请等待当前轮结束或停止后再发。')
     }
 
     if (!this.adapter.sendQueuedMessage) {

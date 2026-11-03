@@ -2192,3 +2192,13 @@
 - **清理及范围纠偏**：新会话、设备、live artifact/sidecar与空间已清理，dev/8443关闭、正式443保留。原启动逻辑自动清理一条旧空草稿、生成disabled渠道预设；停机后只恢复该草稿、撤销新预设，原20会话及4份配置hash恢复，备份保留。执行工曾误升版本，父发现后已撤回，package/lock与HEAD一致，未提交或运行误升版。未触正式数据、SDK源码或既有schema；不合并、推送、打包、安装。
 - **状态**：修复后Codex针对性复审和新Proma只读计划验收仍待完成，本条不是可合入结论。最终版没有重新做长压缩、真实自动threshold/overflow故障或图片与恢复包共存测试；同步SQLite事务不可被Promise deadline硬抢占的限制仍在。
 - **文档/记忆**：更新PERSONAL、backlog、功能SSOT及本追加记录；无需修改共同维护规则。未把阶段性验证流水升级为长期协作记忆。
+
+## 2026-11-04: Goal Memory M0 复审三项修复与第二次短回归
+
+- **复审裁决**：首个修复复审的原请求因订阅额度中断，无有效结论；额度恢复后的同范围重试由Codex CLI 0.165.0以`--base personal --rules docs/personal/review-rules.md`完成，新增3项P2全部采纳：Evidence每页重取branch会将自身receipt递归纳入关键词结果；活跃queue路径绕过宿主Goal解析；Goal命令与普通query的workspace优先级相反。父分别用实际production tool/facade与AST提取的真实orchestrator方法复现，不照单采信。无暂缓项。
+- **修复**：main每query新增≤16 MiB的固定Evidence命中快照，offset 0开新检索，nextOffset沿用当时branch/hash/命中集，每页仍验证当前来源与ancestor关系；新root、selector/revision/source变化、rewind、off或revoke使旧快照失效，不过滤全部toolResult。活跃轮次的管理命令在enrichment、adapter注入与持久化前明确拒绝，普通文本和全局flag关闭路径不变。Goal命令及bootstrap统一优先持久会话workspace，仅缺失时回退请求/default。上游仅额外改orchestrator接线，其余逻辑与测试在个人模块；总上游六文件清单仍见PERSONAL。
+- **独立回归**：原2条命中的Evidence测试由七页不断返回receipt变为两页终止；真实方法探针由2 pass/8 fail变为10 pass。旧6项、精确query、28页checkpoint逐轮持久化、扫描中途revoke无迟到写全部通过；30×10装载、15证据、21压缩hook和4类mutation重跑通过。全仓870 pass/0 fail、2316 assertions，typecheck、personal scripts、五目标构建、diff check均通过；所有改动源码hash在前后相同。方法探针不是完整UI/SDK E2E，以下真实链路另列。
+- **最新真实链路**：用户额外批准一次短fixture回归，API Key新会话单run为33,230 ms。真实utility按顺序执行EvidenceRead两页→CheckpointRead→Report，5次provider请求各只有单份≤12,000-byte恢复包，必需约束齐全；工具content/details为8,606/2,226/1,114/1,128 bytes。两页分别为原user/assistant entry，第二页无nextOffset，无新receipt递归。实际远程queue IPC在活跃时拒绝管理命令，原文及provider均未出现该输入，合同仍启用；过时workspace请求下宿主set/status仍正确归属，21/9 ms，无SDK/provider/title调用。父核对合同hash、所有entry hashes、ancestry、显式goalId/revision/modelSequence，checkpoint仅waiting_user，保留待用户问题，不将模型报告提升为业务验收。
+- **版本与证据分层**：此前三次长压缩是初审前快照，28.3秒短run是前一修复快照；本条33.2秒run对应追加三项修复后的源码。不得相互代替最终版长期压缩证明。真实自动threshold/overflow故障、图片共存和大历史UI负载仍未测；同步SQLite提交不能由Promise deadline硬抢占。实际IPC拒绝已观测，但首版探针仅存String(error)，未保留序列化对象内的拒绝文案，源方法探针另行验证了拒绝路径。
+- **清理**：应用删除新增会话、撤销新增设备、结束测试空间；标准脚本只停所属dev，8443关闭、正式443保留。只清新live artifact/sidecar/配对材料，私有合成审计副本保留。既有启动逻辑再次移走空草稿、生成disabled预设，停机后精确恢复草稿metadata和原渠道字节；20原会话ID及四配置hash恢复。所有旧备份、新草稿备份及恢复前index/channel备份均保留，未复制正式数据或重建fixture。
+- **状态与文档**：同步Goal功能SSOT、PERSONAL及backlog。最后一轮针对性Codex复审与全新Proma只读计划验收仍待完成；仅功能分支提交，不合并、推送、升版、打包、安装。无需更新共同维护规则；不将测试流水写入长期协作记忆。

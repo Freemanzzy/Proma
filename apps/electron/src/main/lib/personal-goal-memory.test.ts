@@ -18,7 +18,7 @@ test('Goal Memory contracts stay immutable, CAS rejects stale state, pack never 
   const source = `
     import assert from 'node:assert/strict'
     import { DatabaseSync } from 'node:sqlite'
-    import { mkdirSync, writeFileSync, existsSync, realpathSync } from 'node:fs'
+    import { mkdirSync, writeFileSync, existsSync, realpathSync, readFileSync } from 'node:fs'
     import { join } from 'node:path'
     import * as goal from ${JSON.stringify(modulePath)}
     import { PiUtilityAdapter } from ${JSON.stringify(join(import.meta.dir, 'adapters/pi-utility-adapter.ts'))}
@@ -69,6 +69,8 @@ test('Goal Memory contracts stay immutable, CAS rejects stale state, pack never 
     assert.deepEqual(goal.parseGoalCommand('/goal set ' + JSON.stringify(commandContract)), {command:'set', input:commandContract})
     assert.deepEqual(goal.parseGoalCommand('/goal restore'), {command:'restore'})
     assert.throws(() => goal.parseGoalCommand('/goal set'), /JSON/)
+    for(const command of ['/goal off','/goal set {}','/goal revise {}','/goal status','/goal restore','/goal unknown','  /goal typo'])assert.equal(goal.isGoalManagementCommandMessage(command),true)
+    assert.equal(goal.isGoalManagementCommandMessage('ordinary queued text'),false)
     assert.equal(goal.isGoalCommandSourceAllowed({triggeredBy:'user',userMessage:'/goal set {...}'}),true)
     assert.equal(goal.isGoalCommandSourceAllowed({triggeredBy:'external',userMessage:'/goal set {...}'}),true)
     assert.equal(goal.isGoalCommandSourceAllowed({triggeredBy:'automation',userMessage:'/goal set {...}'}),false)
@@ -79,6 +81,25 @@ test('Goal Memory contracts stay immutable, CAS rejects stale state, pack never 
     const restoreReply=goal.buildGoalRestoreReply(c2,cp)
     assert.match(restoreReply,/历史记录.*msg-2.*不构成本轮新的用户授权.*checkpoint只是历史快照.*未核验当前artifact/)
     assert.ok(restoreReply.includes('artifact/branch')&&restoreReply.includes('下次query中验证'))
+    const orchestratorSource=readFileSync(${JSON.stringify(join(repoRoot, 'apps/electron/src/main/lib/agent-orchestrator.ts'))},'utf8')
+    const goalCommandStart=orchestratorSource.indexOf('// Goal 指令只在明确启用时由宿主解析')
+    const goalCommandEnd=orchestratorSource.indexOf('// 0.5 清除上一轮中断标记',goalCommandStart)
+    const goalCommandBody=orchestratorSource.slice(goalCommandStart,goalCommandEnd)
+    const queueMessageStart=orchestratorSource.indexOf('async queueMessage(')
+    const queueMessageBody=orchestratorSource.slice(queueMessageStart)
+    assert.ok(queueMessageBody.includes('isGoalMemoryEnabled() && isGoalManagementCommandMessage(text)'),'实际queueMessage先拒绝活跃Goal命令')
+    const queueGuardIndex=queueMessageBody.indexOf('isGoalManagementCommandMessage(text)')
+    for(const laterSideEffect of ['this.adapter.sendQueuedMessage','getAgentSessionMeta','getVaultUserContext','buildReferencedSessionsPrompt','presetUuid || randomUUID()','this.queuedMessageUuids.get','appendSDKMessages']){
+      const sideEffectIndex=queueMessageBody.indexOf(laterSideEffect)
+      assert.ok(sideEffectIndex>=0,'queueMessage应保留原有路径节点: '+laterSideEffect)
+      assert.ok(queueGuardIndex<sideEffectIndex,'queue guard必须先于'+laterSideEffect)
+    }
+    assert.ok(goalCommandBody.includes("const goalWorkspaceId = sessionMeta?.workspaceId ?? requestedWorkspaceId ?? 'default'"),'宿主命令workspace优先级必须来自持久session metadata')
+    assert.ok(goalCommandBody.includes('workspaceId: goalWorkspaceId'))
+    assert.ok(goalCommandBody.includes('getGoalContract(sessionId, goalWorkspaceId)'),'status/restore必须使用同一会话归属')
+    assert.ok(orchestratorSource.includes('const workspaceId = sessionMeta?.workspaceId ?? requestedWorkspaceId'),'普通query workspace也必须优先持久会话归属')
+    assert.ok(orchestratorSource.includes("const activeGoal = isGoalMemoryEnabled() ? getGoalContract(sessionId, workspaceId ?? 'default') : null"),'query contract lookup必须与持久会话workspace归属一致')
+    assert.ok(orchestratorSource.includes("const goalWorkspaceId = workspaceId ?? 'default'"),'query capability的workspace不得反向优先请求slug')
     const dtoFixture={...cp,sequence:77,modelSequence:4,observed:Array.from({length:25},(_,i)=>'observed-'+i),modelReported:Array.from({length:25},(_,i)=>'reported-'+i),nextAction:'next-action',questions:Array.from({length:25},(_,i)=>'question-'+i),unknownSideEffects:Array.from({length:25},(_,i)=>'side-effect-'+i),entryWatermark:Array.from({length:5000},(_,i)=>'entry-'+i),entryHashes:Object.fromEntries(Array.from({length:5000},(_,i)=>['entry-'+i,'a'.repeat(64)]))}
     let dtoCursor;const dtoItems=[];let firstDto
     do {const dto=goal.toGoalCheckpointModelDto(dtoFixture,dtoCursor);firstDto??=dto;assert.equal('entryWatermark' in dto,false);assert.equal('entryHashes' in dto,false);const serialized=JSON.stringify(dto);const serializedTool=JSON.stringify({content:[{type:'text',text:serialized}],details:dto});assert.ok(Buffer.byteLength(serializedTool,'utf8')<32*1024);dtoItems.push(...dto.entries);dtoCursor=dto.nextCursor} while(dtoCursor)
@@ -398,6 +419,95 @@ test('Goal Memory contracts stay immutable, CAS rejects stale state, pack never 
     assert.ok(revokeRootAgain.checkpoint.nextCursor)
     revokeOwner.revoke()
     await assert.rejects(()=>revokeOwner.request({...revokeIdentity,operation:'checkpoint_read',cursor:revokeRootAgain.checkpoint.nextCursor}),/query.*失效/)
+    const createEvidenceLoopFixture=(name)=>{
+      const sessionId='evidence-pages-'+name;const workspaceId='w';const artifactId='evidence-sdk-'+name
+      const directory=join(process.env.HOME,'evidence-pages-'+name);mkdirSync(directory,{recursive:true})
+      const artifactPath=join(directory,'session.jsonl');const needle='EVIDENCE_PAGE_NEEDLE'
+      const rows=[
+        {type:'session',version:3,id:artifactId,timestamp:new Date().toISOString(),cwd:directory},
+        {type:'message',id:'evidence-a',parentId:null,timestamp:new Date().toISOString(),message:{role:'user',content:[{type:'text',text:needle}]}},
+        {type:'message',id:'evidence-b',parentId:'evidence-a',timestamp:new Date().toISOString(),message:{role:'user',content:[{type:'text',text:needle}]}}
+      ]
+      const writeRows=()=>writeFileSync(artifactPath,rows.map((row)=>JSON.stringify(row)).join('\\n')+'\\n')
+      writeRows()
+      const binding={sessionId,workspaceId,artifactId,artifactIdentity:'identity-'+name,path:realpathSync(artifactPath),sessionsDirectory:realpathSync(directory)}
+      const contract=goal.createGoalContract({sessionId,workspaceId,expectedRevision:0,originalText:'Evidence pagination must stay on the captured hit set.',scope:[],nonGoals:[],hardConstraints:[],acceptance:[],userMessageRef:'evidence-pages-'+name})
+      const owner=goal.createGoalMemoryCapability(sessionId,workspaceId,async()=>binding)
+      const identity={ownerId:owner.ownerId,sessionId,workspaceId,queryId:'evidence-pages-query-'+name}
+      let branchEntryIds=['evidence-a','evidence-b'];let leafId='evidence-b';let receiptNo=0
+      const tools=goal.buildGoalMemoryTools({defineTool:(definition)=>definition},owner,sessionId,identity.queryId,{getLeafId:()=>leafId,getBranch:()=>branchEntryIds.map((id)=>({id}))},(payload)=>{const serialized=serializePiToolResultPayload(payload);return {content:[{type:'text',text:serialized.text}],details:serialized.details}})
+      const read=tools.find((tool)=>tool.name==='GoalEvidenceRead')
+      const turnEnd=async(entryIds)=>owner.request({...identity,operation:'turn_end',artifactId,leafId,entryIds,branchEntryIds})
+      const addToolReceipt=async(result)=>{
+        const id='evidence-receipt-'+receiptNo++
+        rows.push({type:'message',id,parentId:leafId,timestamp:new Date().toISOString(),message:{role:'toolResult',toolCallId:'evidence-call-'+receiptNo,toolName:'GoalEvidenceRead',content:result.content,details:result.details,isError:false}})
+        writeRows();branchEntryIds=[...branchEntryIds,id];leafId=id
+        await turnEnd([id])
+      }
+      return {sessionId,workspaceId,artifactId,artifactPath,rows,needle,contract,owner,identity,read,turnEnd,addToolReceipt,getBranch:()=>branchEntryIds,setBranch:(ids,leaf)=>{branchEntryIds=ids;leafId=leaf},writeRows}
+    }
+    const evidenceLoop=createEvidenceLoopFixture('self-reference')
+    await evidenceLoop.turnEnd(['evidence-b'])
+    const evidenceFound=[];let evidenceOffset=0;let evidencePages=0;let evidenceDone=false
+    while(evidencePages<5){
+      const pageResult=await evidenceLoop.read.execute('evidence-call-'+evidencePages,{mode:'keyword',query:evidenceLoop.needle,offset:evidenceOffset,limit:1},new AbortController().signal)
+      const evidence=pageResult.details.evidence
+      assert.equal('snapshotEntries' in evidence,false,'main-only match snapshot不得暴露给模型')
+      assert.equal('entryHashes' in evidence,false,'source hash map不得暴露给模型')
+      assert.equal(evidence.status,'ok')
+      evidenceFound.push(...evidence.lines.map((line)=>JSON.parse(line).id))
+      evidencePages+=1
+      await evidenceLoop.addToolReceipt(pageResult)
+      if(evidence.nextOffset===undefined){evidenceDone=true;break}
+      evidenceOffset=evidence.nextOffset
+    }
+    assert.equal(evidenceDone,true,'真实toolResult/turn_end之后原始两条命中分页必须结束')
+    assert.equal(evidencePages,2)
+    assert.deepEqual(evidenceFound,['evidence-a','evidence-b'],'当前GoalEvidenceRead receipt不递归进入当前检索快照')
+
+    const selectorFixture=createEvidenceLoopFixture('selector-change')
+    await selectorFixture.turnEnd(['evidence-b'])
+    assert.equal((await selectorFixture.read.execute('selector-root-a',{mode:'keyword',query:selectorFixture.needle,offset:0,limit:1})).details.evidence.nextOffset,1)
+    assert.equal((await selectorFixture.read.execute('selector-root-b',{mode:'keyword',query:'PAGE_NEEDLE',offset:0,limit:1})).details.evidence.nextOffset,1,'新的root/selector建立新快照')
+    await assert.rejects(()=>selectorFixture.read.execute('selector-old-cursor',{mode:'keyword',query:selectorFixture.needle,offset:1,limit:1}),/selector changed/)
+    await assert.rejects(()=>selectorFixture.read.execute('selector-cleared-cursor',{mode:'keyword',query:'PAGE_NEEDLE',offset:1,limit:1}),/snapshot unavailable/)
+
+    const tamperFixture=createEvidenceLoopFixture('tampered-source')
+    await tamperFixture.turnEnd(['evidence-b'])
+    const tamperFirst=await tamperFixture.read.execute('tamper-page-0',{mode:'keyword',query:tamperFixture.needle,offset:0,limit:1})
+    assert.equal(tamperFirst.details.evidence.nextOffset,1)
+    await tamperFixture.addToolReceipt(tamperFirst)
+    tamperFixture.rows[1].message.content[0].text='EVIDENCE_PAGE_TAMPER'
+    tamperFixture.writeRows()
+    const tamperedPage=await tamperFixture.read.execute('tamper-page-1',{mode:'keyword',query:tamperFixture.needle,offset:1,limit:1})
+    assert.equal(tamperedPage.details.evidence.status,'changed','snapshot分页必须重新验证原始source hash')
+
+    const rewindFixture=createEvidenceLoopFixture('rewound-source')
+    await rewindFixture.turnEnd(['evidence-b'])
+    assert.equal((await rewindFixture.read.execute('rewind-page-0',{mode:'keyword',query:rewindFixture.needle,offset:0,limit:1})).details.evidence.nextOffset,1)
+    rewindFixture.setBranch(['evidence-a'],'evidence-a')
+    await assert.rejects(()=>rewindFixture.read.execute('rewind-page-1',{mode:'keyword',query:rewindFixture.needle,offset:1,limit:1}),/branch rewind/)
+
+    const revisionEvidence=createEvidenceLoopFixture('revision-invalidates')
+    await revisionEvidence.turnEnd(['evidence-b'])
+    assert.equal((await revisionEvidence.read.execute('revision-page-0',{mode:'keyword',query:revisionEvidence.needle,offset:0,limit:1})).details.evidence.nextOffset,1)
+    goal.createGoalContract({sessionId:revisionEvidence.sessionId,workspaceId:revisionEvidence.workspaceId,expectedRevision:1,originalText:'new revision invalidates old evidence cursors',scope:[],nonGoals:[],hardConstraints:[],acceptance:[],userMessageRef:'evidence-revision-2'})
+    await assert.rejects(()=>revisionEvidence.read.execute('revision-page-1',{mode:'keyword',query:revisionEvidence.needle,offset:1,limit:1}),/snapshot unavailable/)
+
+    const disabledEvidence=createEvidenceLoopFixture('feature-off-invalidates')
+    await disabledEvidence.turnEnd(['evidence-b'])
+    assert.equal((await disabledEvidence.read.execute('disabled-page-0',{mode:'keyword',query:disabledEvidence.needle,offset:0,limit:1})).details.evidence.nextOffset,1)
+    process.env.PROMA_PERSONAL_GOAL_MEMORY='0'
+    await assert.rejects(()=>disabledEvidence.read.execute('disabled-page-1',{mode:'keyword',query:disabledEvidence.needle,offset:1,limit:1}),/当前已关闭/)
+    process.env.PROMA_PERSONAL_GOAL_MEMORY='1'
+    await assert.rejects(()=>disabledEvidence.read.execute('disabled-page-1-after-enable',{mode:'keyword',query:disabledEvidence.needle,offset:1,limit:1}),/snapshot unavailable/)
+
+    const revokedEvidence=createEvidenceLoopFixture('owner-revoke-invalidates')
+    await revokedEvidence.turnEnd(['evidence-b'])
+    assert.equal((await revokedEvidence.read.execute('revoke-page-0',{mode:'keyword',query:revokedEvidence.needle,offset:0,limit:1})).details.evidence.nextOffset,1)
+    revokedEvidence.owner.revoke()
+    await assert.rejects(()=>revokedEvidence.read.execute('revoke-page-1',{mode:'keyword',query:revokedEvidence.needle,offset:1,limit:1}),/query.*失效/)
+
     const queryBoundOwner=goal.createGoalMemoryCapability('s','w')
     await queryBoundOwner.request({ownerId:queryBoundOwner.ownerId,sessionId:'s',workspaceId:'w',queryId:'query-bound',operation:'checkpoint_read'})
     await assert.rejects(()=>queryBoundOwner.request({ownerId:queryBoundOwner.ownerId,sessionId:'s',workspaceId:'w',queryId:'query-other',operation:'checkpoint_read'}),/query.*身份不匹配/)
