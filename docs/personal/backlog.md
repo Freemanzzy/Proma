@@ -22,7 +22,7 @@
 
 ## 开发中（未验收，不属于已验证分支）
 
-- **Goal Memory M0**（截至2026-11-04，`feat/goal-memory-m0-20261103`，基于 `personal` `1c373673`）：默认关闭的独立持久化与手动恢复实验，功能 SSOT 见 [`goal-memory.md`](./goal-memory.md)。首轮5项P2/1项P3及父发现的CAS、query/source、checkpoint分页与撤销竞态已修；首个修复复审新增3项P2（Evidence自引用分页、活跃命令绕过宿主、workspace优先级）全部采纳并修复。最新源码重跑870测试、typecheck、personal scripts、五目标构建及全部独立矩阵通过；第二次获准真实utility短run为33.2秒（4工具/5请求），两页原文稳定结束，活跃命令被拒绝且未入模型，过时workspace请求不改变持久归属，checkpoint仅waiting_user。前一次28.3秒短run及三次长压缩均按源码快照单列，不冒充当前版长压缩验证。新会话/设备/live文件和dev/8443已清理，20原会话及4配置hash恢复、备份保留。最后一轮Codex复审和新会话独立计划验收待收敛，当前不是合入或安装许可。仍未测最新源码的长压缩、真实threshold/overflow故障及图片共存；无M1控制器，不合并、推送、升版、打包或安装。
+- **Goal Memory M0**（截至2026-11-04，`feat/goal-memory-m0-20261103`，基于 `personal` `1c373673`）：默认关闭的独立持久化与手动恢复实验，功能 SSOT 见 [`goal-memory.md`](./goal-memory.md)。此前各批审查及父发现的问题已修；修复复审2再发现的无user压缩上下文漏包、配置根漂移、临界合同进度更新阻塞三项P2也已补修。最新源码重跑871测试、typecheck、personal scripts、五目标构建及全部独立矩阵通过，并用同版SDK实际buildSessionContext/convertToLlm验证cut-turn、用临时HOME和Electron API stub验证规范配置根、以ASCII/Unicode精确12KB包和最大合法进度验证预算。最新这批未再调用真实模型；前一1664e7f1的33.2秒短run（4工具/5请求）、f568c35c的28.3秒run及更早三次长压缩均独立保留，不冒充最新源码实测。fixture已清理恢复20原会话及4配置hash，dev/8443已关、正式443保留。用户已明确批准额外一次CodeX复审（原两轮上限之外，仅一次、不新增真实模型调用）；该轮及全新只读计划验收待完成。无M1控制器，不合并、推送、升版、打包或安装；真实自动threshold/overflow故障、图片共存、大历史UI负载仍未测。
 
 ## 用户反馈收集（2026-10-01 起，下一批一并实现）
 

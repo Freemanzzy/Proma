@@ -2202,3 +2202,12 @@
 - **版本与证据分层**：此前三次长压缩是初审前快照，28.3秒短run是前一修复快照；本条33.2秒run对应追加三项修复后的源码。不得相互代替最终版长期压缩证明。真实自动threshold/overflow故障、图片共存和大历史UI负载仍未测；同步SQLite提交不能由Promise deadline硬抢占。实际IPC拒绝已观测，但首版探针仅存String(error)，未保留序列化对象内的拒绝文案，源方法探针另行验证了拒绝路径。
 - **清理**：应用删除新增会话、撤销新增设备、结束测试空间；标准脚本只停所属dev，8443关闭、正式443保留。只清新live artifact/sidecar/配对材料，私有合成审计副本保留。既有启动逻辑再次移走空草稿、生成disabled预设，停机后精确恢复草稿metadata和原渠道字节；20原会话ID及四配置hash恢复。所有旧备份、新草稿备份及恢复前index/channel备份均保留，未复制正式数据或重建fixture。
 - **状态与文档**：同步Goal功能SSOT、PERSONAL及backlog。最后一轮针对性Codex复审与全新Proma只读计划验收仍待完成；仅功能分支提交，不合并、推送、升版、打包、安装。无需更新共同维护规则；不将测试流水写入长期协作记忆。
+
+## 2026-11-04: Goal Memory M0 额外复审修复与确定性收口
+
+- **新增裁决与授权**：修复复审2由Codex CLI 0.165.0完成（402秒、base personal及个人审查规则），新增3项P2全部采纳：SDK压缩切到工具轮中部、没有原始user时恢复包漏注入；未打包Electron无PROMA_DEV时Goal与规范配置根不一致；接近12KB的已接受合同被合法进度更新阻塞。父独立核实源码及负向复现，不把此前全绿测试当无缺陷证明。原两轮复审上限已到，先停下向用户说明，再取得“继续修复并额外复审1轮”的明确批准；仅额外一次，不新增真实模型调用。
+- **修复范围**：只在个人Goal模块、对应测试及功能SSOT调整。无原始user时在summary/system之后、保留尾部之前插入任务数据；原user、图片对象、previous transform及隐藏Symbol幂等语义不改，不启动新run。sidecar复用config-paths.getConfigDir及既有目录名校验，仍延迟到flag开启且实际打开数据库时解析；测试override保留。合同创建/修订预留固定短省略标记的正文预算，可选进度过大时整体省略而不截必需合同。旧已接受边界复现可通过短标记继续读取；不改schema、不自动迁移或重写合同，异常历史数据仍fail closed。上游触点清单不增加，版本/lock/依赖不变。
+- **父独立回归**：旧源码的实际SDK cut-turn、配置根与临界预算三项负向控制均失败；本次转通过。同版本SDK真实buildSessionContext产生compactionSummary/assistant/toolResult无user上下文，inject后convertToLlm保留单份完整Goal包；空/system-only、重复包、用户相似marker和图片对象检查通过。配置根测试使用临时HOME和Electron API stub，覆盖未打包默认、合法fixture、非法目录名、打包态及flag0，不声称完整GUI开发启动。ASCII/Unicode二分至本组合同的11,676-byte原文和精确12,000-byte包正文；模型三数组各100×5,000 bytes、nextAction 5,000 bytes，在五种允许状态下均只省略进度，必需原文及约束完整。正文预算不含外层固定task-data标记。
+- **完整检查**：旧6项、精确query、28页跨turn checkpoint、撤销无迟到写、Evidence自引用分页及实际host方法10项重跑通过；30×10装载、15证据、21hook、4类mutation controls先过且变异因断言失败。全仓871 pass/0 fail、2322 assertions，typecheck、personal scripts、main/agent-runtime/preload/renderer/web-preload构建及diff-check通过，源码hash前后相同。临时mutation副本仅重定向已有配置模块/TypeBox的解析并把electron保持external，与main构建语义一致；未修改SDK或依赖源码。
+- **验证分层与限制**：本批按新许可仅本地确定性/SDK转换，不新增真实模型或重开dev。此前1664e7f1的33.2秒、f568c35c的28.3秒短run及首版三次长压缩分别保留，不冒充本批源码真实provider验证。真实自动threshold/overflow故障、图片与provider共存、大历史UI负载未测；同步SQLite事务不可被Promise deadline硬抢占。fixture此前已精确清理，20原会话/四配置hash恢复、备份保留，dev/8443关闭、正式443保留，本批无额外live实验材料。
+- **当前状态**：父已同步PERSONAL、backlog与功能SSOT。额外获准的复审3及全新Proma只读计划验收仍待完成，当前不宣称可合入或已验收。仅功能分支提交，不合并、推送、升版、打包、安装。无需改共同维护规则，测试流水留审计材料而不写入长期协作记忆。

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { getConfigDir } from './config-paths'
 import type { ExtensionFactory, ToolDefinition } from '@earendil-works/pi-coding-agent'
 import type { AgentToolResult } from '@earendil-works/pi-agent-core'
 import { Type } from 'typebox'
@@ -64,9 +64,8 @@ function isEnabled(): boolean {
 export function isGoalMemoryEnabled(): boolean { return isEnabled() }
 
 function databasePath(): string {
-  const root = process.env.PROMA_PERSONAL_GOAL_DATA_DIR
-    ? join(process.env.PROMA_PERSONAL_GOAL_DATA_DIR, 'goal-memory')
-    : join(homedir(), process.env.PROMA_DEV === '1' ? (process.env.PROMA_DEV_DATA_DIR_NAME ?? '.proma-dev') : '.proma', 'goal-memory')
+  const explicitTestRoot = process.env.PROMA_PERSONAL_GOAL_DATA_DIR
+  const root = explicitTestRoot ? join(explicitTestRoot, 'goal-memory') : join(getConfigDir(), 'goal-memory')
   mkdirSync(root, { recursive: true, mode: 0o700 })
   return join(root, 'goals.sqlite')
 }
@@ -158,6 +157,7 @@ export function createGoalContract(input: {
       }
       const contract: GoalContract = { ...value, hash: contractHash(value), createdAt: Date.now() }
       const initialCheckpoint = emptyCheckpoint(contract)
+      validateGoalContextFallbackBudget(contract)
       buildGoalContextPack(contract, initialCheckpoint)
       db.prepare('INSERT INTO contracts(id, session_id, revision, hash, payload, created_at) VALUES (?, ?, ?, ?, ?, ?)')
         .run(contract.id, contract.sessionId, contract.revision, contract.hash, JSON.stringify(contract), contract.createdAt)
@@ -529,15 +529,19 @@ const goalTaskDataIdentity = Symbol('proma.goal-memory.task-data')
 export function injectGoalTaskData<T extends {role:string;content?:unknown}>(messages:T[], context:string):T[] {
   const retained=messages.filter((message)=>!(message as T&{[goalTaskDataIdentity]?:boolean})[goalTaskDataIdentity])
   const lastUser=retained.findLastIndex((message)=>message.role==='user')
-  if(lastUser<0)return retained
+  const lastSummary=retained.findLastIndex((message)=>message.role==='compactionSummary'||message.role==='branchSummary')
+  const lastSystem=retained.findLastIndex((message)=>message.role==='system')
+  const insertionIndex=lastUser>=0?lastUser:Math.max(lastSystem,lastSummary)+1
   const task={role:'user',content:`<goal-memory-task-data>\\n${context}\\n</goal-memory-task-data>`,timestamp:Date.now()} as unknown as T
   Object.defineProperty(task,goalTaskDataIdentity,{value:true,enumerable:false})
-  retained.splice(lastUser,0,task)
+  retained.splice(insertionIndex,0,task)
   return retained
 }
 
-export function buildGoalContextPack(contract: GoalContract, checkpoint: GoalCheckpoint, budgetBytes = GOAL_CONTEXT_BUDGET_CHARS): string {
-  const required = [
+const GOAL_PROGRESS_OMISSION_TEXT = '[可选checkpoint进度已省略；请用 GoalCheckpointRead 分页读取。]'
+
+function goalRequiredContextText(contract: GoalContract): string {
+  return [
     `Goal ${contract.id} · revision ${contract.revision} · ${contract.hash}`,
     `用户目标原文：${contract.originalText}`,
     `Scope：${contract.scope.join('；')}`,
@@ -545,6 +549,22 @@ export function buildGoalContextPack(contract: GoalContract, checkpoint: GoalChe
     `硬约束：${contract.hardConstraints.join('；')}`,
     `验收项：${contract.acceptance.join('；')}`,
   ].join('\n')
+}
+
+function goalProgressOmissionPack(required: string): string {
+  return `${required}\n\n${GOAL_PROGRESS_OMISSION_TEXT}`
+}
+
+function validateGoalContextFallbackBudget(contract: GoalContract, budgetBytes = GOAL_CONTEXT_BUDGET_CHARS): void {
+  const required = goalRequiredContextText(contract)
+  if (Buffer.byteLength(required, 'utf8') > budgetBytes) throw new Error('Goal 必需合同字段超出恢复包 UTF-8 字节预算，已阻塞；未截断约束')
+  if (Buffer.byteLength(goalProgressOmissionPack(required), 'utf8') > budgetBytes) {
+    throw new Error('Goal 合同必须为固定进度省略提示预留恢复包预算；未截断或改写必需合同字段')
+  }
+}
+
+export function buildGoalContextPack(contract: GoalContract, checkpoint: GoalCheckpoint, budgetBytes = GOAL_CONTEXT_BUDGET_CHARS): string {
+  const required = goalRequiredContextText(contract)
   if (Buffer.byteLength(required, 'utf8') > budgetBytes) throw new Error('Goal 必需合同字段超出恢复包 UTF-8 字节预算，已阻塞；未截断约束')
   const progress = [
     `状态：${checkpoint.status}`,
@@ -556,8 +576,8 @@ export function buildGoalContextPack(contract: GoalContract, checkpoint: GoalChe
   ].join('\n')
   const renderedProgress = `${required}\n\n${progress}`
   if (Buffer.byteLength(renderedProgress, 'utf8') <= budgetBytes) return renderedProgress
-  const omission = `${required}\n\n[可选checkpoint进度字段因恢复包预算不足而省略；请用 GoalCheckpointRead 按有界页读取。无cursor会从当前进度开始固定本query快照；nextCursor继续读取同一快照，不受turn_end或compact推进影响。]`
-  if (Buffer.byteLength(omission, 'utf8') > budgetBytes) throw new Error('Goal 必需合同字段与进度省略指针超出恢复包预算，已阻塞')
+  const omission = goalProgressOmissionPack(required)
+  if (Buffer.byteLength(omission, 'utf8') > budgetBytes) throw new Error('Goal 必需合同字段与固定进度省略提示超出恢复包预算；旧合同保持fail closed且不会自动迁移')
   return omission
 }
 

@@ -21,6 +21,8 @@ test('Goal Memory contracts stay immutable, CAS rejects stale state, pack never 
     import { mkdirSync, writeFileSync, existsSync, realpathSync, readFileSync } from 'node:fs'
     import { join } from 'node:path'
     import * as goal from ${JSON.stringify(modulePath)}
+    import { buildSessionContext } from ${JSON.stringify(join(repoRoot, 'node_modules/@earendil-works/pi-coding-agent/dist/core/session-manager.js'))}
+    import { convertToLlm } from ${JSON.stringify(join(repoRoot, 'node_modules/@earendil-works/pi-coding-agent/dist/core/messages.js'))}
     import { PiUtilityAdapter } from ${JSON.stringify(join(import.meta.dir, 'adapters/pi-utility-adapter.ts'))}
     import { serializePiToolResultPayload } from ${JSON.stringify(join(import.meta.dir, 'adapters/pi-tool-result-json.ts'))}
     import { AGENT_RUNTIME_METHODS } from ${JSON.stringify(join(repoRoot, 'packages/shared/src/types/agent-runtime.ts'))}
@@ -31,6 +33,41 @@ test('Goal Memory contracts stay immutable, CAS rejects stale state, pack never 
     const packedAgain=goal.injectGoalTaskData(packed,'目标恢复合同')
     assert.equal(packedAgain.filter((item)=>String(item.content).includes('目标恢复合同')).length,1)
     assert.ok(packedAgain.includes(markerUser))
+    const sdkEntries=[
+      {type:'session',id:'sdk-session',parentId:null,version:3,timestamp:new Date().toISOString(),cwd:'/tmp'},
+      {type:'message',id:'old-user',parentId:'sdk-session',timestamp:new Date().toISOString(),message:{role:'user',content:'Old turn user message'}},
+      {type:'compaction',id:'cut-turn',parentId:'old-user',timestamp:new Date().toISOString(),summary:'SDK-generated cut-turn summary',tokensBefore:40_000,firstKeptEntryId:'not-retained'},
+      {type:'message',id:'continuation-assistant',parentId:'cut-turn',timestamp:new Date().toISOString(),message:{role:'assistant',content:[{type:'text',text:'Continue from the cut turn'}]}},
+      {type:'message',id:'continuation-tool-result',parentId:'continuation-assistant',timestamp:new Date().toISOString(),message:{role:'toolResult',toolCallId:'sdk-tool-call',toolName:'Bash',content:[{type:'text',text:'SDK tool output'}]}}
+    ]
+    const sdkIndex=new Map(sdkEntries.map((entry)=>[entry.id,entry]))
+    const sdkCutContext=buildSessionContext(sdkEntries,'continuation-tool-result',sdkIndex)
+    assert.deepEqual(sdkCutContext.messages.map((message)=>message.role),['compactionSummary','assistant','toolResult'],'安装版Pi SDK应生成没有原始user的真实cut-turn上下文')
+    const mandatoryPack='Goal original objective; HARD_CONSTRAINT: do not publish; user authorization is not inferred.'
+    const sdkInjectedOnce=goal.injectGoalTaskData(sdkCutContext.messages,mandatoryPack)
+    const sdkInjectedTwice=goal.injectGoalTaskData(sdkInjectedOnce,mandatoryPack)
+    const sdkConverted=convertToLlm(sdkInjectedTwice)
+    const sdkGoalPackets=sdkConverted.filter((message)=>message.role==='user'&&String(message.content).includes('<goal-memory-task-data>'))
+    assert.equal(sdkGoalPackets.length,1,'真实cut-turn请求每次只携带一份Goal task-data')
+    assert.ok(sdkGoalPackets[0].content.includes(mandatoryPack),'转换后完整保留必需目标与硬约束')
+    assert.deepEqual(sdkConverted.map((message)=>message.role),['user','user','assistant','toolResult'])
+    const systemOnlyEntries=[sdkEntries[0],{type:'message',id:'system-only',parentId:'sdk-session',timestamp:new Date().toISOString(),message:{role:'system',content:'System instructions'}}]
+    const systemOnlyContext=buildSessionContext(systemOnlyEntries,'system-only',new Map(systemOnlyEntries.map((entry)=>[entry.id,entry])))
+    const systemOnlyConverted=convertToLlm(goal.injectGoalTaskData(systemOnlyContext.messages,mandatoryPack))
+    assert.deepEqual(systemOnlyConverted.map((message)=>message.role),['system','user'],'system-only合法上下文仍注入Goal包且不覆盖system')
+    assert.ok(String(systemOnlyConverted[1].content).includes(mandatoryPack))
+    const emptySdkContext=buildSessionContext([],null,new Map())
+    const emptyConverted=convertToLlm(goal.injectGoalTaskData(emptySdkContext.messages,mandatoryPack))
+    assert.deepEqual(emptyConverted.map((message)=>message.role),['user'],'空合法上下文也保留完整Goal包')
+    assert.ok(String(emptyConverted[0].content).includes(mandatoryPack))
+    const adapterSource=readFileSync(${JSON.stringify(join(repoRoot, 'apps/electron/src/main/lib/adapters/pi-agent-adapter.ts'))},'utf8')
+    const adapterTransformStart=adapterSource.indexOf('session.agent.transformContext = async (messages, signal) => {')
+    const adapterTransformEnd=adapterSource.indexOf('// Pi 0.86 的 transcript-aware',adapterTransformStart)
+    const adapterTransform=adapterSource.slice(adapterTransformStart,adapterTransformEnd)
+    const transformStageOrder=['await previousTransformContext?.','capability.request({','injectGoalTaskData(transformed, loaded.context)','sanitizePiMessageImageContent(transformed)','applyImageBudget(sanitized']
+    const transformStagePositions=transformStageOrder.map((stage)=>adapterTransform.indexOf(stage))
+    assert.ok(transformStagePositions.every((position)=>position>=0),'保留previous transform、Goal注入、图片sanitize与budget步骤')
+    assert.deepEqual(transformStagePositions,[...transformStagePositions].sort((a,b)=>a-b),'Goal task-data仍经过既有图片处理链')
     assert.equal(packedAgain.find((item)=>item===markerUser).content,markerUser.content)
     assert.equal(goal.getGoalContract('off'), null)
     assert.equal(existsSync(root), false)
@@ -65,6 +102,50 @@ test('Goal Memory contracts stay immutable, CAS rejects stale state, pack never 
     for (const text of [...c2.hardConstraints, ...c2.acceptance, c2.originalText]) assert.ok(pack.includes(text))
     assert.ok(pack.includes('未验证'))
     assert.throws(() => goal.buildGoalContextPack({...c2, originalText:'x'.repeat(200)}, first, 100), /超出恢复包 UTF-8 字节预算/)
+    const legacyEdgeText='x'.repeat(11_650)
+    const legacyEdgeContract=goal.createGoalContract({sessionId:'legacy-edge-contract',workspaceId:'w',expectedRevision:0,originalText:legacyEdgeText,scope:[],nonGoals:[],hardConstraints:[],acceptance:[],userMessageRef:'legacy-edge-user'})
+    const legacyEdgeCheckpoint=goal.getGoalCheckpoint(legacyEdgeContract.id,1)
+    const legacyInitialPack=goal.buildGoalContextPack(legacyEdgeContract,legacyEdgeCheckpoint)
+    assert.equal(Buffer.byteLength(legacyInitialPack,'utf8'),11_955,'保留父复现的11,650 ASCII初始包边界')
+    const maxProgressList=(prefix,character)=>Array.from({length:100},(_,index)=>{const head=prefix+'-'+index+'-';return head+character.repeat(5_000-head.length)})
+    const budgetMaxObserved=maxProgressList('MAX_OBSERVED','o')
+    const maxReports=maxProgressList('MAX_MODEL_PROGRESS_SENTINEL','m')
+    const maxQuestions=maxProgressList('MAX_QUESTION','q')
+    const maxUnknown=maxProgressList('MAX_UNKNOWN_SIDE_EFFECT','u')
+    const maxNextAction='MAX_NEXT_ACTION_SENTINEL_'+ 'n'.repeat(5_000-'MAX_NEXT_ACTION_SENTINEL_'.length)
+    const budgetContract=goal.createGoalContract({sessionId:'max-progress-budget',workspaceId:'w',expectedRevision:0,originalText:'Preserve this objective without inferring authorization.',scope:['temporary fixture'],nonGoals:['do not publish'],hardConstraints:['HARD_CONSTRAINT: never publish without explicit user approval'],acceptance:['retain the original constraint'],userMessageRef:'max-progress-user'})
+    const budgetStart=goal.getGoalCheckpoint(budgetContract.id,1)
+    const budgetObserved=goal.recordGoalObservedCheckpoint({goalId:budgetContract.id,revision:1,expectedSequence:budgetStart.sequence,observed:budgetMaxObserved,artifactId:'',branchId:'',leafId:'',entryWatermark:[],entryHashes:{}})
+    const maxProgressCheckpoint=goal.recordGoalModelCheckpoint({goalId:budgetContract.id,revision:1,expectedSequence:budgetObserved.sequence,status:'claimed_done',modelReported:maxReports,nextAction:maxNextAction,questions:maxQuestions,unknownSideEffects:maxUnknown})
+    assert.equal(maxProgressCheckpoint.status,'claimed_done')
+    for(const status of ['active','waiting_user','blocked','paused','claimed_done']){
+      const fallbackPack=goal.buildGoalContextPack(budgetContract,{...maxProgressCheckpoint,status})
+      assert.ok(Buffer.byteLength(fallbackPack,'utf8')<=goal.GOAL_CONTEXT_BUDGET_CHARS)
+      assert.ok(fallbackPack.includes('可选checkpoint进度已省略'))
+      assert.ok(fallbackPack.includes('HARD_CONSTRAINT: never publish without explicit user approval'))
+      assert.ok(fallbackPack.includes('Preserve this objective without inferring authorization.'))
+      assert.equal(fallbackPack.includes('MAX_MODEL_PROGRESS_SENTINEL'),false,'可选进度全部省略时必需合同不得变形')
+    }
+    const legacyAfterLargeProgress=goal.buildGoalContextPack(legacyEdgeContract,{...maxProgressCheckpoint,goalId:legacyEdgeContract.id,revision:1})
+    assert.ok(Buffer.byteLength(legacyAfterLargeProgress,'utf8')<=goal.GOAL_CONTEXT_BUDGET_CHARS,'未修改的历史边界合同可使用短省略标记恢复')
+    assert.ok(legacyAfterLargeProgress.includes(legacyEdgeText),'历史合同原文逐字保留')
+    const boundaryCandidate={...budgetContract,id:'a'.repeat(36),revision:1,hash:'b'.repeat(64),scope:[],nonGoals:[],hardConstraints:[],acceptance:[]}
+    const fallbackFits=(text)=>{try{goal.buildGoalContextPack({...boundaryCandidate,originalText:text},{...maxProgressCheckpoint,goalId:boundaryCandidate.id,revision:1});return true}catch{return false}}
+    const maxAsciiLength=(()=>{let low=0,high=12_000;while(low<high){const middle=Math.ceil((low+high)/2);if(fallbackFits('x'.repeat(middle)))low=middle;else high=middle-1}return low})()
+    const asciiBoundary=goal.createGoalContract({sessionId:'ascii-budget-boundary',workspaceId:'w',expectedRevision:0,originalText:'x'.repeat(maxAsciiLength),scope:[],nonGoals:[],hardConstraints:[],acceptance:[],userMessageRef:'ascii-boundary'})
+    const asciiBoundaryPack=goal.buildGoalContextPack(asciiBoundary,{...maxProgressCheckpoint,goalId:asciiBoundary.id,revision:1})
+    assert.ok(Buffer.byteLength(asciiBoundaryPack,'utf8')<=goal.GOAL_CONTEXT_BUDGET_CHARS)
+    assert.throws(()=>goal.createGoalContract({sessionId:'ascii-budget-over',workspaceId:'w',expectedRevision:0,originalText:'x'.repeat(maxAsciiLength+1),scope:[],nonGoals:[],hardConstraints:[],acceptance:[],userMessageRef:'ascii-over'}),/固定进度省略提示/)
+    assert.equal(goal.getGoalContract('ascii-budget-over','w'),null,'预算拒绝后合同CAS状态未推进')
+    const maxEmojiCount=(()=>{let low=0,high=3_000;while(low<high){const middle=Math.ceil((low+high)/2);if(fallbackFits('🌙'.repeat(middle)))low=middle;else high=middle-1}return low})()
+    const unicodeBoundary=goal.createGoalContract({sessionId:'unicode-budget-boundary',workspaceId:'w',expectedRevision:0,originalText:'🌙'.repeat(maxEmojiCount),scope:[],nonGoals:[],hardConstraints:[],acceptance:[],userMessageRef:'unicode-boundary'})
+    const unicodeBoundaryPack=goal.buildGoalContextPack(unicodeBoundary,{...maxProgressCheckpoint,goalId:unicodeBoundary.id,revision:1})
+    assert.ok(Buffer.byteLength(unicodeBoundaryPack,'utf8')<=goal.GOAL_CONTEXT_BUDGET_CHARS)
+    assert.throws(()=>goal.createGoalContract({sessionId:'unicode-budget-over',workspaceId:'w',expectedRevision:0,originalText:'🌙'.repeat(maxEmojiCount+1),scope:[],nonGoals:[],hardConstraints:[],acceptance:[],userMessageRef:'unicode-over'}),/固定进度省略提示/)
+    assert.equal(goal.getGoalContract('unicode-budget-over','w'),null,'UTF-8越界拒绝不写新合同')
+    const beforeBudgetCas=goal.getGoalContract(budgetContract.sessionId,'w')
+    assert.throws(()=>goal.createGoalContract({sessionId:budgetContract.sessionId,workspaceId:'w',expectedRevision:0,originalText:'stale boundary revision',scope:[],nonGoals:[],hardConstraints:[],acceptance:[],userMessageRef:'stale-budget-cas'}),/CAS 冲突/)
+    assert.deepEqual(goal.getGoalContract(budgetContract.sessionId,'w'),beforeBudgetCas,'CAS失败不改现有immutable合同')
     const commandContract = {expectedRevision:2,originalText:'原文目标',scope:[],nonGoals:[],hardConstraints:['不得发布'],acceptance:['人工确认']}
     assert.deepEqual(goal.parseGoalCommand('/goal set ' + JSON.stringify(commandContract)), {command:'set', input:commandContract})
     assert.deepEqual(goal.parseGoalCommand('/goal restore'), {command:'restore'})
@@ -593,3 +674,69 @@ test('Goal Memory contracts stay immutable, CAS rejects stale state, pack never 
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
   } finally { rmSync(home, { recursive: true, force: true }) }
 })
+
+test('Goal sidecar resolves shared packaged/dev config roots and stays filesystem-lazy when disabled', async () => {
+  const suiteHome=mkdtempSync(join(tmpdir(),'proma-goal-config-suite-'))
+  const sourcePath=join(suiteHome,'verify-goal-config.ts')
+  const outputPath=join(suiteHome,'verify-goal-config.mjs')
+  const preloadPath=join(suiteHome,'mock-electron.cjs')
+  const scenarios = [
+    { name:'unpackaged-default', packaged:false, expectedName:'.proma-dev' },
+    { name:'unpackaged-valid-override', packaged:false, dataDirName:'.proma-dev-goal-fixture', expectedName:'.proma-dev-goal-fixture' },
+    { name:'unpackaged-invalid-override', packaged:false, dataDirName:'../.proma', expectedName:'.proma-dev' },
+    { name:'packaged-ignores-dev-override', packaged:true, dataDirName:'.proma-dev-goal-fixture', expectedName:'.proma' },
+    { name:'explicit-test-root', packaged:true, override:true, expectedName:null },
+  ]
+  const probeSource = `
+    import assert from 'node:assert/strict'
+    import { existsSync } from 'node:fs'
+    import { join } from 'node:path'
+    import * as goal from ${JSON.stringify(modulePath)}
+    const scenario=JSON.parse(process.env.GOAL_CONFIG_SCENARIO)
+    const home=process.env.HOME
+    process.env.PROMA_PERSONAL_GOAL_MEMORY='0'
+    assert.equal(goal.getGoalContract('disabled'),null)
+    assert.throws(()=>goal.createGoalContract({sessionId:'disabled',workspaceId:'w',expectedRevision:0,originalText:'disabled',scope:[],nonGoals:[],hardConstraints:[],acceptance:[],userMessageRef:'disabled'}),/已关闭/)
+    assert.equal(existsSync(join(home,'.proma')),false,'flag=0不得创建正式配置根')
+    assert.equal(existsSync(join(home,'.proma-dev')),false,'flag=0不得创建默认开发配置根')
+    process.env.PROMA_PERSONAL_GOAL_MEMORY='1'
+    const contract=goal.createGoalContract({sessionId:'path-'+scenario.name,workspaceId:'w',expectedRevision:0,originalText:'temporary path fixture',scope:[],nonGoals:[],hardConstraints:[],acceptance:[],userMessageRef:'path-fixture'})
+    assert.ok(contract.id)
+    const databasePath=join(scenario.override?join(home,'goal-test-override'):join(home,scenario.expectedName),'goal-memory','goals.sqlite')
+    assert.equal(existsSync(databasePath),true,'sidecar must follow the configured root')
+    for(const name of ['.proma','.proma-dev','.proma-dev-goal-fixture']){
+      if(!scenario.override&&name===scenario.expectedName)continue
+      assert.equal(existsSync(join(home,name)),false,'unexpected root created: '+name)
+    }
+  `
+  const preloadSource=`
+    const Module=require('node:module')
+    const originalLoad=Module._load
+    Module._load=function(request,parent,isMain){
+      if(request==='electron'||/(?:^|[/\\\\])electron(?:[/\\\\]index\\.js)?$/.test(String(request)))return {app:{isPackaged:process.env.PROMA_TEST_ELECTRON_PACKAGED==='1'}}
+      return originalLoad.call(this,request,parent,isMain)
+    }
+  `
+  try {
+    writeFileSync(sourcePath,probeSource)
+    writeFileSync(preloadPath,preloadSource)
+    const build=await Bun.build({entrypoints:[sourcePath],target:'node',format:'esm',external:['node:sqlite','electron']})
+    expect(build.success,build.logs.map((log)=>log.message).join('\\n')).toBe(true)
+    const compiled=build.outputs[0]
+    if(!compiled)throw new Error('未生成配置路径验证脚本')
+    await Bun.write(outputPath,compiled)
+    for(const scenario of scenarios){
+      const home=mkdtempSync(join(tmpdir(),'proma-goal-config-'+scenario.name+'-'))
+      const env:NodeJS.ProcessEnv={...process.env,HOME:home,PROMA_PERSONAL_GOAL_MEMORY:'0',PROMA_TEST_ELECTRON_PACKAGED:scenario.packaged?'1':'0',GOAL_CONFIG_SCENARIO:JSON.stringify(scenario)}
+      delete env.PROMA_DEV
+      delete env.PROMA_DEV_DATA_DIR_NAME
+      delete env.PROMA_PERSONAL_GOAL_DATA_DIR
+      if(scenario.dataDirName!==undefined)env.PROMA_DEV_DATA_DIR_NAME=scenario.dataDirName
+      if(scenario.override)env.PROMA_PERSONAL_GOAL_DATA_DIR=join(home,'goal-test-override')
+      try {
+        const result=spawnSync('node',['--require',preloadPath,outputPath],{cwd:repoRoot,env,encoding:'utf8',timeout:15_000,maxBuffer:2*1024*1024})
+        expect(result.status,`${scenario.name}: ${result.stdout}\\n${result.stderr}`).toBe(0)
+      } finally {rmSync(home,{recursive:true,force:true})}
+    }
+  } finally {rmSync(suiteHome,{recursive:true,force:true})}
+},30_000)
