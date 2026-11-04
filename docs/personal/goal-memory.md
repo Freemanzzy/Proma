@@ -1,6 +1,6 @@
 # Goal Memory（M0）功能 SSOT 草稿
 
-状态（2026-11-04，21:15批准后的候选）：**首次Evidence绑定owner屏障已最小修复，父实际双Worker首chunk门控已负向转正，9项末端/16线程及完整矩阵、876测试、typecheck/scripts/五构建通过，17源hash前后一致。仅额外一轮定向复审6与全新只读计划验收尚待执行，不声称最终通过。默认关闭、仅功能分支，无新API/schema/自动重试/M1；未合并/推送/升版/打包/安装，无新dev/provider/长压缩，不重做旧清理。**
+状态（2026-11-04，21:15批准后的最终候选）：**产品df8ae0fd首次Evidence绑定owner屏障已修，父B6双Worker负向转正及完整矩阵/876测试通过。唯一额外定向复审6已实际完成：CLI0.165.0/base personal/review-rules，93秒，聚焦9e6→df8未发现可操作缺陷，源码未变，隔离快照未重跑测试。当前等待全新只读计划验收，不宣称整体通过。不自动第七轮；默认关闭，无API/schema/自动重试/M1或新dev/provider/长压缩；未合并/推送/升版/打包/安装，不重做旧清理。**
 
 ## 范围与启用
 
@@ -142,3 +142,9 @@ Codex CLI0.165.0以base personal/review-rules对9e6f7036完成唯一获准复审
 在生产esbuild core/伴随Worker的冻结候选上，两个真实Worker在readStream首chunk实际门控；先放被替换旧A，拒绝且sequence仍0/空绑定，再放当前B，首次成功返回BETA b0，offset1返回b1，最终hostseq1/modelseq0、identity与完整watermark正确、4线程退出。相同增强探针对冻结9e6旧源确因旧A推进seq0→1失败，前后对照保留。不是自动重试，未用context预先绑定掩盖CP0边界。
 
 B6全部通过：9项末端/快照/首次绑定，原16线程/故障/无来源，原六项/query/28页checkpoint/revoke/Evidence两页/host10/50k，SDK/context/budget/config-path/defaultoff，30×10装载、15证据、21hook、4mutation（control先过/断言失败killed），876 pass/0 fail/2328 expect/146 files、typecheck、personal scripts、五构建与Worker产物；17源码/构建输入before/after一致。此后仅按许可做一次定向6和新只读验收，无新功能模型实验或发布动作；旧未测限制和实验版本归属保持。
+
+## 2026-11-04 定向复审6实际收敛
+
+唯一额外定向复审6针对产品df8ae0fd、base personal及review-rules，以9e6→df8首次binding owner提交屏障及其受影响不变量为关注范围。CLI0.165.0，93秒、报告生成退出码0、源码未变；报告明确“未发现可操作缺陷”，核对owner检查/state seal/SQLite CAS无await、post-return检查保留及CP0双root回归，未见source/lifecycle/CAS约束削弱。隔离快照缺依赖，审查者未重跑测试；父B6完整测试不归为CodeX实跑。
+
+父核对采纳本轮无发现结论，原P2同步屏障已修并原生负向转正，未新增暂缓项。没有追加第七轮或发布动作；已记录实际结果后再真正新建role review验收原计划、研究与三个补充，对最终代码自主裁决。当前只通过修复/测试/定向复审，不把这些替代最终验收。
