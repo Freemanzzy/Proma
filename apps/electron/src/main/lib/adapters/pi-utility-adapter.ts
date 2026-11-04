@@ -29,6 +29,7 @@ type PendingQuery = {
 type CapabilityRequest = {
   controller: AbortController
   queryId: string
+  sessionId: string
 }
 
 type QueryAbortResponse = {
@@ -72,7 +73,7 @@ export class PiUtilityAdapter {
     try {
       await client.call(
         AGENT_RUNTIME_METHODS.QUERY_START,
-        { queryId, input: serializeQueryInput(input) },
+        { queryId, input: serializeQueryInput(input, queryId) },
         { queryId },
       )
       pending.accepted = true
@@ -189,16 +190,30 @@ export class PiUtilityAdapter {
 
     if (request.method === AGENT_RUNTIME_METHODS.CAPABILITY_CANCEL) {
       const requestId = typeof payload?.requestId === 'string' ? payload.requestId : ''
-      this.capabilityAbortControllers.get(requestId)?.controller.abort()
+      const capability = this.capabilityAbortControllers.get(requestId)
+      if (capability && capability.queryId === request.queryId && capability.sessionId === request.sessionId) capability.controller.abort()
       return { accepted: true }
     }
 
-    if (!pending) throw new Error(`No active Agent query: ${queryId ?? 'unknown'}`)
+    if (!pending || request.queryId !== pending.queryId || request.sessionId !== pending.sessionId) throw new Error(`No active Agent query: ${queryId ?? 'unknown'}`)
+
+    if (request.method === AGENT_RUNTIME_METHODS.CAPABILITY_GOAL_MEMORY) {
+      const capability = pending.input.goalMemoryCapability
+      if (!capability) throw new Error('Goal capability unavailable for this query')
+      if (payload?.ownerId !== capability.ownerId || payload?.sessionId !== pending.sessionId || payload?.workspaceId !== capability.workspaceId || payload?.queryId !== pending.queryId) {
+        throw new Error('Goal capability request identity mismatch')
+      }
+      const controller = new AbortController()
+      this.capabilityAbortControllers.set(request.requestId, { controller, queryId: pending.queryId, sessionId: pending.sessionId })
+      try {
+        return await capability.request(payload as unknown as Parameters<typeof capability.request>[0], controller.signal)
+      } finally { this.capabilityAbortControllers.delete(request.requestId) }
+    }
 
     if (request.method === AGENT_RUNTIME_METHODS.CAPABILITY_CAN_USE_TOOL) {
       if (!pending.input.canUseTool) throw new Error(`No canUseTool handler: ${pending.sessionId}`)
       const controller = new AbortController()
-      this.capabilityAbortControllers.set(request.requestId, { controller, queryId: pending.queryId })
+      this.capabilityAbortControllers.set(request.requestId, { controller, queryId: pending.queryId, sessionId: pending.sessionId })
       try {
         const options = (payload?.options && typeof payload.options === 'object' ? payload.options : {}) as Record<string, unknown>
         return await pending.input.canUseTool(
@@ -216,7 +231,7 @@ export class PiUtilityAdapter {
       const tool = pending.input.customTools?.find((candidate) => candidate.name === toolName)
       if (!tool) throw new Error(`No custom tool handler: ${toolName}`)
       const controller = new AbortController()
-      this.capabilityAbortControllers.set(request.requestId, { controller, queryId: pending.queryId })
+      this.capabilityAbortControllers.set(request.requestId, { controller, queryId: pending.queryId, sessionId: pending.sessionId })
       try {
         const execute = tool.execute as unknown as (
           toolCallId: string,
@@ -331,7 +346,7 @@ export class PiUtilityAdapter {
   }
 }
 
-function serializeQueryInput(input: PiAgentQueryOptions): Record<string, unknown> {
+function serializeQueryInput(input: PiAgentQueryOptions, queryId: string): Record<string, unknown> {
   const {
     abortSignal: _abortSignal,
     canUseTool: _canUseTool,
@@ -345,6 +360,7 @@ function serializeQueryInput(input: PiAgentQueryOptions): Record<string, unknown
     onCodexOAuthCredentialsRefreshed: _onCodexOAuthCredentialsRefreshed,
     onGithubCopilotOAuthCredentialsRefreshed: _onGithubCopilotOAuthCredentialsRefreshed,
     onXaiOAuthCredentialsRefreshed: _onXaiOAuthCredentialsRefreshed,
+    goalMemoryCapability,
     ...serializable
   } = input
   const serializedCustomTools = (customTools ?? []).map((tool) => {
@@ -353,6 +369,14 @@ function serializeQueryInput(input: PiAgentQueryOptions): Record<string, unknown
   })
   return {
     ...serializable,
+    ...(goalMemoryCapability ? {
+      goalMemoryCapability: {
+        ownerId: goalMemoryCapability.ownerId,
+        sessionId: goalMemoryCapability.sessionId,
+        workspaceId: goalMemoryCapability.workspaceId,
+      },
+      goalMemoryQueryId: queryId,
+    } : {}),
     ...(serializedCustomTools.length > 0 ? { customTools: serializedCustomTools } : {}),
   }
 }

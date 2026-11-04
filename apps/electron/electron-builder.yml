@@ -21,6 +21,7 @@ compression: normal
 # 启用 ASAR 归档，将 Pi native addon 与其它 native binary 解压到 app.asar.unpacked/ 避免路径问题
 asar: true
 asarUnpack:
+  - "dist/personal-goal-artifact-worker.cjs"
   - "node_modules/@silvia-odwyer/**"
   - "node_modules/@mariozechner/**"
   - "node_modules/@napi-rs/**"

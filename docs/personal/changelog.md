@@ -2168,3 +2168,123 @@
 - **#17 安装后续**：更新共享 Skill `shared-skills`（`~/.proma/shared-skills/shared-skills/`，不在仓库）1.0.2 → 1.0.3：「新建工作区后」改为无需操作；`check-shared-skills.sh` 保留为检查工具，以及切回官方版或回滚到 `1286ff19` 之前版本前为新工作区补链接的工具；注明不要改名或移走共享目录。脚本未改动；真实数据只读检查 rc=0。
 - **backlog**：当前安装改为 `1286ff19`；“已合入、未安装”清空；#14/#16/#17 标为已安装；#15 补 `DEP0180`。
 - **同步文档**：`docs/personal/backlog.md`、本记录。
+
+
+## 2026-11-03: Goal Memory M0 实施与隔离开发验证（审查前快照）
+
+- **范围**：在 `feat/goal-memory-m0-20261103`（基线 `personal` `1c373673`）实现默认关闭的目标合同、checkpoint、证据回读与手动恢复。未合并、推送、打包或安装；不包含 M1 自动续跑、调度、完成控制器或权限授予。功能规范以 `goal-memory.md` 为准。
+- **实现**：独立 `personal-goal-memory.ts` 使用现有 `node:sqlite`、schemaVersion 1、DELETE journal 与 FULL durability。合同保留原文和用户消息引用，revision/hash 不可变、变更必须 CAS；checkpoint 使用独立 sequence CAS。模型只能报告未验证进度，不能改合同、写宿主 observed 或设为 verified/completed。provider-only 单份 task-data 包保留必需字段，UTF-8 预算不足时阻塞；历史证据仅限当前会话、artifact 和 branch，并验证旧 entry hashes、身份与 ancestry。所有压缩原因等待严格 true 的持久化 ack，失败后锁住本 run 的 provider/tool 路径。
+- **上游触点**：`agent-orchestrator.ts`（宿主命令与 capability bootstrap）、`adapters/pi-agent-adapter.ts`（context、Goal 工具、turn/compact hook 接线）、`adapters/pi-utility-adapter.ts`（内部 capability 转发）、`utility/agent-runtime.ts`（可取消 RPC）、`utility/agent-runtime-request-timeout.ts`（该 capability 的限时）与 shared `agent-runtime.ts`（方法名）。策略和存储集中在个人版模块。未修改 SDK/node_modules 源码、patches、依赖、版本号、Pi transcript/索引或 planning schema。
+- **独立确定性验证**：30 个不同语义案例 × 10 次装载/恢复、15 项生产证据 capability、21 项压缩 hook 边界与 4 类核心不变量变异检验通过。实施期发现的旧原文尾部搜索遗漏、旧 hash 被重新 baseline、context 未及时拒绝 artifact/workspace 变化等问题已修复并以生产 facade 回归，不以旧原型测试代替最终证据。30×10 只证明程序装载，不是 300 次模型压缩。
+- **仓库验证**：全仓 `bun test` **870 pass / 0 fail**（2316 assertions）；全仓 typecheck、personal scripts、main / agent-runtime / preload / renderer / web-preload 构建及 diff check 通过。首轮父测试脚本误将 fixture 目录环境变量强加给既有路径断言，造成 harness 环境冲突；保留失败日志，在临时 HOME 下取消该变量后重跑通过，未为此修改产品逻辑。
+- **真实 fixture 实验**：只用新会话与已启用 API Key 模型，未复制正式材料。3 次实际手动摘要耗时约 **34.1 / 43.9 / 51.5 秒**，压缩前估计 **70,945 / 77,736 / 77,446** tokens，压缩后估计 **37,990 / 38,002 / 38,140** tokens；另一次小上下文 noop 未计数。每次模型均经 GoalEvidenceRead 回读同一条压缩前原始 entry，父独立比较确认五条约束与待用户问题逐字保留；sidecar 合同、branch/entry hashes 与 3 个 ack 先于摘要落盘均通过。实际 utility 子进程与主进程归属已观测。
+- **真实请求与回退**：补充 utility 网络传输观察，仅保留合成 Goal 片段与元数据，不记录授权头/密钥；本地 loopback 自测确认观察器不改变请求字节。修订后的两次实际 provider 请求各只有一份恢复包、全部必需字段原样保留，用户输入的相似 marker 未被过滤。revision 2 的首次 checkpoint read 为 sequence 0、observed/modelReported 为空，不继承旧报告。stale revision 拒绝；宿主 set/status/revise/restore/off 不触发 provider 或标题生成。全局环境关闭及会话 off 后普通消息成功、实际请求无 Goal 包/工具，历史保留且普通消息前后数据库字节相同。
+- **清理与计划外发现**：只删除本轮会话、Pi 原文、新 sidecar 与临时配对材料；撤销本轮设备、关闭测试空间及标准 dev，开发端口无监听、临时 8443 已撤，正式 443 保留。原有启动逻辑曾把 fixture 的一条既有空草稿清理到自动备份；停机后恢复该备份中的原始 metadata，原 20 个会话 ID 齐全，所有备份保留。未重置整个 fixture，也未覆盖既有业务数据。
+- **局限与待办**：真实模型仅一个合成会话的三轮，不能证明永久遵循或任意模型语义可靠性。手动压缩返回的 usage 是合成零值，摘要生成的实际 token 用量未由该结果暴露，不能宣称摘要无成本。SQLite 同步事务段不能由 Promise deadline 硬抢占。自动 threshold/overflow 与故障取消通过确定性 hook 测试/注入核对，并非真实服务端故障实验。原 transform/图片预算链的接线已按源码核对，但本轮未做图片附件与 Goal 包共存的真实模型回归。Codex 独立审查及最终只读计划验收尚待完成，后续结论另追加，不将本记录视为合入许可。
+- **证据与文档**：脱敏统计、原始实验记录和审查材料保存在执行会话工作台 `verification-final/`，不进入公开 Git。同步 `PERSONAL.md`、`backlog.md` 与功能 SSOT；无需修改共同维护规则。未将阶段性测试流水写为长期协作记忆。
+
+## 2026-11-03: Goal Memory M0 首轮审查修复与最终快照回归
+
+- **审查裁决**：Codex CLI 0.165.0 首轮以 `--base personal --rules docs/personal/review-rules.md` 只读审查，5项P2、1项P3全部采纳，无暂缓：大leaf验证误用正文读取上限→分离hash-only扫描；完整checkpoint索引外泄→有界分页DTO；首次历史EvidenceRead无法初始化→验证持久branch前缀后绑定；水位includes二次复杂度→Set；关键词漏任意参数与数组尾→完整字面搜索、预算到限显式too-large；Goal工具定义侵入adapter→迁入个人模块。报告保存在执行会话私有工作台，不进入Git。
+- **父额外核实与修复**：旧模型报告不可被最新revision重新标记，工具显式提交goalId/revision/expectedModelSequence，独立modelSequence CAS拒绝重放而保留host水位；main精确绑定query并在结束/取消时撤销；automation/delegation等来源不能管理用户合同，保留人类external。restore明确历史快照与本次未核验来源。父跨工具回归又发现每轮turn_end会让分页cursor作废，现用main单query有界progress快照；首次scan中途revoke曾迟到写水位，现由owner生命周期signal取消所有pending工作，嵌套写前检查，调用方不传signal也不例外。
+- **最终快照独立验证**：旧6失败全部转通过；query身份、28页逐轮持久toolResult/turn_end后完整分页及revoke中途无写通过；30×10装载、15证据边界、21压缩hook、4类mutation（控制先过、突变因断言失败）重跑通过。50,000项水位同机单次容量计时由约725.5 ms降至最终约36.8 ms，仅作算法回归，不是UI性能基准。全仓870 pass / 0 fail、2316 assertions；typecheck、personal scripts、main/runtime/preload/renderer/web-preload构建通过，全部改动源码hash在前后相同。
+- **最终短模型回归**：获用户另行批准后，fixture新会话只运行一次短模型run（28,283 ms）；真实utility依次调用GoalEvidenceRead、GoalCheckpointRead、GoalCheckpointReport，4次provider请求各有单份预算内恢复包。实际工具content/details为6,492 / 1,114 / 1,126 bytes；显式revision/modelSequence参数与sidecar一致，waiting_user及待用户问题保留，原文hash/ancestry独立核对。宿主set为16 ms，无provider/utility/标题调用。没有重跑长压缩；此前三轮真实摘要仅属于修复前基线。
+- **清理及范围纠偏**：新会话、设备、live artifact/sidecar与空间已清理，dev/8443关闭、正式443保留。原启动逻辑自动清理一条旧空草稿、生成disabled渠道预设；停机后只恢复该草稿、撤销新预设，原20会话及4份配置hash恢复，备份保留。执行工曾误升版本，父发现后已撤回，package/lock与HEAD一致，未提交或运行误升版。未触正式数据、SDK源码或既有schema；不合并、推送、打包、安装。
+- **状态**：修复后Codex针对性复审和新Proma只读计划验收仍待完成，本条不是可合入结论。最终版没有重新做长压缩、真实自动threshold/overflow故障或图片与恢复包共存测试；同步SQLite事务不可被Promise deadline硬抢占的限制仍在。
+- **文档/记忆**：更新PERSONAL、backlog、功能SSOT及本追加记录；无需修改共同维护规则。未把阶段性验证流水升级为长期协作记忆。
+
+## 2026-11-04: Goal Memory M0 复审三项修复与第二次短回归
+
+- **复审裁决**：首个修复复审的原请求因订阅额度中断，无有效结论；额度恢复后的同范围重试由Codex CLI 0.165.0以`--base personal --rules docs/personal/review-rules.md`完成，新增3项P2全部采纳：Evidence每页重取branch会将自身receipt递归纳入关键词结果；活跃queue路径绕过宿主Goal解析；Goal命令与普通query的workspace优先级相反。父分别用实际production tool/facade与AST提取的真实orchestrator方法复现，不照单采信。无暂缓项。
+- **修复**：main每query新增≤16 MiB的固定Evidence命中快照，offset 0开新检索，nextOffset沿用当时branch/hash/命中集，每页仍验证当前来源与ancestor关系；新root、selector/revision/source变化、rewind、off或revoke使旧快照失效，不过滤全部toolResult。活跃轮次的管理命令在enrichment、adapter注入与持久化前明确拒绝，普通文本和全局flag关闭路径不变。Goal命令及bootstrap统一优先持久会话workspace，仅缺失时回退请求/default。上游仅额外改orchestrator接线，其余逻辑与测试在个人模块；总上游六文件清单仍见PERSONAL。
+- **独立回归**：原2条命中的Evidence测试由七页不断返回receipt变为两页终止；真实方法探针由2 pass/8 fail变为10 pass。旧6项、精确query、28页checkpoint逐轮持久化、扫描中途revoke无迟到写全部通过；30×10装载、15证据、21压缩hook和4类mutation重跑通过。全仓870 pass/0 fail、2316 assertions，typecheck、personal scripts、五目标构建、diff check均通过；所有改动源码hash在前后相同。方法探针不是完整UI/SDK E2E，以下真实链路另列。
+- **最新真实链路**：用户额外批准一次短fixture回归，API Key新会话单run为33,230 ms。真实utility按顺序执行EvidenceRead两页→CheckpointRead→Report，5次provider请求各只有单份≤12,000-byte恢复包，必需约束齐全；工具content/details为8,606/2,226/1,114/1,128 bytes。两页分别为原user/assistant entry，第二页无nextOffset，无新receipt递归。实际远程queue IPC在活跃时拒绝管理命令，原文及provider均未出现该输入，合同仍启用；过时workspace请求下宿主set/status仍正确归属，21/9 ms，无SDK/provider/title调用。父核对合同hash、所有entry hashes、ancestry、显式goalId/revision/modelSequence，checkpoint仅waiting_user，保留待用户问题，不将模型报告提升为业务验收。
+- **版本与证据分层**：此前三次长压缩是初审前快照，28.3秒短run是前一修复快照；本条33.2秒run对应追加三项修复后的源码。不得相互代替最终版长期压缩证明。真实自动threshold/overflow故障、图片共存和大历史UI负载仍未测；同步SQLite提交不能由Promise deadline硬抢占。实际IPC拒绝已观测，但首版探针仅存String(error)，未保留序列化对象内的拒绝文案，源方法探针另行验证了拒绝路径。
+- **清理**：应用删除新增会话、撤销新增设备、结束测试空间；标准脚本只停所属dev，8443关闭、正式443保留。只清新live artifact/sidecar/配对材料，私有合成审计副本保留。既有启动逻辑再次移走空草稿、生成disabled预设，停机后精确恢复草稿metadata和原渠道字节；20原会话ID及四配置hash恢复。所有旧备份、新草稿备份及恢复前index/channel备份均保留，未复制正式数据或重建fixture。
+- **状态与文档**：同步Goal功能SSOT、PERSONAL及backlog。最后一轮针对性Codex复审与全新Proma只读计划验收仍待完成；仅功能分支提交，不合并、推送、升版、打包、安装。无需更新共同维护规则；不将测试流水写入长期协作记忆。
+
+## 2026-11-04: Goal Memory M0 额外复审修复与确定性收口
+
+- **新增裁决与授权**：修复复审2由Codex CLI 0.165.0完成（402秒、base personal及个人审查规则），新增3项P2全部采纳：SDK压缩切到工具轮中部、没有原始user时恢复包漏注入；未打包Electron无PROMA_DEV时Goal与规范配置根不一致；接近12KB的已接受合同被合法进度更新阻塞。父独立核实源码及负向复现，不把此前全绿测试当无缺陷证明。原两轮复审上限已到，先停下向用户说明，再取得“继续修复并额外复审1轮”的明确批准；仅额外一次，不新增真实模型调用。
+- **修复范围**：只在个人Goal模块、对应测试及功能SSOT调整。无原始user时在summary/system之后、保留尾部之前插入任务数据；原user、图片对象、previous transform及隐藏Symbol幂等语义不改，不启动新run。sidecar复用config-paths.getConfigDir及既有目录名校验，仍延迟到flag开启且实际打开数据库时解析；测试override保留。合同创建/修订预留固定短省略标记的正文预算，可选进度过大时整体省略而不截必需合同。旧已接受边界复现可通过短标记继续读取；不改schema、不自动迁移或重写合同，异常历史数据仍fail closed。上游触点清单不增加，版本/lock/依赖不变。
+- **父独立回归**：旧源码的实际SDK cut-turn、配置根与临界预算三项负向控制均失败；本次转通过。同版本SDK真实buildSessionContext产生compactionSummary/assistant/toolResult无user上下文，inject后convertToLlm保留单份完整Goal包；空/system-only、重复包、用户相似marker和图片对象检查通过。配置根测试使用临时HOME和Electron API stub，覆盖未打包默认、合法fixture、非法目录名、打包态及flag0，不声称完整GUI开发启动。ASCII/Unicode二分至本组合同的11,676-byte原文和精确12,000-byte包正文；模型三数组各100×5,000 bytes、nextAction 5,000 bytes，在五种允许状态下均只省略进度，必需原文及约束完整。正文预算不含外层固定task-data标记。
+- **完整检查**：旧6项、精确query、28页跨turn checkpoint、撤销无迟到写、Evidence自引用分页及实际host方法10项重跑通过；30×10装载、15证据、21hook、4类mutation controls先过且变异因断言失败。全仓871 pass/0 fail、2322 assertions，typecheck、personal scripts、main/agent-runtime/preload/renderer/web-preload构建及diff-check通过，源码hash前后相同。临时mutation副本仅重定向已有配置模块/TypeBox的解析并把electron保持external，与main构建语义一致；未修改SDK或依赖源码。
+- **验证分层与限制**：本批按新许可仅本地确定性/SDK转换，不新增真实模型或重开dev。此前1664e7f1的33.2秒、f568c35c的28.3秒短run及首版三次长压缩分别保留，不冒充本批源码真实provider验证。真实自动threshold/overflow故障、图片与provider共存、大历史UI负载未测；同步SQLite事务不可被Promise deadline硬抢占。fixture此前已精确清理，20原会话/四配置hash恢复、备份保留，dev/8443关闭、正式443保留，本批无额外live实验材料。
+- **当前状态**：父已同步PERSONAL、backlog与功能SSOT。额外获准的复审3及全新Proma只读计划验收仍待完成，当前不宣称可合入或已验收。仅功能分支提交，不合并、推送、升版、打包、安装。无需改共同维护规则，测试流水留审计材料而不写入长期协作记忆。
+
+## 2026-11-04: Goal Memory M0 独立计划验收需要返工
+
+- **Codex复审3收敛**：额外获准的复审3对产品源码903fb8eb完成（CLI0.165.0、310秒、指定base personal及review-rules，报告20261104-041949-base-personal），未发现需要报告的缺陷。报告仅静态调用链及无写入边界探针，隔离快照缺依赖，没有冒称重跑完整测试/模型。
+- **独立验收事实**：全新Astra只读会话最初仅额度错误，completed状态不作验收；09:15原任务重试后实际报告为“需要返工”：A/E未通过，B/C/D通过。审查员只读核对批准计划、上位研究、后续许可、源码及分版本日志，未写文件、跑测试/SDK/dev/实验模型或再委派。报告已由父存入私有工作台。
+- **A-1采纳，未自行放宽**：计划A第16行要求“不在主线程扫描大历史”。scanBoundArtifact的逐行JSON解析、关键词遍历、hash与索引仍在main capability调用线程中；异步流式I/O满足有界读取，却不能代替线程隔离。上位研究另有“不在主线程同步读数百MB”的较弱表述，父不据此擅改已经批准的更严格条款。此为执行位置不符，不是已证明UI卡顿；50k容量/水位计时不作UI或线程隔离证明。后续需用户确认按严格条款移出扫描CPU工作（主进程保留授权/身份校验/权威写入），或明确调整验收标准。
+- **E-1采纳并补记**：本次只更新功能SSOT、PERSONAL、backlog和本记录，登记已完成的复审3及实际独立验收结论，不提前标成通过；产品源码保持903fb8eb。纯记录补齐不要求再跑Codex，不因此获得第四轮代码复审或新模型实验许可。
+- **保留证据与边界**：当前871/0/2322及SDK本地转换、配置根、预算和全部矩阵仍有效，但不抵消A的计划差距；旧三次长压缩与两次短run仍按旧源快照分开。既有清理/备份不重做，功能默认关闭。未改AGENTS/版本/lock/依赖/SDK，未合并、推送、制作安装包或安装。任务暂停于用户决定，不宣称M0全部验收完成。
+
+## 2026-11-04: Goal Memory M0 历史扫描线程隔离与父回归
+
+- **授权与目标**：用户09:33确认严格按原A条款返工，补真实worker、全矩阵、额外仅一轮修复复审4及全新只读验收；没有降低条款或增加M1。原Luna为唯一代码写者，完成后父经wait收敛再冻结验证。
+- **实现**：扫描/JSON解析/字面关键词/hash/索引和原文读取移入个人scan/protocol/worker/client模块，禁止main调用扫描或失败fallback。main仍掌握来源授权/会话与query/合同revision/sequence/CAS，worker后复核binding与文件stat再提交/ack或更新快照。2活跃/8排队/55s作业deadline，取消、畸形/错配消息、error/exit0、启动失败均终止线程并拒绝迟到结果。worker只读，不依赖数据库、Electron或SDK。
+- **必要上游触点**：在原六接线文件之外，本次修改package scripts、dev-bundle-readiness及electron-builder.yml精确worker asarUnpack项；新增对应测试。build/main与watch/main组合独立worker脚本，而非优先建议的命名多入口；保留原main outfile和固定worker产物/readiness，开发时新增watcher分支，本轮不实际运行watch。未改版本、依赖、lock、SDK、planning/schema或AGENTS。
+- **父独立证据**：旧903精确原文/hash正确但main解析6次、历史hash7次、Worker0的负向控制已保留。修后真实Worker threadId>0、main原始行parse/hash均0、原文/hash正确且线程退出；另13类原生Worker故障/取消/源变更/同跨owner并发/非法与错配响应通过，checkpoint无迟到变化。最初Bun私有CJS bundle将__filename改为源TS路径，造成测试伴随worker缺失；保留失败，改用与生产一致的esbuild编译核心/worker，不修改产品来适配测试。
+- **完整回归**：旧6/query/28页checkpoint/revoke/Evidence两页/host10/50k及SDK/path/budget全部通过；30×10装载、15证据、21hook、4类mutation重跑通过，control先过且突变因断言失败。全仓876 pass/0 fail/2328 assertions/146 files，typecheck、personal scripts、main/agent-runtime/preload/renderer/web-preload及worker产物、diff check通过；17源/构建输入hash前后一致。30×10不是实际模型压缩。
+- **边界与状态**：仅临时HOME本地验证，无新dev/provider或长压缩，不重做旧fixture清理。旧三长及两短模型实验仍分版本，不能用作本批实测。真实自动threshold/overflow故障、图片/provider共存、大历史UI负载、实际watch时序/安装包及长期语义仍未测，同步SQLite段不受Promise硬抢占。复审4与全新只读计划验收尚待执行；不称整体通过，不合并/推送/制作安装包/安装。
+- **文档与记忆**：同步功能SSOT、PERSONAL及backlog；共同维护规则无需变更，普通验证流水留私有审计材料，不写入长期协作记忆。
+
+## 2026-11-04: Goal Memory M0 复审4发现最终状态竞态
+
+- **实际审查**：额外且仅一次获准的修复复审4已经完成，CLI0.165.0，指定base personal及review-rules，产品875da468、312秒、报告20261104-110600-base-personal，源未变。exit0只表示报告生成，报告含1项P2，不作为无缺陷或整体通过。
+- **父裁决：采纳，尚未修复**。Evidence路径在包含合同/sequence检查的callback后继续异步lstat/realpath/stat，最后返回和更新分页快照前仅验证query活跃，可能接受失效合同或水位对应的迟到结果。应在最后async结束后同步重验合同与sequence，覆盖有关结果返回/快照更新点，而非用另一个await留下同类窗口。
+- **独立复现**：生产esbuild core/worker、ElectronRunAsNode、自己创建的临时HOME与真实facade，在已绑定EvidenceRead最后main stat处注入revision1→2、sequence1→2，均仍返回ok/nextOffset1，预期拒绝断言失败。最初harness未同步Node builtin ESM导出/未匹配canonical路径，随后错误等待第二次stat，均未触发变更；保留这些无效注入记录，不当作产品负向证据。接线修正后mutationFired=true，两个有效控制确证该竞态。未修改产品来制造通过，未调用provider。
+- **当前边界**：线程隔离、16项线程/故障/关闭验证及876全仓测试等记录仍保留，但不能抵消新发现。产品源码保持875da468，当前只同步本结论至功能SSOT、PERSONAL/backlog；追加第五轮CodeX尚未明确获准，不以新计划验收替代代码复审，也不自动扩大轮次。未合入、推送、制作安装包或安装。
+
+## 2026-11-04: Goal Memory M0 最终异步状态与快照所有权修复
+
+- **授权**：更正上一阶段的待确认状态：用户15:54已明确批准修复复审4的P2、独立回归、额外仅一轮复审5、全新只读计划验收。没有第六轮、新dev/provider/长压缩或发布安装许可。
+- **实现**：原单写者限定core/test/功能SSOT。最后await之后，在Evidence快照更新/响应、context pack、初次binding提交、turn_end水位写、compact ack前同步重验请求owner/session/workspace/query、生命周期/开关、合同id/revision/hash及CPsequence；seal至作用点不再await。每页以本次请求入口sequence验证，保留跨请求host推进的固定分页。父补回归发现旧页可能推进新root，进一步用私有snapshot owner及捕获的快照防止旧continuation/root迟到成功或失败改动、清理新root；不增加DTO/schema或新功能。
+- **父独立证据**：四项revision/sequence即时与3微任务延迟控制在875均失败、最终转通过；快照continuation/root迟到成功/失败四项最终转通过，新BETA offset1精确回读b1、CP不变、所有真实Worker退出。旧875与第一批仅合同seal的负向均保留，不用最新全绿改写历史。原16原生线程/故障/无来源以及全部原矩阵通过，main原始行parse/hash0。
+- **完整检查**：旧六项/query/28页checkpoint/revoke/Evidence两页/host10/50k、实际SDK/path/budget、30×10装载、15证据、21hook/4mutation通过；876 pass/0 fail/2328 expect/146 files、typecheck/personal scripts/五构建及worker产物/diff通过，17源/构建hash前后一致。私有mutation只按入场身份捕获变量适配文本锚点，control先过且由断言失败计killed。
+- **状态及限制**：额外仅一轮复审5及全新只读计划验收尚待执行；本提交不标为已审查通过或可合入。未测完整GUI/大历史UI负载/真实threshold或overflow故障/图片与provider共存/实际watch及安装包/长期语义；SQLite同步段不可被Promise硬抢占。旧真实实验仍分版本，无新live材料或旧清理动作，不改版本/依赖/lock/SDK/AGENTS，不合并/推送/打包/安装。
+- **文档与记忆**：同步PERSONAL、backlog及功能SSOT；维护规则无需改，普通验证流水保留私有审计材料，不升级长期协作记忆。
+
+## 2026-11-04: Goal Memory M0 复审5记录与首次并发绑定暂缓
+
+- **实际审查**：唯一获准修复复审5已完成，产品9e6f7036，CLI0.165.0/base personal/review-rules，325秒、源未变、报告20261104-164552-base-personal。1项P2，不是无缺陷通过。
+- **独立核实**：首次CPseq0时，两个root并发初始化，旧A在被新B替换后仍提交正确host绑定并推进seq1；A因owner失效、B因seq变化双拒绝。父真实Worker双首chunk gate确认，断言失败控制保留。显式重试则精确回读b0/b1、绑定与watermark正确、revision不变、modelSequence0、active状态，所有Worker退出，无provider；没有新增产品自动重试。
+- **处理：P2暂缓修复**。按P2可登记backlog的裁决边界，本轮不改产品或自动追加第六轮。当前确认为低频初始化并发的可恢复失败，不是已证明的错源/权限扩张/数据损坏或假完成；保留真实缺陷，不写成已修复。候选最小修复为初始化beforeCommit同步加snapshot owner校验，未实施。全新只读计划验收独立判断是否阻塞原A/B/C/D/E及补充；若阻塞则停止请用户决定，不能以父裁决替代验收。
+- **状态**：仅同步PERSONAL、backlog、功能SSOT与本记录，产品仍9e6f7036。876全仓等既有通过记录不能抵消已知项；不再跑代码审查/模型/dev，不合并/推送/打包/安装，维护规则与长期记忆无需更新。
+
+## 2026-11-04: Goal Memory M0 全新独立验收仍需返工
+
+- **有效验收**：全新Astra只读任务首次因订阅额度中断，没有报告，不视为通过；19:48用户批准继续已说明的只读流程后，续原任务产出完整报告并经父wait收敛。核验HEAD4a315c8b、产品9e6f7036、base1c373673及17源码hash相同，无文件写入/测试/SDK/dev/provider/浏览器/安装/再委派。
+- **裁决及采纳**：A未通过，B/C/D/E通过各自当前阶段要求，总裁决需要返工。唯一阻塞为首次Evidence初始化beforeCommit未核验private snapshot owner，helper提交后才检查，导致已被替换旧root仍推进首次binding/host seq、新root也被迫拒绝。父核对源码与真实双Worker负向后采纳；正确binding、显式重试恢复和P2可登记backlog的一般流程，不能豁免线程R2/最终R5-1及私有snapshot提交屏障。更正此前暂缓在验收中的地位为阻塞未修，不自行放宽硬条款；未声称错源、权限扩张、假完成或数据损坏。
+- **保留通过与限制**：线程隔离、原复审4末端窗口、已绑定快照交接及876全仓/原完整矩阵的通过事实保留，但不覆盖当前有效失败；独立worker build/watch组合和scripts-only变化已披露，未测完整GUI/实际watch或包等边界保持，旧实验不冒充当前实测。
+- **停止边界**：本次只同步四维护文档；不改产品、不发写者、不自动追加第六轮。19:48按当时明确的只读续跑范围执行，未扩为修复/第六轮/dev/provider/合并推送打包安装许可。建议用户明确批准最小owner屏障修复、回归、仅额外一次定向6及新独立验收，或暂停保留当前分支与证据。维护规则与长期协作记忆无需变更。
+
+## 2026-11-04: Goal Memory M0 首次绑定owner提交屏障修复与父回归
+
+- **明确授权**：21:15用户批准此前具体提出的最小修复、回归、额外仅一轮定向复审6及全新只读验收。原验收P2是硬条款唯一阻塞，不再因显式恢复可用而豁免。不自动第七轮或扩到dev/provider/长压缩/M1/合并推送打包安装，旧清理与备份保持。
+- **最小修复**：仅Evidence首次初始化的同步beforeCommit增加private snapshot owner核验，再执行原cap/query/signal/goal id/revision/hash/sequence seal，直接同步进入SQLite CAS，helper返回后检查保留。未改context初始化或API/schema，未新增自动重试/重构。原Luna唯一写者只改core/test/GoalSSOT；native新增CP0双root source-stat门控断言，定向2pass/typecheck/diff通过。
+- **父独立对照**：同一增强探针对9e6冻结旧bundle有效失败（双首chunk门控、旧A推进seq0→1），对新候选则旧A拒绝且CP0无binding/水位，新B首次即正确返回b0/offset1 b1，最终hostseq1/modelseq0、正确identity/完整水位、4线程退出。真实Worker读取门控，不是伪造DTO或先context预热；没有产品自动重试。旧B5负向与恢复诊断原样保留。
+- **验证**：新9末端/快照/初绑、原16线程与全部旧矩阵，30×10装载/15证据/21hook/4mutation，876 pass/0 fail/2328 expect/146 files、typecheck、personal scripts、五构建/Worker产物、diff均通过；17源/构建manifest前后相同。300装载不冒充模型压缩，旧三长/两短不冒充本候选真实provider；完整GUI/threshold/overflow/watch/安装包等未测限制不变。
+- **记录与下一步**：同步PERSONAL、backlog和GoalSSOT当前候选状态，保留原独立不通过历史；额外唯一复审6及新只读验收尚待实际执行，测试通过不等于验收。不改维护规则或长期协作记忆，版本/依赖/lock不变；仅功能分支提交，不合并/推送/打包/安装。
+
+## 2026-11-04: Goal Memory M0 唯一定向复审6未发现可操作缺陷
+
+- **实际范围和结果**：CLI0.165.0、base personal、项目review-rules，聚焦9e6f7036→df8ae0fd的首次Evidence binding owner同步屏障及受影响source/lifecycle/CAS/pagination不变量；93秒、报告生成exit0、源码未变，报告明确“未发现可操作缺陷”。隔离快照缺依赖，未重跑测试，不能把父B6测试归为CodeX亲跑或把exit0本身当通过。
+- **父级核实**：采纳本轮无可操作缺陷结论；核对owner检查与既有state seal至SQLite CAS无await、提交后owner检查保留、CP0原生回归覆盖旧root不提交/新root初始化分页。B6同一个旧9e6有效负向已在df8转正，9末端/16线程、原矩阵与876全仓/typecheck/scripts/五构建及17源一致独立证据保持，无新发现需暂缓或反驳。
+- **同步及边界**：同步PERSONAL/backlog/GoalSSOT实际审查结果；本次只改四维护文档、产品仍df8，不自动第七轮。之后才新建全新只读role review验收最终版本，不续旧Astra、不父或执行工自评。当前未宣称整体验收通过；无dev/provider/长压缩/旧清理/合入推送打包安装。未测与旧实验分版本限制不变，无需更新维护规则或长期记忆。
+
+## 2026-11-04: Goal Memory M0 最终独立计划验收通过
+
+- **实际验收者与失败区分**：产品df8ae0fd、记录HEADa8f4e80f。Astra新任务只有部分进度与订阅额度错误，无完整报告，不计通过/失败。父向用户说明后，在同订阅渠道换用可用Sol真正新建独立role review上下文；不是父自评/原Luna自评，不是CodeX7，不切新付费渠道。完整实际报告经wait收敛返回，原A/B/C/D/E及三个补充在当前M0实验阶段全部通过。
+- **自主核验及父裁决**：独立review只读批准计划/研究/三个补充/21:15及22:03授权、最终源码和原始日志/git/hash，17输入与B6六阶段manifest及df8 Git内容一致、工作树干净、版本依赖lock不变；核owner检查/state seal至SQLite CAS无await、提交后检查保留，真实双Worker CP0负向转正。父重算core hash、核代码与证据逐条采纳：此前唯一首次binding owner阻塞真正闭合，复审5的P2不再暂缓，未发现当前需产品返工阻塞。独立review未跑测试/项目/SDK/dev/provider/浏览器或写文件，不将其报告归为亲跑实验。
+- **保留验证与限制**：B6 9末端/16线程/原完整矩阵、876/0/2328/146、typecheck/scripts/五构建、唯一定向6实际93秒无可操作缺陷；300装载非模型压缩，旧三长/两短仍分版本。独立worker build/watch组合、多一watcher、scripts-only变化及asar仅布局测试偏差保留；最终完整GUI/大历史UI/真实threshold-overflow/图片provider/实际watch-安装包/长期语义未测，SQLite不可Promise硬抢占。
+- **同步和停止边界**：只同步PERSONAL/backlog/GoalSSOT当前实验验收通过与本末尾changelog，产品不变。默认关闭，仍未合并/推送/启用/升版/打包/安装；无第七轮或M1/新dev-provider-长压缩/旧清理，备份保留。通过不替代后续独立授权；无需改维护规则/AGENTS/长期协作记忆，普通记录留SSOT及会话工作台。
+
+## 2026-11-05: Goal Memory M0 隔离dev新旧往返与对话保留核实
+
+- **新增授权与范围**：用户02:13 GMT+8明确批准dev核实。产品df8ae0fd不变，记录90ef2fa4的M0对照当前安装源码1286ff19，在独立验证worktree中顺序读取同一全新隔离数据；不恢复快照、不在主仓开发测试。真实应用/SDK/SQLite执行，provider为本机确定性stub，不复制正式凭据、不调用真实模型。
+- **结果**：新版普通/Goal会话SDK记录3/7条，旧版原样加载后续聊为6/10条并新增3条会话，返回M0逐对象一致，再续行为9/17/3条。旧版可显示并展开Goal历史，但按普通聊天继续；旧版不改sidecar，4份原始日志既有字节前缀完整。返回M0同合同/绑定/revision，Goal status及实际GoalCheckpointRead成功，host checkpoint seq2→4，6份原始日志前缀完整。未伪造宿主完成。
+- **材料验证**：三份479/481/481文件整目录副本逐hash一致，SQLite integrity均ok；9轮消息处理无流错误、9次本机provider请求，43项离线材料断言通过，17源码/构建输入与最终独立验收一致。材料harness首次误用SQL列名已按payload.id修正；一次UI原生button选择器未命中后按真实DOM定位，均非产品缺陷、未改产品凑过。
+- **限制与收束**：本次补充了真实watch启动及小样本GUI，不覆盖真实provider/模型语义、完整GUI性能/大历史/附件/压缩/损坏、菜单退出或安装版降级。在轮次完成后只SIGTERM自有dev、再停自有watcher，无force kill；不声称菜单app.quit完整清理已测或未落盘内容可保留。dev/本机stub/Ego均关闭，测试数据及三份副本保留，正式数据/应用与服务不改。
+- **文档与停止边界**：更新Goal SSOT当前状态及本次结果，PERSONAL/backlog增加日期化摘要；原11月4日状态保留其历史时间。纯文档记录，不重跑全套876/不追加第七轮代码复审，不合并/推送/启用正式M0/打包/安装或进入M1；无需修改维护规则/AGENTS或长期协作记忆。正式回退仍须先备份最新数据，仅回应用；恢复旧数据需另批。
