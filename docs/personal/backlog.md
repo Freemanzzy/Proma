@@ -22,7 +22,7 @@
 
 ## 开发中（未验收，不属于已验证分支）
 
-- **Goal Memory M0**（截至2026-11-04，`feat/goal-memory-m0-20261103`，基线`personal` `1c373673`）：独立计划验收原判903fb8eb的A线程要求未过，B/C/D通过，E记录缺口已补。用户09:33确认严格返工、额外复审4仅一次及全新只读验收。现已接入真实Node worker_threads，main不扫描且无fallback，仍掌握授权/绑定/合同/CAS/ack；worker结果后重新检查来源身份与stat。父14项原生线程/故障/源变化/同跨owner并发、原全部矩阵、全仓876 pass/0 fail/2328 assertions、typecheck/scripts/五构建与worker产物均通过，17源/构建hash一致。当前等待复审4和新独立验收，不宣称整体通过。只在临时HOME做本地测试；无新dev/真实provider/长压缩，原三次长压缩及f568c35c、1664e7f1短run不得冒充本批实测。旧fixture清理与备份保持，不重做。未测完整GUI、大历史UI负载、真实threshold/overflow故障、图片与provider共存、实际安装包/运行watch时序与长期语义遵循；SQLite同步段不受Promise硬抢占。默认关闭、无M1，不合并、推送、升版、打包或安装；复审4若有新发现不得自动追加第五轮。功能SSOT见[goal-memory.md](./goal-memory.md)。
+- **Goal Memory M0**（截至2026-11-04，`feat/goal-memory-m0-20261103`，基线`personal` `1c373673`）：独立计划验收原判903fb8eb的A线程要求未过，B/C/D通过，E记录缺口已补。用户09:33确认严格返工、额外复审4仅一次及全新只读验收。现已接入真实Node worker_threads，main不扫描且无fallback，仍掌握授权/绑定/合同/CAS/ack；worker结果后重新检查来源身份与stat。父14项原生线程/故障/源变化/同跨owner并发、原全部矩阵、全仓876 pass/0 fail/2328 assertions、typecheck/scripts/五构建与worker产物均通过，17源/构建hash一致。复审4已完成，1项P2采纳未修：Evidence异步stat复核之后未最终同步重验合同/sequence，父在实际Worker facade上复现revision1→2或sequence1→2后仍返回ok/nextOffset。当前需要返工，追加复审5尚未明确获准，不启动新计划验收来代替代码复审。只在临时HOME做本地测试；无新dev/真实provider/长压缩，原三次长压缩及f568c35c、1664e7f1短run不得冒充本批实测。旧fixture清理与备份保持，不重做。未测完整GUI、大历史UI负载、真实threshold/overflow故障、图片与provider共存、实际安装包/运行watch时序与长期语义遵循；SQLite同步段不受Promise硬抢占。默认关闭、无M1，不合并、推送、升版、打包或安装；复审4若有新发现不得自动追加第五轮。功能SSOT见[goal-memory.md](./goal-memory.md)。
 
 ## 用户反馈收集（2026-10-01 起，下一批一并实现）
 

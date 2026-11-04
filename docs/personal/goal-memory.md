@@ -1,6 +1,6 @@
 # Goal Memory（M0）功能 SSOT 草稿
 
-状态（2026-11-04）：**903fb8eb曾因主线程扫描约束需要返工。用户09:33明确批准严格线程隔离、额外一次复审4及全新只读验收。现扫描已接入真实Node worker_threads；父独立14项原生线程/故障探针、全部既有矩阵、全仓876 pass/0 fail、typecheck/scripts/五构建与worker产物检查通过，17个源/构建输入hash一致。复审4和新独立计划验收仍待完成，不把本地测试当整体验收。默认关闭、未合入/安装；本批无新开发实例或真实provider/长压缩实验。**
+状态（2026-11-04）：**903fb8eb曾因主线程扫描约束需要返工。用户09:33明确批准严格线程隔离、额外一次复审4及全新只读验收。现扫描已接入真实Node worker_threads；父独立14项原生线程/故障探针、全部既有矩阵、全仓876 pass/0 fail、typecheck/scripts/五构建与worker产物检查通过，17个源/构建输入hash一致。复审4已完成并新增1项P2最终状态复核竞态，父已独立复现并采纳，尚未修复或收敛；追加复审5需明确授权，新计划验收未启动。本地全绿矩阵不能替代该修复或整体验收。默认关闭、未合入/安装；本批无新开发实例或真实provider/长压缩实验。**
 
 ## 范围与启用
 
@@ -76,6 +76,14 @@ Pi `session_before_compact`扩展覆盖`manual`、`threshold`、`overflow`三类
 旧六项/query/28页checkpoint/revoke/Evidence两页/host10/50k，SDK cut-turn/规范配置根/预算边界，30×10装载、15证据、21hook及4类mutation全部通过；mutation仍先验证control，再仅把断言失败计为killed。全仓876 pass、0 fail、2328 assertions；typecheck、personal scripts、五既有构建（main含worker）、生成物与diff检查通过，源hash前后相同。原生探针的核心与worker均以生产esbuild Node/CJS方式编译；父最初沿用Bun CJS私有harness时，Bun将__filename改写为源TS路径而导致伴随worker定位缺失，保留该失败并改为生产编译方式，未为harness改产品行为。
 
 本批没有dev/真实provider/长压缩或制作安装包。asarUnpack仅配置核对与临时布局路径测试，watch入口仅脚本/产物及readiness检查，不冒称实际运行watch/安装包已验。构建实现使用独立worker build/watch脚本，由main脚本组合，而非补充计划优先建议的命名多入口；固定CJS产物与ready护栏保留，但开发时新增worker watcher分支。复审4和全新只读计划验收仍待完成；旧真实实验限制不变。
+
+## 2026-11-04 复审4裁决与当前阻塞
+
+Codex CLI0.165.0对产品875da468完成额外获准的一轮复审4（312秒，指定base personal/review-rules，源未变），新增1项P2，父采纳：`requestArtifactScan`先await包含合同/sequence检查的callback，再await文件lstat/realpath/stat；EvidenceRead在最后await之后只检查query活跃，便返回证据、保存或推进分页快照。必须在最后异步步骤结束后、影响快照/返回结果前同步复核当前合同与sequence，不能再在最终状态检查之后引入新的await窗口。
+
+父通过生产esbuild core/worker、临时HOME的真实capability独立故障注入：已绑定来源的EvidenceRead在最后main stat期间分别切换revision1→2、或推进同revision checkpoint sequence1→2，两者仍返回ok与nextOffset1。这个复现验证程序竞态，不是完整GUI复现；宿主命令的active管理门禁仍在，未宣称发生实际数据损坏。原16项线程/故障/关闭探针、876仓库测试及既有矩阵通过仍有效，但未覆盖这一最终窗口，不代表全局无缺陷。
+
+当前仅记录问题，不修改产品875da468，不新增真实provider/dev/打包/安装。原授权仅额外一次复审4；不擅自追加第五轮，待明确后再修复与回归并按获准范围复审，之后才进入全新只读计划验收。
 
 ## 回滚
 

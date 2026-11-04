@@ -2229,3 +2229,10 @@
 - **完整回归**：旧6/query/28页checkpoint/revoke/Evidence两页/host10/50k及SDK/path/budget全部通过；30×10装载、15证据、21hook、4类mutation重跑通过，control先过且突变因断言失败。全仓876 pass/0 fail/2328 assertions/146 files，typecheck、personal scripts、main/agent-runtime/preload/renderer/web-preload及worker产物、diff check通过；17源/构建输入hash前后一致。30×10不是实际模型压缩。
 - **边界与状态**：仅临时HOME本地验证，无新dev/provider或长压缩，不重做旧fixture清理。旧三长及两短模型实验仍分版本，不能用作本批实测。真实自动threshold/overflow故障、图片/provider共存、大历史UI负载、实际watch时序/安装包及长期语义仍未测，同步SQLite段不受Promise硬抢占。复审4与全新只读计划验收尚待执行；不称整体通过，不合并/推送/制作安装包/安装。
 - **文档与记忆**：同步功能SSOT、PERSONAL及backlog；共同维护规则无需变更，普通验证流水留私有审计材料，不写入长期协作记忆。
+
+## 2026-11-04: Goal Memory M0 复审4发现最终状态竞态
+
+- **实际审查**：额外且仅一次获准的修复复审4已经完成，CLI0.165.0，指定base personal及review-rules，产品875da468、312秒、报告20261104-110600-base-personal，源未变。exit0只表示报告生成，报告含1项P2，不作为无缺陷或整体通过。
+- **父裁决：采纳，尚未修复**。Evidence路径在包含合同/sequence检查的callback后继续异步lstat/realpath/stat，最后返回和更新分页快照前仅验证query活跃，可能接受失效合同或水位对应的迟到结果。应在最后async结束后同步重验合同与sequence，覆盖有关结果返回/快照更新点，而非用另一个await留下同类窗口。
+- **独立复现**：生产esbuild core/worker、ElectronRunAsNode、自己创建的临时HOME与真实facade，在已绑定EvidenceRead最后main stat处注入revision1→2、sequence1→2，均仍返回ok/nextOffset1，预期拒绝断言失败。最初harness未同步Node builtin ESM导出/未匹配canonical路径，随后错误等待第二次stat，均未触发变更；保留这些无效注入记录，不当作产品负向证据。接线修正后mutationFired=true，两个有效控制确证该竞态。未修改产品来制造通过，未调用provider。
+- **当前边界**：线程隔离、16项线程/故障/关闭验证及876全仓测试等记录仍保留，但不能抵消新发现。产品源码保持875da468，当前只同步本结论至功能SSOT、PERSONAL/backlog；追加第五轮CodeX尚未明确获准，不以新计划验收替代代码复审，也不自动扩大轮次。未合入、推送、制作安装包或安装。
