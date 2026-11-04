@@ -22,7 +22,7 @@
 
 ## 开发中（未验收，不属于已验证分支）
 
-- **Goal Memory M0**（截至2026-11-04，`feat/goal-memory-m0-20261103`，基线`personal` `1c373673`）：原903fb8eb计划验收A线程条款及E记录差距已返工，B/C/D原通过。真实worker只读执行历史扫描/解析/hash/索引，main权威，无fallback。复审4对875da468提出1P2；用户15:54明确批准修复、回归、额外仅一轮复审5与全新只读验收。最终await后的同步state seal及私有snapshot owner已实现；父8项最终状态/快照交接和原16项线程/故障边界、原完整矩阵通过，876 pass/0 fail/2328 assertions、typecheck/scripts/五构建通过，17源/构建hash一致。复审5已完成（CLI0.165.0、325秒、产品9e6f7036），1项P2暂缓：CP尚未绑定时，旧root在新root启动后仍可提交正确首次绑定并推进host sequence，导致两根读取都拒绝；父真实Worker复现并验证显式重试回读b0/b1、绑定/水位正确、revision不变、modelSequence0与active状态。问题未修复，不称无缺陷；候选最小修复为beforeCommit同步加snapshot owner校验。按P2允许登记backlog的边界暂缓，不改产品或自动第六轮；新只读验收自行判断是否违反硬性计划，若阻塞则停下请用户决定。只做临时HOME本地测试，无新dev/provider/长压缩；旧三长与两个短run不得冒充本批实测，清理/备份不重做。未测完整GUI、大历史UI负载、真实threshold/overflow故障、图片与provider共存、实际watch/安装包与长期语义；同步SQLite不能被Promise硬抢占。默认关闭、无M1，不合并、推送、升版、打包或安装。功能SSOT见[goal-memory.md](./goal-memory.md)。
+- **Goal Memory M0**（截至2026-11-04，`feat/goal-memory-m0-20261103`，产品9e6f7036，基线personal 1c373673）：**需要返工，唯一阻塞为首次Evidence初始化beforeCommit缺少private snapshot owner检查**。旧root已被新root替换却可先提交正确binding/host seq0→1，随后两根请求拒绝；父实际双Worker验证，显式重试能恢复b0/b1，但不满足获准补充的提交屏障。唯一复审5（CLI0.165.0、325秒）1P2原暂缓，19:48继续后的全新Astra独立验收判A未过、B/C/D/E通过各阶段要求；父采纳，P2从待独立判定转为阻塞未修，不以登记backlog放宽硬条款。建议仅在明确批准后做最小beforeCommit owner修复、负向转正及回归、额外仅一轮定向复审6和新独立验收；当前未获第六轮/修复许可，不自动第七轮。线程隔离、末端seal及已绑定快照保护保留；B5全部矩阵、876/0/2328/146、typecheck/scripts/五构建与17源hash一致不能抵消此失败。旧真实实验分版本，无新dev/provider/长压缩，清理/备份不重做。仍未测完整GUI、大历史UI、真实threshold/overflow、图片/provider共存、实际watch/安装包及长期语义；同步SQLite不能被Promise硬抢占。默认关闭、无M1，不合并/推送/升版/打包/安装。SSOT见[goal-memory.md](./goal-memory.md)。
 
 ## 用户反馈收集（2026-10-01 起，下一批一并实现）
 
