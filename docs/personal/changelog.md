@@ -2280,3 +2280,11 @@
 - **自主核验及父裁决**：独立review只读批准计划/研究/三个补充/21:15及22:03授权、最终源码和原始日志/git/hash，17输入与B6六阶段manifest及df8 Git内容一致、工作树干净、版本依赖lock不变；核owner检查/state seal至SQLite CAS无await、提交后检查保留，真实双Worker CP0负向转正。父重算core hash、核代码与证据逐条采纳：此前唯一首次binding owner阻塞真正闭合，复审5的P2不再暂缓，未发现当前需产品返工阻塞。独立review未跑测试/项目/SDK/dev/provider/浏览器或写文件，不将其报告归为亲跑实验。
 - **保留验证与限制**：B6 9末端/16线程/原完整矩阵、876/0/2328/146、typecheck/scripts/五构建、唯一定向6实际93秒无可操作缺陷；300装载非模型压缩，旧三长/两短仍分版本。独立worker build/watch组合、多一watcher、scripts-only变化及asar仅布局测试偏差保留；最终完整GUI/大历史UI/真实threshold-overflow/图片provider/实际watch-安装包/长期语义未测，SQLite不可Promise硬抢占。
 - **同步和停止边界**：只同步PERSONAL/backlog/GoalSSOT当前实验验收通过与本末尾changelog，产品不变。默认关闭，仍未合并/推送/启用/升版/打包/安装；无第七轮或M1/新dev-provider-长压缩/旧清理，备份保留。通过不替代后续独立授权；无需改维护规则/AGENTS/长期协作记忆，普通记录留SSOT及会话工作台。
+
+## 2026-11-05: Goal Memory M0 隔离dev新旧往返与对话保留核实
+
+- **新增授权与范围**：用户02:13 GMT+8明确批准dev核实。产品df8ae0fd不变，记录90ef2fa4的M0对照当前安装源码1286ff19，在独立验证worktree中顺序读取同一全新隔离数据；不恢复快照、不在主仓开发测试。真实应用/SDK/SQLite执行，provider为本机确定性stub，不复制正式凭据、不调用真实模型。
+- **结果**：新版普通/Goal会话SDK记录3/7条，旧版原样加载后续聊为6/10条并新增3条会话，返回M0逐对象一致，再续行为9/17/3条。旧版可显示并展开Goal历史，但按普通聊天继续；旧版不改sidecar，4份原始日志既有字节前缀完整。返回M0同合同/绑定/revision，Goal status及实际GoalCheckpointRead成功，host checkpoint seq2→4，6份原始日志前缀完整。未伪造宿主完成。
+- **材料验证**：三份479/481/481文件整目录副本逐hash一致，SQLite integrity均ok；9轮消息处理无流错误、9次本机provider请求，43项离线材料断言通过，17源码/构建输入与最终独立验收一致。材料harness首次误用SQL列名已按payload.id修正；一次UI原生button选择器未命中后按真实DOM定位，均非产品缺陷、未改产品凑过。
+- **限制与收束**：本次补充了真实watch启动及小样本GUI，不覆盖真实provider/模型语义、完整GUI性能/大历史/附件/压缩/损坏、菜单退出或安装版降级。在轮次完成后只SIGTERM自有dev、再停自有watcher，无force kill；不声称菜单app.quit完整清理已测或未落盘内容可保留。dev/本机stub/Ego均关闭，测试数据及三份副本保留，正式数据/应用与服务不改。
+- **文档与停止边界**：更新Goal SSOT当前状态及本次结果，PERSONAL/backlog增加日期化摘要；原11月4日状态保留其历史时间。纯文档记录，不重跑全套876/不追加第七轮代码复审，不合并/推送/启用正式M0/打包/安装或进入M1；无需修改维护规则/AGENTS或长期协作记忆。正式回退仍须先备份最新数据，仅回应用；恢复旧数据需另批。

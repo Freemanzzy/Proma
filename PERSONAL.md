@@ -20,6 +20,7 @@
 - **Goal Memory M0**（截至2026-11-04 22:19 GMT+8）：**产品df8ae0fd通过当前M0实验计划验收，默认关闭、未合入/发布。** SSOT见 [`goal-memory.md`](./docs/personal/goal-memory.md)，分支及保留限制见 [`backlog.md`](./docs/personal/backlog.md)。首次绑定private owner提交屏障已最小修复，父双Worker CP0负向转正，9末端/16线程及完整矩阵、876测试/typecheck/scripts/五构建、17源一致通过。唯一定向复审6（CLI0.165.0/base personal，93秒）未发现可操作缺陷；Astra最终验收因额度仅返部分进展，不计结论，之后全新独立Sol role review实际核对源码/日志/hash，A/B/C/D/E和三个补充全部通过，父逐条采纳。独立审查/验收仅读代码和日志，不冒充重跑测试。未合并/推送/启用/升版/打包/安装，无M1/第七轮或新dev/provider/长压缩，旧真实实测分版本，未测GUI/实际watch/包和长期语义等限制保留。
   - 上游触点：原六处orchestrator、Pi/utility adapters、utility runtime/timeout及shared runtime类型接线不扩展新行为；本次另改Electron `package.json` 的worker build/watch scripts、`scripts/dev-bundle-readiness.ts`及`electron-builder.yml`精确worker解包项。策略/SQLite仍在`personal-goal-memory.ts`，新增个人artifact scan/protocol/worker/client模块；worker无数据库/SDK/Electron依赖。
   - 兼容与回退：不修改 Pi transcript、会话索引或 planning schema，不新增依赖；取消 `PROMA_PERSONAL_GOAL_MEMORY=1` 即关闭新路径，独立 sidecar 保留。未获合并、推送、打包或安装授权。
+  - **追加核实（2026-11-05）**：按当日02:13 GMT+8新增授权，用同一全新隔离数据完成M0→当前安装源码1286ff19→M0的真实dev往返。普通/Goal工具历史可读且可续聊，旧版sidecar字节不变，回M0合同不变、Goal读取和checkpoint推进成功；43项材料断言通过。实际运行原watch组合及小样本GUI，更新此前未测这两项的证据边界；provider为本机确定性stub，不是真实模型、完整GUI性能或安装版降级。结果及限制唯一正文见Goal SSOT和changelog 2026-11-05；产品源码未变，未发布安装。
 
 ## 同步规则
 

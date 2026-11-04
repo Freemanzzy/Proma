@@ -1,6 +1,6 @@
 # Goal Memory（M0）功能 SSOT 草稿
 
-状态（2026-11-04 22:19 GMT+8）：**产品df8ae0fd通过当前M0功能分支实验计划验收：原A/B/C/D/E及线程隔离、最终state/私有快照、首次binding owner三个补充全部通过。唯一owner阻塞已同步封口并父真实Worker负向转正，B6完整矩阵/876测试/typecheck/scripts/五构建及17源一致通过；唯一定向复审6无可操作缺陷，最终独立Sol role review已实际返回完整通过报告，父核实采纳。Astra额度中断仅部分进度，不计验收。默认关闭、未合并/推送/启用/升版/打包/安装，无M1/第七轮/新dev-provider-长压缩，旧实验分版本与未测限制保留。**
+状态（2026-11-05 dev往返核实后，GMT+8）：**产品df8ae0fd通过当前M0功能分支实验计划验收：原A/B/C/D/E及线程隔离、最终state/私有快照、首次binding owner三个补充全部通过。唯一owner阻塞已同步封口并父真实Worker负向转正，B6完整矩阵/876测试/typecheck/scripts/五构建及17源一致通过；唯一定向复审6无可操作缺陷，最终独立Sol role review已实际返回完整通过报告，父核实采纳。Astra额度中断仅部分进度，不计验收。默认关闭、未合并/推送/正式启用/升版/打包/安装，无M1/第七轮。11月5日按新增授权完成下述本地stub的隔离dev新旧往返，未新增真实provider或长压缩；旧实验分版本与其余未测限制保留。**
 
 ## 范围与启用
 
@@ -156,3 +156,19 @@ Astra最后一次验收经wait收敛只有部分hash/控制流核验和订阅额
 首次绑定的关键闭合点是owner检查→合同/sequence seal→同步SQLite CAS之间无await，post-return检查保留；被新B替换的A不再提交CP0，新B首次正常初始化和分页，不是先写正确binding后双拒绝/靠显式重试恢复。复审5的历史P2至此已修复验证，不再暂缓。
 
 本裁决只认可当前M0实验分支交付，不代表生产安装/启用或永久语义保真；独立review只读代码/日志没有重跑父测试。最终GUI/大历史UI、真实自动threshold/overflow、图片与provider共存、实际watch/安装包、长期语义/收益及SQLite硬抢占限制继续保留。原三manual及两个短run明确属于旧版本，后续禁止新dev/provider/长压缩的许可边界没有放宽。只同步实际验收文档，不再改产品、不自动合入/发布/安装或进入M1。
+
+## 2026-11-05 隔离dev新旧往返：对话与sidecar保留核实
+
+用户于当日02:13 GMT+8明确批准本次dev演练，覆盖此前停止新dev的边界，仅限隔离验证，不授权合并/发布/安装、真实模型或M1。新版为产品df8ae0fd、记录90ef2fa4；旧版1286ff19与当时已安装marker一致，使用独立detached验证worktree，不在主personal仓构建。新旧共享同一全新合法dev配置根及独立Chromium实例，顺序运行，未恢复任何数据快照。provider仅为本机确定性Anthropic兼容stub，应用/SDK/SQLite和工具执行是真实dev，不是模拟存储层。
+
+| 阶段 | 普通会话SDK记录 | 原Goal会话SDK记录 | 旧版新建会话SDK记录 |
+|---|---:|---:|---:|
+| 新版产生并冻结 | 3 | 7 | — |
+| 旧版续聊及新建后 | 6 | 10 | 3 |
+| 返回M0再次运行后 | 9 | 17 | 3 |
+
+旧版初次API读取与新版两段原历史逐对象相同，Goal工具历史可在UI展开；旧版当前不提供Goal capability，原Goal会话按普通聊天继续，不维护sidecar。旧版退出后，两份Proma JSONL及两份Pi artifact的既有字节前缀全部保留，sidecar SHA-256与新版退出时完全一致。回M0时三会话与旧版末次API历史逐对象相同；随后宿主/goal status和实际GoalCheckpointRead成功，工具结果is_error=false且读取同Goal ID/revision1、原绑定checkpoint seq2。两个turn_end将host sequence正常推进至4；合同表及当前绑定三阶段逐行不变，未伪造verified/completed。返回阶段六份原始JSONL既有字节前缀全保留。
+
+三份整目录副本分别479/481/481文件，逐文件hash一致；SQLite三次integrity_check=ok、DELETE journal。9轮宿主消息处理均完成，9个provider请求仅发本机stub；43项材料断言通过，不与旧876仓库测试混算。17源码/构建输入与最终独立验收manifest相同，无产品改动。本次实际启动原watch组合并核对小样本GUI；不把它扩成完整GUI性能/大历史、真实provider、图片附件、压缩/overflow、合同修订/关闭、磁盘损坏或安装包降级验证。
+
+每次在轮次完成、无active query后，核验自有主进程身份并发送SIGTERM，再停止自有watcher；无force kill，但**不是UI菜单app.quit清理链验证，也不保证生成中尚未落盘内容**。新数据、三份副本和旧验证worktree保留；自有dev/fixture服务及Ego TaskSpace已关闭，正式数据/应用和服务未修改。此结果支持“仅回滚应用、保留当前数据”的小样本兼容性，不支持恢复升级前整库快照后自动找回增量对话；正式回滚仍先备份当时最新完整数据，恢复旧数据另批。
