@@ -1,6 +1,6 @@
 # Goal Memory（M0）功能 SSOT 草稿
 
-状态（2026-11-04）：**实现仍在未合入分支。最后三项P2修复后，父已独立重跑实际SDK本地转换、配置根/12KB边界、完整确定性矩阵、871测试、typecheck及五目标构建通过。未新增真实模型调用；两次短run及三次长压缩均按旧源码快照单列。用户额外批准的一轮Codex复审与全新只读计划验收待完成。**本文件只描述当前代码实际具备的能力，不代表 M1 Goal 控制器或可合入结论。
+状态（2026-11-04）：**独立计划验收需要返工。对903fb8eb，B/C/D通过；A未满足“不在主线程扫描大历史”，当前解析/hash仍在主线程。E指出审查结论未同步，本次已补记，但整体不得标为已验收。Codex额外复审3无需要报告的缺陷；871测试及完整矩阵通过不替代计划符合性。功能默认关闭、未合入/安装，后续线程隔离或条款调整及新增复审须用户确认。**
 
 ## 范围与启用
 
@@ -57,7 +57,8 @@ Pi `session_before_compact`扩展覆盖`manual`、`threshold`、`overflow`三类
 - 第二次新会话通过应用删除，新增设备撤销、测试空间结束、own live artifact/sidecar及配对材料清理，dev/8443关闭而正式443保留。恢复20个原会话ID和4配置hash；草稿metadata与本次启动备份完全相同。原备份及本次恢复前的index/channel备份保留，不重建整个fixture。所有合成审计材料仅在私有工作台。
 - 2026-11-04最后三项review P2修复：`injectGoalTaskData`支持无原始user的Pi cut-turn上下文；测试通过安装版Pi SDK `buildSessionContext`与`convertToLlm`实测compactionSummary/assistant/toolResult cut-turn与单份恢复包；独立边界单元测试覆盖system-only/empty上下文，另检查重复包、相似用户marker及previous-transform/图片处理顺序。sidecar改用统一`config-paths.getConfigDir()`，并以临时HOME、mock `app.isPackaged`覆盖未打包默认/合法开发目录名/非法名称/打包版/显式测试override；验证flag=0不创建正式或开发配置根。合同创建会预留固定短进度省略标记预算；新增父11,650 ASCII复现、最大合法进度与状态、ASCII/Unicode精确边界及CAS失败不改现有合同回归。最终`bun test apps/electron/src/main/lib/personal-goal-memory.test.ts`为2 pass；`bun run typecheck`所有包通过；`git diff --check`通过。未启动dev、未新增真实模型调用、未改schema/自动迁移/版本/lock/依赖，未commit。
 - 最后三项修复后的父独立验证：同版SDK实际cut-turn context为compactionSummary/assistant/toolResult，转换后恰一份完整Goal包，空/system-only、重复注入、原始marker及图片对象保留；官方配置根的未打包默认/合法fixture名/非法名/打包态及flag0均通过（临时HOME、Electron API stub，不是完整GUI启动）。ASCII/Unicode各二分至接受边界，本文测试合同的必需原文11,676 bytes、包正文恰12,000 bytes，模型三组数组各100×5,000 bytes、nextAction 5,000 bytes，在active/waiting_user/blocked/paused/claimed_done五态均只省略可选进度，不阻断或截必需字段。旧6项、query、28页checkpoint、revoke无迟到写、Evidence两页与host10项全部重跑；30×10/15/21/4矩阵通过。全仓871 pass/0 fail、2322 assertions，typecheck、personal scripts、五目标构建与diff-check通过；源码hash前后相同。
-- 本轮最后三项修复后的额外Codex复审与全新只读计划验收尚待执行；未新增真实模型调用、未重做长压缩。真实自动threshold/overflow故障、图片附件provider共存及大历史UI负载仍未测。既有结果不构成合入/发布许可或长期语义遵循证明。
+- 额外Codex复审3已完成：CLI0.165.0、310秒，针对903fb8eb，未发现需要报告的缺陷；只读快照缺依赖，未重跑父完整矩阵。随后全新Astra只读验收（初次额度失败无结论，09:15重试）裁决需要返工：A的扫描CPU工作仍在Electron主线程，不满足批准计划第16行；B/C/D通过；E的审查结论缺记已由父补齐本节及相关文档。没有据此声称全部通过或擅自放宽条款。当前不新增实验、改代码或追加复审，等待用户选择线程隔离返工或明确调整条款。
+- 未新增真实模型调用、未重做长压缩。真实自动threshold/overflow故障、图片附件provider共存及大历史UI负载仍未测；异步流式读取不等于worker隔离，也未证明实际UI卡顿。既有结果不构成合入/发布许可或长期语义遵循证明。
 
 ## 回滚
 
