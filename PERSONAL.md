@@ -17,7 +17,7 @@
 
 ## 本分支实验（尚未合入）
 
-- **Goal Memory M0**（截至2026-11-04，21:15批准后的候选）：默认关闭的合同/checkpoint/证据回读与手动恢复实验。权威见 [`goal-memory.md`](./docs/personal/goal-memory.md)，验收见 [`backlog.md`](./docs/personal/backlog.md)。全新独立验收确认的首次绑定owner唯一阻塞已最小修复：Evidence同步beforeCommit先核private snapshot owner再seal合同/sequence，保留CAS和提交后检查，无API/schema/自动重试。父双真实Worker首chunk gate转正：被替换旧A拒绝且CP0无绑定，新B首次成功b0/offset1 b1，hostseq1/modelseq0/正确水位、4线程退出。B6原9末端/16线程及完整矩阵、876测试、typecheck/scripts/五构建通过，17源hash相同。唯一获准定向复审6已完成（CLI0.165.0/base personal，93秒），聚焦9e6→df8ae0fd未发现可操作缺陷，隔离快照未重跑测试；当前等待全新只读计划验收，未声称最终通过；无新dev/provider/长压缩、M1或合并/推送/制作安装包/安装。
+- **Goal Memory M0**（截至2026-11-04 22:19 GMT+8）：**产品df8ae0fd通过当前M0实验计划验收，默认关闭、未合入/发布。** SSOT见 [`goal-memory.md`](./docs/personal/goal-memory.md)，分支及保留限制见 [`backlog.md`](./docs/personal/backlog.md)。首次绑定private owner提交屏障已最小修复，父双Worker CP0负向转正，9末端/16线程及完整矩阵、876测试/typecheck/scripts/五构建、17源一致通过。唯一定向复审6（CLI0.165.0/base personal，93秒）未发现可操作缺陷；Astra最终验收因额度仅返部分进展，不计结论，之后全新独立Sol role review实际核对源码/日志/hash，A/B/C/D/E和三个补充全部通过，父逐条采纳。独立审查/验收仅读代码和日志，不冒充重跑测试。未合并/推送/启用/升版/打包/安装，无M1/第七轮或新dev/provider/长压缩，旧真实实测分版本，未测GUI/实际watch/包和长期语义等限制保留。
   - 上游触点：原六处orchestrator、Pi/utility adapters、utility runtime/timeout及shared runtime类型接线不扩展新行为；本次另改Electron `package.json` 的worker build/watch scripts、`scripts/dev-bundle-readiness.ts`及`electron-builder.yml`精确worker解包项。策略/SQLite仍在`personal-goal-memory.ts`，新增个人artifact scan/protocol/worker/client模块；worker无数据库/SDK/Electron依赖。
   - 兼容与回退：不修改 Pi transcript、会话索引或 planning schema，不新增依赖；取消 `PROMA_PERSONAL_GOAL_MEMORY=1` 即关闭新路径，独立 sidecar 保留。未获合并、推送、打包或安装授权。
 

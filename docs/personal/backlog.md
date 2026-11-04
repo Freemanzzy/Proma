@@ -22,7 +22,7 @@
 
 ## 开发中（未验收，不属于已验证分支）
 
-- **Goal Memory M0**（截至2026-11-04 21:15批准后的候选，`feat/goal-memory-m0-20261103`，基线personal 1c373673）：原独立验收A及补充未过、B/C/D/E各阶段过；唯一首次Evidence初始化owner屏障已按许可最小修复并父独立转正，**唯一额外定向复审6已无可操作缺陷，等待全新只读验收**，不是仍等修复许可或已通过。同步beforeCommit一并核owner及合同/seq；旧A不写CP0，新B无需重试即正确初始化b0/b1，hostseq1/modelseq0、水位/identity正确。9项末端/16线程、全部旧矩阵、876/0/2328/146、typecheck/scripts/五构建通过，17源前后一致。原P2的历史暂缓不能豁免硬条款；产品df8ae0fd的最小修复/父测试与复审6已通过（93秒，只读未跑测试），仍需实际新计划验收，不由父自评。无新API/schema/自动重试/M1；不自动第七轮。保留完整GUI、大历史UI、真实threshold/overflow、图片/provider共存、实际watch/安装包及长期语义未测，SQLite不受Promise硬抢占；旧真实实验证据分版本，不新dev/provider/长压缩或重做旧清理。默认关闭，不合并/推送/升版/打包/安装。SSOT见[goal-memory.md](./goal-memory.md)。
+- **Goal Memory M0**（截至2026-11-04 22:19 GMT+8，`feat/goal-memory-m0-20261103`，产品df8ae0fd，基线personal 1c373673）：**当前M0实验计划及三个补充验收全部通过，仍未合入/发布、默认关闭**。此前唯一首次Evidence binding owner阻塞已在beforeCommit同步修复并真实双Worker负向转正：旧A不写CP0，新B首次正常b0/b1，hostseq1/modelseq0及源水位正确，不靠重试。原P2不再为暂缓遗留。B6原9末端/16线程及完整矩阵、876/0/2328/146、typecheck/scripts/五构建/17源一致；唯一定向6实际93秒无可操作缺陷。Astra部分进度+额度错误不算结论；随后真正全新独立Sol role review按源码/原日志/hash判A/B/C/D/E及三补充通过，父采纳。**保留未测**：最终完整GUI/大历史UI、真实自动threshold/overflow故障、图片/provider共存、实际watch/安装包、长期语义和收益比例；SQLite不能Promise硬抢占，旧三长/两短只归各旧版本，300装载非模型压缩。通过不授权后续合并/推送/启用/升版/打包/安装/M1/第七轮，不重做旧清理或自动创建后续任务。SSOT见[goal-memory.md](./goal-memory.md)。
 
 ## 用户反馈收集（2026-10-01 起，下一批一并实现）
 

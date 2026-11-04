@@ -2273,3 +2273,10 @@
 - **实际范围和结果**：CLI0.165.0、base personal、项目review-rules，聚焦9e6f7036→df8ae0fd的首次Evidence binding owner同步屏障及受影响source/lifecycle/CAS/pagination不变量；93秒、报告生成exit0、源码未变，报告明确“未发现可操作缺陷”。隔离快照缺依赖，未重跑测试，不能把父B6测试归为CodeX亲跑或把exit0本身当通过。
 - **父级核实**：采纳本轮无可操作缺陷结论；核对owner检查与既有state seal至SQLite CAS无await、提交后owner检查保留、CP0原生回归覆盖旧root不提交/新root初始化分页。B6同一个旧9e6有效负向已在df8转正，9末端/16线程、原矩阵与876全仓/typecheck/scripts/五构建及17源一致独立证据保持，无新发现需暂缓或反驳。
 - **同步及边界**：同步PERSONAL/backlog/GoalSSOT实际审查结果；本次只改四维护文档、产品仍df8，不自动第七轮。之后才新建全新只读role review验收最终版本，不续旧Astra、不父或执行工自评。当前未宣称整体验收通过；无dev/provider/长压缩/旧清理/合入推送打包安装。未测与旧实验分版本限制不变，无需更新维护规则或长期记忆。
+
+## 2026-11-04: Goal Memory M0 最终独立计划验收通过
+
+- **实际验收者与失败区分**：产品df8ae0fd、记录HEADa8f4e80f。Astra新任务只有部分进度与订阅额度错误，无完整报告，不计通过/失败。父向用户说明后，在同订阅渠道换用可用Sol真正新建独立role review上下文；不是父自评/原Luna自评，不是CodeX7，不切新付费渠道。完整实际报告经wait收敛返回，原A/B/C/D/E及三个补充在当前M0实验阶段全部通过。
+- **自主核验及父裁决**：独立review只读批准计划/研究/三个补充/21:15及22:03授权、最终源码和原始日志/git/hash，17输入与B6六阶段manifest及df8 Git内容一致、工作树干净、版本依赖lock不变；核owner检查/state seal至SQLite CAS无await、提交后检查保留，真实双Worker CP0负向转正。父重算core hash、核代码与证据逐条采纳：此前唯一首次binding owner阻塞真正闭合，复审5的P2不再暂缓，未发现当前需产品返工阻塞。独立review未跑测试/项目/SDK/dev/provider/浏览器或写文件，不将其报告归为亲跑实验。
+- **保留验证与限制**：B6 9末端/16线程/原完整矩阵、876/0/2328/146、typecheck/scripts/五构建、唯一定向6实际93秒无可操作缺陷；300装载非模型压缩，旧三长/两短仍分版本。独立worker build/watch组合、多一watcher、scripts-only变化及asar仅布局测试偏差保留；最终完整GUI/大历史UI/真实threshold-overflow/图片provider/实际watch-安装包/长期语义未测，SQLite不可Promise硬抢占。
+- **同步和停止边界**：只同步PERSONAL/backlog/GoalSSOT当前实验验收通过与本末尾changelog，产品不变。默认关闭，仍未合并/推送/启用/升版/打包/安装；无第七轮或M1/新dev-provider-长压缩/旧清理，备份保留。通过不替代后续独立授权；无需改维护规则/AGENTS/长期协作记忆，普通记录留SSOT及会话工作台。
