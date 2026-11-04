@@ -1,6 +1,6 @@
 # Goal Memory（M0）功能 SSOT 草稿
 
-状态（2026-11-04）：**903fb8eb曾因主线程扫描约束需要返工。用户09:33明确批准严格线程隔离、额外一次复审4及全新只读验收。现扫描已接入真实Node worker_threads；父独立14项原生线程/故障探针、全部既有矩阵、全仓876 pass/0 fail、typecheck/scripts/五构建与worker产物检查通过，17个源/构建输入hash一致。复审4已完成并新增1项P2最终状态复核竞态，父已独立复现并采纳，尚未修复或收敛；追加复审5需明确授权，新计划验收未启动。本地全绿矩阵不能替代该修复或整体验收。默认关闭、未合入/安装；本批无新开发实例或真实provider/长压缩实验。**
+状态（2026-11-04，父独立回归完成后）：**复审4的最终状态竞态已修复，相关私有snapshot交接已封口。父冻结17个源/构建输入，完成8项最终状态/快照交接、原16项线程边界及全部既有矩阵，876/0测试、typecheck/scripts/五构建通过。用户15:54明确批准的额外仅一轮复审5及全新只读计划验收尚待执行，不代表已验收或可合入。实现仅在功能分支，未合并/推送/制作安装包/安装；本批无dev、真实provider或长压缩，默认关闭。执行工自检与父独立结果按下列阶段分别记录。**
 
 ## 范围与启用
 
@@ -75,16 +75,40 @@ Pi `session_before_compact`扩展覆盖`manual`、`threshold`、`overflow`三类
 
 旧六项/query/28页checkpoint/revoke/Evidence两页/host10/50k，SDK cut-turn/规范配置根/预算边界，30×10装载、15证据、21hook及4类mutation全部通过；mutation仍先验证control，再仅把断言失败计为killed。全仓876 pass、0 fail、2328 assertions；typecheck、personal scripts、五既有构建（main含worker）、生成物与diff检查通过，源hash前后相同。原生探针的核心与worker均以生产esbuild Node/CJS方式编译；父最初沿用Bun CJS私有harness时，Bun将__filename改写为源TS路径而导致伴随worker定位缺失，保留该失败并改为生产编译方式，未为harness改产品行为。
 
-本批没有dev/真实provider/长压缩或制作安装包。asarUnpack仅配置核对与临时布局路径测试，watch入口仅脚本/产物及readiness检查，不冒称实际运行watch/安装包已验。构建实现使用独立worker build/watch脚本，由main脚本组合，而非补充计划优先建议的命名多入口；固定CJS产物与ready护栏保留，但开发时新增worker watcher分支。复审4和全新只读计划验收仍待完成；旧真实实验限制不变。
+本批没有dev/真实provider/长压缩或制作安装包。asarUnpack仅配置核对与临时布局路径测试，watch入口仅脚本/产物及readiness检查，不冒称实际运行watch/安装包已验。构建实现使用独立worker build/watch脚本，由main脚本组合，而非补充计划优先建议的命名多入口；固定CJS产物与ready护栏保留，但开发时新增worker watcher分支。当时复审4和新计划验收尚待执行；后续实际裁决及修复见下节，旧真实实验限制不变。
 
-## 2026-11-04 复审4裁决与当前阻塞
+## 2026-11-04 复审4裁决与后续修复
 
 Codex CLI0.165.0对产品875da468完成额外获准的一轮复审4（312秒，指定base personal/review-rules，源未变），新增1项P2，父采纳：`requestArtifactScan`先await包含合同/sequence检查的callback，再await文件lstat/realpath/stat；EvidenceRead在最后await之后只检查query活跃，便返回证据、保存或推进分页快照。必须在最后异步步骤结束后、影响快照/返回结果前同步复核当前合同与sequence，不能再在最终状态检查之后引入新的await窗口。
 
 父通过生产esbuild core/worker、临时HOME的真实capability独立故障注入：已绑定来源的EvidenceRead在最后main stat期间分别切换revision1→2、或推进同revision checkpoint sequence1→2，两者仍返回ok与nextOffset1。这个复现验证程序竞态，不是完整GUI复现；宿主命令的active管理门禁仍在，未宣称发生实际数据损坏。原16项线程/故障/关闭探针、876仓库测试及既有矩阵通过仍有效，但未覆盖这一最终窗口，不代表全局无缺陷。
 
-当前仅记录问题，不修改产品875da468，不新增真实provider/dev/打包/安装。原授权仅额外一次复审4；不擅自追加第五轮，待明确后再修复与回归并按获准范围复审，之后才进入全新只读计划验收。
+复审4之后用户于2026-11-04 15:54 GMT+8明确批准“修复复审4的P2→独立回归→额外仅一轮复审5→全新只读计划验收”。本轮仍由原产品写者限定实现，不执行复审或全局验收。
+
+### 复审4 P2修复与定向native回归
+
+在`createGoalMemoryCapability`内新增同步`assertFinalGoalState`，捕获请求开始时的owner/session/workspace/query身份；在作用点同步检查owner/query/signal/功能开关，并通过同步SQLite读取比较当前goal id/revision/hash与checkpoint sequence。这个检查放在最后一次异步source stat之后、对应快照更新/响应构造/权威写入之前，不在检查与作用点之间再await。`initializeGoalArtifactBinding`在source扫描完成后通过同步`beforeCommit` seal再进入`commitCheckpointUpdate`；`context`在source validation await后seal再构造恢复包；`turn_end`在扫描await及结果检查后seal再提交observed watermark（SQLite原有CAS保留）；`compact_ack`在source validation await后seal再写ack；`evidence_read`在扫描await/错误处理后seal，再同步创建或推进快照并构造结果。每个新分页请求以该请求开始时的当前sequence作为预期值，所以合法host sequence在两次分页请求之间前进时仍可续读固定root快照；仅本次worker/source复核期间状态改变会拒绝，不会推进cursor。
+
+对应native测试在临时HOME、ElectronRunAsNode实际capability路径中，通过可控替换`fs/promises.stat`并同步ESM builtin exports，在原始stat完成而main stat Promise尚未返回时注入revision1→2或同revision sequence1→2。Evidence两种mutation都必须拒绝，且后续offset页证明root cursor未保存/推进；其他回归覆盖context终态拒绝、首次context初始化不得迟到绑定/水位、turn_end不得写旧observed/watermark、compact ack不得迟到成功。测试还验证mutation确实触发且只命中目标main source stat；不是mock worker结果或未接线探针。原worker只读/无main fallback、2 active/8 queued/55秒总期限、compact 5秒、hash/branch/分页/默认关闭和模型报告边界均未改。
+
+最终定向结果：`bun test ./apps/electron/src/main/lib/personal-goal-memory.test.ts` → 2 pass、0 fail；全仓`bun run typecheck`与`git diff --check`通过。未跑全仓suite/既有全矩阵、personal scripts/五构建、dev、provider/模型或长压缩；未提交/合并/打包/安装。复审5和新只读计划验收由父会话按授权执行，未由执行工自审。
+
+### 私有分页快照所有权补齐（2026-11-04 16:24 GMT+8）
+
+父会话等待本地首批state seal验证时，又在同一Evidence快照最终作用点复现旧root/continuation迟到推进新root的问题（合同与checkpoint sequence均未变）。本批为每个root分配私有随机owner token；continuation持有开始时的snapshot对象与owner token，不再在await后重新读取全局snapshot。新root替换owner；旧请求在最后await后发现owner已变化即拒绝，worker错误catch/selector/source失败的清理也必须仍持有原owner才可清除快照。root设置/完成、cursor推进、失败清理均同步执行，API、schema及worker协议不变。
+
+新增ElectronRunAsNode真实capability/Worker native回归，以最后main source stat gate制造并发：旧ALPHA continuation迟到返回、旧ALPHA root迟到返回、旧ALPHA root迟到stat失败三种情况，均在BETA root成功返回`b0/nextOffset=1`之后释放；旧请求不得推进或清理BETA快照，随后BETA offset=1必须返回`b1`。检查checkpoint byte-for-byte不变、所有worker清空。这里gate位于真实Worker结果之后的main stat await，未修改父私有harness，也不伪称复现其Worker首chunk gate。
+
+此批之后再次运行`bun test ./apps/electron/src/main/lib/personal-goal-memory.test.ts` → 2 pass、0 fail；`bun run typecheck`全部包通过；`git diff --check`通过。父独立cursor-handoff probe、全矩阵、复审5及全新只读计划验收仍未由执行工运行，交还父会话。
 
 ## 回滚
 
 将 `PROMA_PERSONAL_GOAL_MEMORY` 取消或设为非 `1` 即关闭新功能路径。关闭不清除 sidecar 文件，不影响旧会话与旧格式；数据删除须另行审批。
+
+## 2026-11-04 父独立最终状态与快照交接回归
+
+父冻结执行工最终源码，生产esbuild core/伴随worker与实际ElectronRunAsNode capability验证：最后main stat期间分别变更revision、sequence，两项均拒绝；另两项将变更延迟3层微任务、跨async helper向consumer交接，仍拒绝。875的四项负向保留。父同批在实际Worker首chunk gate复现旧continuation推进新root的同类私有状态窗口（合同/sequence不变），第一批seal不能抵消该问题；最终snapshot owner保护后，continuation迟到成功/失败、旧root迟到成功/失败四项均保持新BETA游标可用、offset1精确回读b1，checkpoint不变、所有Worker退出。执行工stat处并发与父实际Worker首chunk gate属于互补证据，不混称同一故障注入点。
+
+原16线程/故障/无来源、旧六项/query/28页跨turn分页/revoke/Evidence两页/host10/50k、实际SDK上下文/配置根/预算、30×10装载、15证据、21hook及4类mutation均通过；全仓876 pass、0 fail、2328 expect、146 files，typecheck/personal scripts/main/agent-runtime/preload/renderer/web-preload及worker产物通过。17个源/构建输入hash在全部检查前后相同。mutation仅适配捕获请求身份后的入场guard文本锚点；四类control先过、突变由实际断言失败，不以编译/缺模块错误计killed。
+
+当前复审5及全新只读验收尚待执行；本地装载不等于模型压缩，线程探针不证明完整GUI性能；本批无新dev/provider/长压缩/实际watch/安装包实验。旧实验按各源码版本保留，既有清理/备份不重复，共同维护规则及长期协作记忆无需变更。

@@ -2236,3 +2236,12 @@
 - **父裁决：采纳，尚未修复**。Evidence路径在包含合同/sequence检查的callback后继续异步lstat/realpath/stat，最后返回和更新分页快照前仅验证query活跃，可能接受失效合同或水位对应的迟到结果。应在最后async结束后同步重验合同与sequence，覆盖有关结果返回/快照更新点，而非用另一个await留下同类窗口。
 - **独立复现**：生产esbuild core/worker、ElectronRunAsNode、自己创建的临时HOME与真实facade，在已绑定EvidenceRead最后main stat处注入revision1→2、sequence1→2，均仍返回ok/nextOffset1，预期拒绝断言失败。最初harness未同步Node builtin ESM导出/未匹配canonical路径，随后错误等待第二次stat，均未触发变更；保留这些无效注入记录，不当作产品负向证据。接线修正后mutationFired=true，两个有效控制确证该竞态。未修改产品来制造通过，未调用provider。
 - **当前边界**：线程隔离、16项线程/故障/关闭验证及876全仓测试等记录仍保留，但不能抵消新发现。产品源码保持875da468，当前只同步本结论至功能SSOT、PERSONAL/backlog；追加第五轮CodeX尚未明确获准，不以新计划验收替代代码复审，也不自动扩大轮次。未合入、推送、制作安装包或安装。
+
+## 2026-11-04: Goal Memory M0 最终异步状态与快照所有权修复
+
+- **授权**：更正上一阶段的待确认状态：用户15:54已明确批准修复复审4的P2、独立回归、额外仅一轮复审5、全新只读计划验收。没有第六轮、新dev/provider/长压缩或发布安装许可。
+- **实现**：原单写者限定core/test/功能SSOT。最后await之后，在Evidence快照更新/响应、context pack、初次binding提交、turn_end水位写、compact ack前同步重验请求owner/session/workspace/query、生命周期/开关、合同id/revision/hash及CPsequence；seal至作用点不再await。每页以本次请求入口sequence验证，保留跨请求host推进的固定分页。父补回归发现旧页可能推进新root，进一步用私有snapshot owner及捕获的快照防止旧continuation/root迟到成功或失败改动、清理新root；不增加DTO/schema或新功能。
+- **父独立证据**：四项revision/sequence即时与3微任务延迟控制在875均失败、最终转通过；快照continuation/root迟到成功/失败四项最终转通过，新BETA offset1精确回读b1、CP不变、所有真实Worker退出。旧875与第一批仅合同seal的负向均保留，不用最新全绿改写历史。原16原生线程/故障/无来源以及全部原矩阵通过，main原始行parse/hash0。
+- **完整检查**：旧六项/query/28页checkpoint/revoke/Evidence两页/host10/50k、实际SDK/path/budget、30×10装载、15证据、21hook/4mutation通过；876 pass/0 fail/2328 expect/146 files、typecheck/personal scripts/五构建及worker产物/diff通过，17源/构建hash前后一致。私有mutation只按入场身份捕获变量适配文本锚点，control先过且由断言失败计killed。
+- **状态及限制**：额外仅一轮复审5及全新只读计划验收尚待执行；本提交不标为已审查通过或可合入。未测完整GUI/大历史UI负载/真实threshold或overflow故障/图片与provider共存/实际watch及安装包/长期语义；SQLite同步段不可被Promise硬抢占。旧真实实验仍分版本，无新live材料或旧清理动作，不改版本/依赖/lock/SDK/AGENTS，不合并/推送/打包/安装。
+- **文档与记忆**：同步PERSONAL、backlog及功能SSOT；维护规则无需改，普通验证流水保留私有审计材料，不升级长期协作记忆。

@@ -20,7 +20,8 @@ test('Goal Memory contracts stay immutable, CAS rejects stale state, pack never 
     import assert from 'node:assert/strict'
     import { createHash } from 'node:crypto'
     import { DatabaseSync } from 'node:sqlite'
-    import { mkdirSync, writeFileSync, existsSync, realpathSync, readFileSync } from 'node:fs'
+    import { mkdirSync, writeFileSync, existsSync, realpathSync, readFileSync, promises as fsp } from 'node:fs'
+    import { syncBuiltinESMExports } from 'node:module'
     import { join } from 'node:path'
     import * as goal from ${JSON.stringify(modulePath)}
     import { buildSessionContext } from ${JSON.stringify(join(repoRoot, 'node_modules/@earendil-works/pi-coding-agent/dist/core/session-manager.js'))}
@@ -295,6 +296,80 @@ test('Goal Memory contracts stay immutable, CAS rejects stale state, pack never 
     const firstEvidenceCheckpoint=goal.getGoalCheckpoint(goal.getGoalContract('first-evidence-session').id,1)
     assert.equal(firstEvidenceCheckpoint.artifactId,firstEvidenceBinding.artifactIdentity)
     assert.equal(firstEvidenceCheckpoint.entryWatermark.length,300)
+    const runFinalStateNativeRace=async({name,operation='evidence_read',prebind=true,expectedError,mutate,verifyAfter})=>{
+      const sessionId='final-state-'+name;const directory=join(process.env.HOME,'final-state-'+name);mkdirSync(directory,{recursive:true})
+      const ids=['final-state-'+name+'-0','final-state-'+name+'-1','final-state-'+name+'-2'];const file=join(directory,'source.jsonl')
+      const sourceRows=ids.map((id,index)=>({id,parentId:index?ids[index-1]:null,type:'message',message:{role:index?'assistant':'user',content:'NATIVE_RACE_'+name+' evidence row '+index}}))
+      writeFileSync(file,sourceRows.map((row)=>JSON.stringify(row)).join('\\n')+'\\n')
+      const contract=goal.createGoalContract({sessionId,workspaceId:'w',expectedRevision:0,originalText:'Final state native race '+name,scope:[],nonGoals:[],hardConstraints:['stale worker response must not commit'],acceptance:['reject after final stat'],userMessageRef:'final-state-user-'+name})
+      const binding={sessionId,workspaceId:'w',artifactId:'sdk-final-'+name,artifactIdentity:'identity-final-'+name,path:realpathSync(file),sessionsDirectory:realpathSync(directory)}
+      const owner=goal.createGoalMemoryCapability(sessionId,'w',async()=>binding)
+      const identity={ownerId:owner.ownerId,sessionId,workspaceId:'w',queryId:'query-final-'+name}
+      const contextRequest={...identity,operation:'context',artifactId:binding.artifactId,leafId:ids[2],branchEntryIds:ids}
+      if(prebind)assert.ok((await owner.request(contextRequest)).context)
+      const before=goal.getGoalCheckpoint(contract.id,contract.revision)
+      const originalStat=fsp.stat;let armed=false;let mainStatCalls=0;let mutationFired=false
+      fsp.stat=async function(...args){const stat=await originalStat.apply(this,args);if(armed&&(args[0]===file||args[0]===binding.path)){mainStatCalls++;if(mainStatCalls===1){mutationFired=true;mutate({contract,before,sessionId,owner,binding,ids})}}return stat}
+      syncBuiltinESMExports()
+      const request=operation==='evidence_read'?{...identity,operation,mode:'keyword',query:'NATIVE_RACE_'+name,offset:0,limit:1,branchEntryIds:ids,leafId:ids[2]}:
+        operation==='turn_end'?{...identity,operation,artifactId:binding.artifactId,leafId:ids[2],entryIds:[ids[2]],branchEntryIds:ids}:
+        operation==='compact_ack'?{...identity,operation,reason:'manual',artifactId:binding.artifactId,leafId:ids[2],branchEntryIds:ids}:contextRequest
+      try{armed=true;await assert.rejects(()=>owner.request(request),expectedError)}finally{armed=false;fsp.stat=originalStat;syncBuiltinESMExports()}
+      assert.equal(mainStatCalls,1,'只在最后main source stat处注入一次')
+      assert.equal(mutationFired,true,'必须在最后source stat await期间触发真实sidecar mutation')
+      const latestContract=goal.getGoalContract(sessionId,'w');const latestCheckpoint=goal.getGoalCheckpoint(latestContract.id,latestContract.revision)
+      if(operation==='evidence_read')await assert.rejects(()=>owner.request({...identity,operation:'evidence_read',mode:'keyword',query:'NATIVE_RACE_'+name,offset:1,limit:1,branchEntryIds:ids,leafId:ids[2]}),/snapshot unavailable/,'拒绝root结果后不得留下或推进cursor快照')
+      if(verifyAfter)verifyAfter({contract,before,latestContract,latestCheckpoint,sessionId,owner,binding,ids})
+      owner.revoke()
+    }
+    const mutateRevisionDuringFinalStat=({contract})=>goal.createGoalContract({sessionId:contract.sessionId,workspaceId:contract.workspaceId,expectedRevision:contract.revision,originalText:'new revision wins during stat',scope:[],nonGoals:[],hardConstraints:['revision changed'],acceptance:['reject old result'],userMessageRef:'new-revision-user'})
+    const mutateSequenceDuringFinalStat=({contract,before})=>goal.recordGoalModelCheckpoint({goalId:contract.id,revision:contract.revision,expectedSequence:before.sequence,status:'active',modelReported:['concurrent native metadata update'],nextAction:'',questions:[],unknownSideEffects:[]})
+    await runFinalStateNativeRace({name:'evidence-revision',expectedError:/contract revision changed during artifact worker scan/,mutate:mutateRevisionDuringFinalStat,verifyAfter:({latestContract,latestCheckpoint})=>assert.equal(latestContract.revision,2)})
+    await runFinalStateNativeRace({name:'evidence-sequence',expectedError:/checkpoint sequence changed during artifact worker scan/,mutate:mutateSequenceDuringFinalStat,verifyAfter:({before,latestCheckpoint})=>assert.equal(latestCheckpoint.sequence,before.sequence+1)})
+    await runFinalStateNativeRace({name:'context-sequence',operation:'context',expectedError:/checkpoint sequence changed during artifact worker scan/,mutate:mutateSequenceDuringFinalStat,verifyAfter:({before,latestCheckpoint})=>assert.equal(latestCheckpoint.sequence,before.sequence+1)})
+    await runFinalStateNativeRace({name:'initial-context-revision',operation:'context',prebind:false,expectedError:/contract revision changed during artifact worker scan/,mutate:mutateRevisionDuringFinalStat,verifyAfter:({latestContract,latestCheckpoint})=>{assert.equal(latestContract.revision,2);assert.equal(latestCheckpoint.artifactId,'');assert.equal(latestCheckpoint.entryWatermark.length,0)}})
+    await runFinalStateNativeRace({name:'turn-end-sequence',operation:'turn_end',expectedError:/checkpoint sequence changed during artifact worker scan/,mutate:mutateSequenceDuringFinalStat,verifyAfter:({before,latestCheckpoint})=>{assert.equal(latestCheckpoint.sequence,before.sequence+1);assert.equal(latestCheckpoint.leafId,before.leafId);assert.ok(!latestCheckpoint.observed.some((entry)=>entry.includes('Pi turn_end 已持久化 entries')));assert.deepEqual(latestCheckpoint.entryWatermark,before.entryWatermark)}})
+    await runFinalStateNativeRace({name:'compact-ack-sequence',operation:'compact_ack',expectedError:/checkpoint sequence changed during artifact worker scan/,mutate:mutateSequenceDuringFinalStat,verifyAfter:({sessionId})=>{const db=new DatabaseSync(join(process.env.HOME,'.proma-dev','goal-memory','goals.sqlite'));try{assert.equal(db.prepare('SELECT COUNT(*) AS count FROM compaction_acks WHERE session_id=?').get(sessionId).count,0)}finally{db.close()}}})
+    const runEvidenceRootOwnershipRace=async({name,staleOffset,failOldStat=false})=>{
+      const sessionId='snapshot-owner-'+name;const directory=join(process.env.HOME,'snapshot-owner-'+name);mkdirSync(directory,{recursive:true})
+      const ids=['u0','a1','b0','b1','leaf'];const texts=['ALPHA first','ALPHA second','BETA first','BETA second','ALPHA BETA last'];const file=join(directory,'source.jsonl')
+      const sourceRows=ids.map((id,index)=>({type:'message',id,parentId:index?ids[index-1]:null,message:{role:index?'assistant':'user',content:[{type:'text',text:texts[index]}]}}))
+      writeFileSync(file,sourceRows.map((row)=>JSON.stringify(row)).join('\\n')+'\\n')
+      const contract=goal.createGoalContract({sessionId,workspaceId:'w',expectedRevision:0,originalText:'Cursor snapshot ownership '+name,scope:[],nonGoals:[],hardConstraints:['stale scan cannot mutate newer root'],acceptance:['BETA offset1 returns b1'],userMessageRef:'snapshot-owner-user-'+name})
+      const binding={sessionId,workspaceId:'w',artifactId:'sdk-snapshot-'+name,artifactIdentity:'snapshot-owner-'+name,path:realpathSync(file),sessionsDirectory:realpathSync(directory)}
+      const owner=goal.createGoalMemoryCapability(sessionId,'w',async()=>binding)
+      const identity={ownerId:owner.ownerId,sessionId,workspaceId:'w',queryId:'snapshot-owner-query-'+name}
+      const read=(query,offset)=>owner.request({...identity,operation:'evidence_read',mode:'keyword',query,offset,limit:1,branchEntryIds:ids,leafId:'leaf'})
+      try{
+        assert.ok((await owner.request({...identity,operation:'context',artifactId:binding.artifactId,branchEntryIds:ids,leafId:'leaf'})).context)
+        const checkpointBefore=JSON.stringify(goal.getGoalCheckpoint(contract.id,contract.revision))
+        const alphaRoot=await read('ALPHA',0);assert.equal(alphaRoot.evidence.nextOffset,1);assert.equal(JSON.parse(alphaRoot.evidence.lines[0]).id,'u0')
+        const originalStat=fsp.stat;let armed=false;let gateEnteredResolve;let releaseGate;let gateEntered=false
+        const gateEnteredPromise=new Promise((resolve)=>{gateEnteredResolve=resolve});const gate=new Promise((resolve)=>{releaseGate=resolve})
+        fsp.stat=async function(...args){const stat=await originalStat.apply(this,args);if(armed&&!gateEntered&&args[0]===binding.path){gateEntered=true;gateEnteredResolve();await gate;if(failOldStat)throw new Error('injected stale snapshot stat failure')}return stat}
+        syncBuiltinESMExports()
+        try{
+          armed=true
+          const staleRead=read('ALPHA',staleOffset).then((value)=>({accepted:true,nextOffset:value.evidence?.nextOffset}),error=>({accepted:false,error:String(error)}))
+          let watchdog;try{await Promise.race([gateEnteredPromise,new Promise((_,reject)=>{watchdog=setTimeout(()=>reject(new Error('snapshot owner stat gate not reached')),3000)})])}finally{if(watchdog)clearTimeout(watchdog)}
+          const betaRoot=await read('BETA',0)
+          assert.equal(betaRoot.evidence.nextOffset,1)
+          assert.equal(JSON.parse(betaRoot.evidence.lines[0]).id,'b0')
+          releaseGate()
+          const staleOutcome=await staleRead
+          assert.equal(staleOutcome.accepted,false,'旧root/continuation在新root建立后必须拒绝迟到结果')
+          const betaContinuation=await read('BETA',1)
+          assert.equal(betaContinuation.evidence.status,'ok')
+          assert.equal(JSON.parse(betaContinuation.evidence.lines[0]).id,'b1','旧ALPHA请求不能清空或推进BETA游标')
+          assert.equal(JSON.stringify(goal.getGoalCheckpoint(contract.id,contract.revision)),checkpointBefore,'快照竞争不得改动authoritative checkpoint')
+          assert.equal(getGoalArtifactWorkerDiagnostics().activeWorkers,0)
+          assert.equal(getGoalArtifactWorkerDiagnostics().queuedJobs,0)
+        }finally{armed=false;releaseGate();fsp.stat=originalStat;syncBuiltinESMExports()}
+      }finally{owner.revoke()}
+    }
+    await runEvidenceRootOwnershipRace({name:'stale-continuation',staleOffset:1})
+    await runEvidenceRootOwnershipRace({name:'stale-root-return',staleOffset:0})
+    await runEvidenceRootOwnershipRace({name:'stale-root-failure',staleOffset:0,failOldStat:true})
     goal.createGoalContract({sessionId:'worker-source-drift-session',workspaceId:'w',expectedRevision:0,originalText:'worker结果返回后必须重新验证artifact binding',scope:[],nonGoals:[],hardConstraints:['源变化不得提交/刷新快照'],acceptance:['拒绝迟到结果'],userMessageRef:'worker-source-drift-user'})
     const workerSourceDriftBinding={...originalBinding,sessionId:'worker-source-drift-session',artifactId:'worker-source-drift-artifact',artifactIdentity:'worker-source-drift:1:1'}
     const workerSourceDriftChanged={...workerSourceDriftBinding,artifactIdentity:'worker-source-drift:2:2'}

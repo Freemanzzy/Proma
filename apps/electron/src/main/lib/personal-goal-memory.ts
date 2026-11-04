@@ -676,7 +676,7 @@ async function requestArtifactScan(binding:HostGoalArtifactBinding, branchEntryI
 
 async function initializeGoalArtifactBinding(
   contract:GoalContract, checkpoint:GoalCheckpoint, binding:HostGoalArtifactBinding, artifactId:string,
-  leafId:string, branchEntryIds:string[], signal?:AbortSignal, afterWorkerScan?:()=>Promise<void>,
+  leafId:string, branchEntryIds:string[], signal?:AbortSignal, afterWorkerScan?:()=>Promise<void>, beforeCommit?:()=>void,
 ):Promise<GoalCheckpoint> {
   if(binding.sessionId!==contract.sessionId||binding.workspaceId!==contract.workspaceId||binding.artifactId!==artifactId||branchEntryIds.at(-1)!==leafId)
     throw new Error('Goal initial artifact/session/workspace binding changed')
@@ -686,6 +686,7 @@ async function initializeGoalArtifactBinding(
   const entryHashes=scan.entryHashes??{}
   const persistedEntryIds=branchEntryIds.filter((id)=>Object.hasOwn(entryHashes,id))
   if(persistedEntryIds.length===0)return checkpoint
+  beforeCommit?.()
   return commitCheckpointUpdate(contract.id,contract.revision,checkpoint.sequence,(current)=>{
     if(current.artifactId&&current.artifactId!==binding.artifactIdentity)throw new Error('Goal artifact identity changed during initial binding')
     if(current.artifactId)throw new Error('Goal initial artifact binding raced with another update; reread checkpoint')
@@ -730,6 +731,15 @@ export function createGoalMemoryCapability(sessionId: string, workspaceId: strin
   let revoked = false
   let checkpointPageSnapshot: GoalCheckpointPageSnapshot | undefined
   let evidencePageSnapshot: GoalEvidencePageSnapshot | undefined
+  let evidencePageSnapshotOwner: string | undefined
+  const clearEvidencePageSnapshot=(expectedOwner?:string):boolean=>{
+    if(expectedOwner!==undefined&&evidencePageSnapshotOwner!==expectedOwner)return false
+    evidencePageSnapshot=undefined;evidencePageSnapshotOwner=undefined
+    return true
+  }
+  const assertEvidencePageSnapshotOwner=(expectedOwner:string|undefined):void=>{
+    if(!expectedOwner||evidencePageSnapshotOwner!==expectedOwner)throw new Error('Goal evidence snapshot was superseded by a newer root; restart from offset 0')
+  }
   const assertActiveQuery = (queryId: string, signal?: AbortSignal): void => {
     if (revoked || (boundQueryId && boundQueryId !== queryId)) throw new Error('Goal capability query 已失效或身份不匹配')
     if (!boundQueryId) boundQueryId = queryId
@@ -753,31 +763,37 @@ export function createGoalMemoryCapability(sessionId: string, workspaceId: strin
     if (revoked) return
     revoked = true
     checkpointPageSnapshot = undefined
-    evidencePageSnapshot = undefined
+    clearEvidencePageSnapshot()
     lifecycleAbortController.abort(new Error('Goal capability query 已撤销'))
   }
   return {
     ownerId, sessionId, workspaceId, revoke,
     resolveArtifactBinding,
     async request(request, callerSignal) {
-      if (request.ownerId !== ownerId || request.sessionId !== sessionId || request.workspaceId !== workspaceId || !request.queryId || request.queryId.length > 200) {
+      const requestOwnerId=request.ownerId;const requestSessionId=request.sessionId;const requestWorkspaceId=request.workspaceId;const queryId=request.queryId
+      if (requestOwnerId !== ownerId || requestSessionId !== sessionId || requestWorkspaceId !== workspaceId || !queryId || queryId.length > 200) {
         throw new Error('Goal capability owner/query/session/workspace 校验失败')
       }
       const signal = callerSignal ? AbortSignal.any([lifecycleAbortController.signal, callerSignal]) : lifecycleAbortController.signal
-      assertActiveQuery(request.queryId, signal)
+      assertActiveQuery(queryId, signal)
+      const assertFinalGoalState=(contract:GoalContract,expectedSequence:number):void=>{
+        if(request.ownerId!==requestOwnerId||request.sessionId!==requestSessionId||request.workspaceId!==requestWorkspaceId||request.queryId!==queryId||requestOwnerId!==ownerId||requestSessionId!==sessionId||requestWorkspaceId!==workspaceId)throw new Error('Goal capability owner/query identity changed during artifact worker scan')
+        assertActiveQuery(queryId,signal)
+        if(!isGoalMemoryEnabled())throw new Error('Goal Memory 当前已关闭')
+        assertCurrentContractAndSequence(contract,expectedSequence)
+      }
       let response: { context?: string; checkpoint?: GoalCheckpointModelDto; acknowledged?: boolean; evidence?: ArtifactScanResult }
-      if (!isGoalMemoryEnabled()) { checkpointPageSnapshot = undefined; evidencePageSnapshot = undefined; throw new Error('Goal Memory 当前已关闭') }
+      if (!isGoalMemoryEnabled()) { checkpointPageSnapshot = undefined; clearEvidencePageSnapshot(); throw new Error('Goal Memory 当前已关闭') }
       if (request.operation === 'compact_ack') {
         const contract=getGoalContract(sessionId,workspaceId);const checkpoint=contract?getGoalCheckpoint(contract.id,contract.revision):null
-        if(!contract||!checkpoint){checkpointPageSnapshot=undefined;evidencePageSnapshot=undefined;throw new Error('Goal checkpoint unavailable before compact')}
+        if(!contract||!checkpoint){checkpointPageSnapshot=undefined;clearEvidencePageSnapshot();throw new Error('Goal checkpoint unavailable before compact')}
         if(checkpointPageSnapshot&&(checkpointPageSnapshot.goalId!==contract.id||checkpointPageSnapshot.revision!==contract.revision))checkpointPageSnapshot=undefined
-        if(evidencePageSnapshot&&(evidencePageSnapshot.goalId!==contract.id||evidencePageSnapshot.revision!==contract.revision))evidencePageSnapshot=undefined
+        if(evidencePageSnapshot&&(evidencePageSnapshot.goalId!==contract.id||evidencePageSnapshot.revision!==contract.revision))clearEvidencePageSnapshot()
         const binding=await awaitWithAbort(Promise.resolve(resolveArtifactBinding?.(signal)??null),signal)
         assertActiveQuery(request.queryId, signal)
         if(binding&&(binding.sessionId!==sessionId||binding.workspaceId!==workspaceId))throw new Error('Goal compact workspace/session binding changed')
         await validateCurrentSource(binding,checkpoint,sessionId,workspaceId,request.artifactId,request.leafId,request.branchEntryIds,signal,binding?()=>verifyAfterWorkerScan(request.queryId,signal,contract,checkpoint.sequence,binding):undefined)
-        assertActiveQuery(request.queryId, signal)
-        assertCurrentContractAndSequence(contract,checkpoint.sequence)
+        assertFinalGoalState(contract,checkpoint.sequence)
         acknowledgeGoalBeforeCompact(sessionId)
         response = { acknowledged: true }
       } else {
@@ -785,22 +801,21 @@ export function createGoalMemoryCapability(sessionId: string, workspaceId: strin
         const checkpoint = contract ? getGoalCheckpoint(contract.id, contract.revision) : null
         if (!contract || !checkpoint) {
           checkpointPageSnapshot = undefined
-          evidencePageSnapshot = undefined
+          clearEvidencePageSnapshot()
           response = {}
         } else {
           if (checkpointPageSnapshot && (checkpointPageSnapshot.goalId !== contract.id || checkpointPageSnapshot.revision !== contract.revision)) checkpointPageSnapshot = undefined
-          if (evidencePageSnapshot && (evidencePageSnapshot.goalId !== contract.id || evidencePageSnapshot.revision !== contract.revision)) evidencePageSnapshot = undefined
+          if (evidencePageSnapshot && (evidencePageSnapshot.goalId !== contract.id || evidencePageSnapshot.revision !== contract.revision)) clearEvidencePageSnapshot()
           if (request.operation === 'context') {
             const binding = await awaitWithAbort(Promise.resolve(resolveArtifactBinding?.(signal) ?? null), signal)
             assertActiveQuery(request.queryId, signal)
             if (binding && (binding.sessionId !== sessionId || binding.workspaceId !== workspaceId || request.artifactId !== binding.artifactId)) throw new Error('Goal context workspace/session/artifact identity changed')
             let currentCheckpoint = checkpoint
             if (!currentCheckpoint.artifactId && binding && request.leafId && request.branchEntryIds.at(-1) === request.leafId) {
-              currentCheckpoint = await initializeGoalArtifactBinding(contract, currentCheckpoint, binding, request.artifactId, request.leafId, request.branchEntryIds, signal,()=>verifyAfterWorkerScan(request.queryId,signal,contract,currentCheckpoint.sequence,binding))
+              currentCheckpoint = await initializeGoalArtifactBinding(contract, currentCheckpoint, binding, request.artifactId, request.leafId, request.branchEntryIds, signal,()=>verifyAfterWorkerScan(request.queryId,signal,contract,currentCheckpoint.sequence,binding),()=>assertFinalGoalState(contract,currentCheckpoint.sequence))
             }
             await validateCurrentSource(binding, currentCheckpoint, sessionId, workspaceId, request.artifactId, request.leafId, request.branchEntryIds, signal,binding?()=>verifyAfterWorkerScan(request.queryId,signal,contract,currentCheckpoint.sequence,binding):undefined)
-            assertActiveQuery(request.queryId, signal)
-            assertCurrentContractAndSequence(contract,currentCheckpoint.sequence)
+            assertFinalGoalState(contract,currentCheckpoint.sequence)
             response = { context: buildGoalContextPack(contract, currentCheckpoint) }
           } else if (request.operation === 'checkpoint_read') {
             if (request.cursor) {
@@ -827,6 +842,7 @@ export function createGoalMemoryCapability(sessionId: string, workspaceId: strin
             const persisted = await requestArtifactScan(binding, request.branchEntryIds, request.leafId, 'entry', request.leafId, 0, 1, signal, request.branchEntryIds, checkpoint.entryHashes, true,false,{},()=>verifyAfterWorkerScan(request.queryId,signal,contract,checkpoint.sequence,binding))
             assertActiveQuery(request.queryId, signal)
             if (persisted.status !== 'ok' || Object.keys(persisted.entryHashes ?? {}).length !== request.branchEntryIds.length) throw new Error(`Goal turn_end artifact verification failed: ${persisted.status}`)
+            assertFinalGoalState(contract,checkpoint.sequence)
             const nextCheckpoint = recordGoalObservedCheckpoint({
               goalId: contract.id, revision: contract.revision, expectedSequence: checkpoint.sequence,
               observed: [...checkpoint.observed.slice(-49), `Pi turn_end 已持久化 entries: ${request.entryIds.join(',')}`],
@@ -838,50 +854,60 @@ export function createGoalMemoryCapability(sessionId: string, workspaceId: strin
             const requestedLimit = request.limit ?? 20
             if (!Number.isSafeInteger(request.offset) || request.offset < 0 || !Number.isSafeInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 20) throw new Error('Goal evidence offset/limit 无效')
             const isRootRead = request.offset === 0
-            if (isRootRead) evidencePageSnapshot = undefined
-            else {
-              const snapshot = evidencePageSnapshot
-              if (!snapshot) throw new Error('Goal evidence cursor snapshot unavailable; restart from offset 0')
-              if (snapshot.goalId !== contract.id || snapshot.revision !== contract.revision || snapshot.mode !== request.mode || snapshot.query !== request.query || snapshot.nextOffset !== request.offset) {
-                evidencePageSnapshot = undefined
+            let requestSnapshotOwner:string|undefined
+            let snapshotForRequest:GoalEvidencePageSnapshot|undefined
+            if (isRootRead) {
+              clearEvidencePageSnapshot()
+              requestSnapshotOwner=randomUUID()
+              evidencePageSnapshotOwner=requestSnapshotOwner
+            } else {
+              requestSnapshotOwner=evidencePageSnapshotOwner
+              snapshotForRequest=evidencePageSnapshot
+              if (!snapshotForRequest||!requestSnapshotOwner) throw new Error('Goal evidence cursor snapshot unavailable; restart from offset 0')
+              if (snapshotForRequest.goalId !== contract.id || snapshotForRequest.revision !== contract.revision || snapshotForRequest.mode !== request.mode || snapshotForRequest.query !== request.query || snapshotForRequest.nextOffset !== request.offset) {
+                clearEvidencePageSnapshot(requestSnapshotOwner)
                 throw new Error('Goal evidence cursor snapshot expired or selector changed; restart from offset 0')
               }
             }
             let binding:HostGoalArtifactBinding|null
             try { binding = await awaitWithAbort(Promise.resolve(resolveArtifactBinding?.(signal) ?? null), signal) }
-            catch(error) { if(!isRootRead)evidencePageSnapshot=undefined; throw error }
+            catch(error) { clearEvidencePageSnapshot(requestSnapshotOwner); throw error }
+            assertEvidencePageSnapshotOwner(requestSnapshotOwner)
             assertActiveQuery(request.queryId, signal)
             if (!binding || binding.sessionId !== sessionId || binding.workspaceId !== workspaceId) {
-              evidencePageSnapshot = undefined
+              clearEvidencePageSnapshot(requestSnapshotOwner)
               throw new Error('Goal evidence artifact binding changed')
             }
             if (request.branchEntryIds.at(-1) !== request.leafId) {
-              evidencePageSnapshot = undefined
+              clearEvidencePageSnapshot(requestSnapshotOwner)
               throw new Error('Goal evidence branch leaf mismatch')
             }
             let currentCheckpoint = checkpoint
-            if (!currentCheckpoint.artifactId) currentCheckpoint = await initializeGoalArtifactBinding(contract, currentCheckpoint, binding, binding.artifactId, request.leafId, request.branchEntryIds, signal,()=>verifyAfterWorkerScan(request.queryId,signal,contract,currentCheckpoint.sequence,binding))
+            if (!currentCheckpoint.artifactId) {
+              currentCheckpoint = await initializeGoalArtifactBinding(contract, currentCheckpoint, binding, binding.artifactId, request.leafId, request.branchEntryIds, signal,()=>verifyAfterWorkerScan(request.queryId,signal,contract,currentCheckpoint.sequence,binding),()=>assertFinalGoalState(contract,currentCheckpoint.sequence))
+              assertEvidencePageSnapshotOwner(requestSnapshotOwner)
+            }
             if (currentCheckpoint.artifactId && binding.artifactIdentity !== currentCheckpoint.artifactId) {
-              evidencePageSnapshot = undefined
+              clearEvidencePageSnapshot(requestSnapshotOwner)
               throw new Error('Goal evidence artifact binding changed')
             }
             if (currentCheckpoint.leafId && !request.branchEntryIds.includes(currentCheckpoint.leafId)) {
-              evidencePageSnapshot = undefined
+              clearEvidencePageSnapshot(requestSnapshotOwner)
               throw new Error('Goal evidence branch rewind or leaf mismatch')
             }
             let expectedHashes:Record<string,string> = currentCheckpoint.entryHashes
             let scanOptions:GoalEvidenceScanOptions = {captureEvidenceSnapshot:true}
             if (!isRootRead) {
-              const snapshot = evidencePageSnapshot!
+              const snapshot = snapshotForRequest!
               if (snapshot.artifactIdentity !== binding.artifactIdentity || snapshot.entries.some((entry,index)=>request.branchEntryIds[index]!==entry.id)) {
-                evidencePageSnapshot = undefined
+                clearEvidencePageSnapshot(requestSnapshotOwner)
                 throw new Error('Goal evidence root branch is no longer an ancestor of the current branch')
               }
               expectedHashes = { ...currentCheckpoint.entryHashes }
               for (const entry of snapshot.entries) {
                 const existingHash = expectedHashes[entry.id]
                 if (existingHash && existingHash !== entry.sha256) {
-                  evidencePageSnapshot = undefined
+                  clearEvidencePageSnapshot(requestSnapshotOwner)
                   throw new Error('Goal evidence root source hash changed')
                 }
                 expectedHashes[entry.id] = entry.sha256
@@ -891,22 +917,23 @@ export function createGoalMemoryCapability(sessionId: string, workspaceId: strin
             let result:ArtifactScanResult
             try {
               result = await requestArtifactScan(binding, request.branchEntryIds, request.leafId, request.mode, request.query, request.offset, requestedLimit, signal, [], expectedHashes, false, true, scanOptions,()=>verifyAfterWorkerScan(request.queryId,signal,contract,currentCheckpoint.sequence,binding))
-            } catch(error) { evidencePageSnapshot=undefined; throw error }
-            assertActiveQuery(request.queryId, signal)
+            } catch(error) { clearEvidencePageSnapshot(requestSnapshotOwner); throw error }
+            assertEvidencePageSnapshotOwner(requestSnapshotOwner)
+            assertFinalGoalState(contract,currentCheckpoint.sequence)
             if (isRootRead && result.snapshotEntries && result.nextOffset !== undefined && result.status === 'ok') {
               const snapshot:GoalEvidencePageSnapshot = {
                 goalId:contract.id, revision:contract.revision, artifactIdentity:binding.artifactIdentity,
                 mode:request.mode, query:request.query, entries:result.snapshotEntries, nextOffset:result.nextOffset,
               }
               if (Buffer.byteLength(JSON.stringify(snapshot),'utf8') > GOAL_EVIDENCE_SNAPSHOT_BUDGET_BYTES) {
-                evidencePageSnapshot = undefined
+                clearEvidencePageSnapshot(requestSnapshotOwner)
                 throw new Error('Goal evidence pagination snapshot exceeds the 16 MiB main-process budget')
               }
               evidencePageSnapshot = snapshot
             } else if (!isRootRead && result.status === 'ok' && result.nextOffset !== undefined) {
               evidencePageSnapshot!.nextOffset = result.nextOffset
             } else {
-              evidencePageSnapshot = undefined
+              clearEvidencePageSnapshot(requestSnapshotOwner)
             }
             const publicEvidence = { ...result }
             delete publicEvidence.entryHashes
@@ -915,7 +942,7 @@ export function createGoalMemoryCapability(sessionId: string, workspaceId: strin
           } else throw new Error('未知 Goal capability operation')
         }
       }
-      assertActiveQuery(request.queryId, signal)
+      assertActiveQuery(queryId, signal)
       return response
     },
   }
