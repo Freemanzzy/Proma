@@ -1,6 +1,6 @@
 # Goal Memory（M0）功能 SSOT 草稿
 
-状态（2026-11-04，19:48继续后的实际独立验收）：**需要返工。产品9e6f7036的线程隔离、末端合同/sequence seal及已绑定快照保护已验证，但首次Evidence初始化beforeCommit仍缺private snapshot owner校验。唯一复审5的1P2经全新Astra判为A及补充条款的唯一阻塞，B/C/D/E通过各阶段要求；父采纳，不再以暂缓登记认为非阻塞。问题未修，额外第六轮及代码返工尚未获明确授权，不自动扩大。876测试与完整B5矩阵不抵消该项。默认关闭，仅功能分支，未合并/推送/制作安装包/安装，无新dev/provider/长压缩或M1。**
+状态（2026-11-04，21:15批准后的候选）：**首次Evidence绑定owner屏障已最小修复，父实际双Worker首chunk门控已负向转正，9项末端/16线程及完整矩阵、876测试、typecheck/scripts/五构建通过，17源hash前后一致。仅额外一轮定向复审6与全新只读计划验收尚待执行，不声称最终通过。默认关闭、仅功能分支，无新API/schema/自动重试/M1；未合并/推送/升版/打包/安装，无新dev/provider/长压缩，不重做旧清理。**
 
 ## 范围与启用
 
@@ -128,3 +128,17 @@ Codex CLI0.165.0以base personal/review-rules对9e6f7036完成唯一获准复审
 唯一阻塞是首次Evidence初始化：新root已替换private owner，旧root传给helper的beforeCommit只执行cap/goal/sequence seal，owner检查却在helper提交之后。正确源绑定、拒绝响应与显式重试恢复不等于满足初始化权威提交屏障；线程R2迟到绑定限制、最终R5-1初始化提交点及私有snapshot作用点要求不能由一般P2可backlog规则豁免。父对照源码及原生证据采纳，**更正此前暂缓在验收中的地位：P2未修且为阻塞，不是可宣告通过的非阻塞项。** 未夸大为错源、权限扩张、假完成或数据损坏。
 
 本次仅同步记录，不修改产品或启动第六轮。建议获明确许可后，将private snapshot owner核验纳入Evidence首次初始化同步beforeCommit，验证被替换旧root不提交、新root可绑定和分页，再按许可回归/定向复审及新独立验收。不加自动重试掩盖窗口，不放宽验收，不新建dev/provider/长压缩或重做旧清理。
+
+## 2026-11-04 首次Evidence绑定owner屏障修复（定向验证）
+
+用户于2026-11-04 21:15 GMT+8明确批准最小修复、回归、额外仅一轮定向复审6及全新只读验收。本轮在Evidence首次初始化传入的同步`beforeCommit`中，先调用`assertEvidencePageSnapshotOwner(requestSnapshotOwner)`，再执行已有`assertFinalGoalState(contract,currentCheckpoint.sequence)`；随后helper直接同步进入`commitCheckpointUpdate`，中间无await。helper返回后的既有owner检查保留，SQLite原CAS仍保留。未初始化context路径未改；没有API/schema/自动重试或其他重构。
+
+新增native双root回归从合同checkpoint CP0（sequence=0、artifactId空、水位空）直接开始，不先调用context预热。真实capability Worker扫描A/ALPHA与B/BETA各自到达main source-stat gate后，先释放已被B替换的A，断言其拒绝且checkpoint仍CP0/无binding/无水位；再释放当前B，断言B成功绑定、返回`b0`和`nextOffset=1`，继续读取offset=1返回`b1`。最终checkpoint sequence=1、modelSequence=0，watermark与source identity正确，active/queued Worker数归零。原有owner replacement、迟到返回/失败清理及合同/sequence即时/微任务seal、跨host sequence分页断言均保留。
+
+本轮`bun test ./apps/electron/src/main/lib/personal-goal-memory.test.ts` → 2 pass、0 fail；全仓`bun run typecheck`通过；`git diff --check`通过。未运行全仓suite/矩阵、父harness、personal scripts/构建、复审6、全新只读验收、dev/provider/模型/长压缩；未提交/合并/推送/打包/安装。最终审查与验收仍由父会话执行。
+
+### 父独立验证（同日，复审6前）
+
+在生产esbuild core/伴随Worker的冻结候选上，两个真实Worker在readStream首chunk实际门控；先放被替换旧A，拒绝且sequence仍0/空绑定，再放当前B，首次成功返回BETA b0，offset1返回b1，最终hostseq1/modelseq0、identity与完整watermark正确、4线程退出。相同增强探针对冻结9e6旧源确因旧A推进seq0→1失败，前后对照保留。不是自动重试，未用context预先绑定掩盖CP0边界。
+
+B6全部通过：9项末端/快照/首次绑定，原16线程/故障/无来源，原六项/query/28页checkpoint/revoke/Evidence两页/host10/50k，SDK/context/budget/config-path/defaultoff，30×10装载、15证据、21hook、4mutation（control先过/断言失败killed），876 pass/0 fail/2328 expect/146 files、typecheck、personal scripts、五构建与Worker产物；17源码/构建输入before/after一致。此后仅按许可做一次定向6和新只读验收，无新功能模型实验或发布动作；旧未测限制和实验版本归属保持。

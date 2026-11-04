@@ -884,7 +884,7 @@ export function createGoalMemoryCapability(sessionId: string, workspaceId: strin
             }
             let currentCheckpoint = checkpoint
             if (!currentCheckpoint.artifactId) {
-              currentCheckpoint = await initializeGoalArtifactBinding(contract, currentCheckpoint, binding, binding.artifactId, request.leafId, request.branchEntryIds, signal,()=>verifyAfterWorkerScan(request.queryId,signal,contract,currentCheckpoint.sequence,binding),()=>assertFinalGoalState(contract,currentCheckpoint.sequence))
+              currentCheckpoint = await initializeGoalArtifactBinding(contract, currentCheckpoint, binding, binding.artifactId, request.leafId, request.branchEntryIds, signal,()=>verifyAfterWorkerScan(request.queryId,signal,contract,currentCheckpoint.sequence,binding),()=>{assertEvidencePageSnapshotOwner(requestSnapshotOwner);assertFinalGoalState(contract,currentCheckpoint.sequence)})
               assertEvidencePageSnapshotOwner(requestSnapshotOwner)
             }
             if (currentCheckpoint.artifactId && binding.artifactIdentity !== currentCheckpoint.artifactId) {

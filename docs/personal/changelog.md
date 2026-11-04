@@ -2259,3 +2259,11 @@
 - **裁决及采纳**：A未通过，B/C/D/E通过各自当前阶段要求，总裁决需要返工。唯一阻塞为首次Evidence初始化beforeCommit未核验private snapshot owner，helper提交后才检查，导致已被替换旧root仍推进首次binding/host seq、新root也被迫拒绝。父核对源码与真实双Worker负向后采纳；正确binding、显式重试恢复和P2可登记backlog的一般流程，不能豁免线程R2/最终R5-1及私有snapshot提交屏障。更正此前暂缓在验收中的地位为阻塞未修，不自行放宽硬条款；未声称错源、权限扩张、假完成或数据损坏。
 - **保留通过与限制**：线程隔离、原复审4末端窗口、已绑定快照交接及876全仓/原完整矩阵的通过事实保留，但不覆盖当前有效失败；独立worker build/watch组合和scripts-only变化已披露，未测完整GUI/实际watch或包等边界保持，旧实验不冒充当前实测。
 - **停止边界**：本次只同步四维护文档；不改产品、不发写者、不自动追加第六轮。19:48按当时明确的只读续跑范围执行，未扩为修复/第六轮/dev/provider/合并推送打包安装许可。建议用户明确批准最小owner屏障修复、回归、仅额外一次定向6及新独立验收，或暂停保留当前分支与证据。维护规则与长期协作记忆无需变更。
+
+## 2026-11-04: Goal Memory M0 首次绑定owner提交屏障修复与父回归
+
+- **明确授权**：21:15用户批准此前具体提出的最小修复、回归、额外仅一轮定向复审6及全新只读验收。原验收P2是硬条款唯一阻塞，不再因显式恢复可用而豁免。不自动第七轮或扩到dev/provider/长压缩/M1/合并推送打包安装，旧清理与备份保持。
+- **最小修复**：仅Evidence首次初始化的同步beforeCommit增加private snapshot owner核验，再执行原cap/query/signal/goal id/revision/hash/sequence seal，直接同步进入SQLite CAS，helper返回后检查保留。未改context初始化或API/schema，未新增自动重试/重构。原Luna唯一写者只改core/test/GoalSSOT；native新增CP0双root source-stat门控断言，定向2pass/typecheck/diff通过。
+- **父独立对照**：同一增强探针对9e6冻结旧bundle有效失败（双首chunk门控、旧A推进seq0→1），对新候选则旧A拒绝且CP0无binding/水位，新B首次即正确返回b0/offset1 b1，最终hostseq1/modelseq0、正确identity/完整水位、4线程退出。真实Worker读取门控，不是伪造DTO或先context预热；没有产品自动重试。旧B5负向与恢复诊断原样保留。
+- **验证**：新9末端/快照/初绑、原16线程与全部旧矩阵，30×10装载/15证据/21hook/4mutation，876 pass/0 fail/2328 expect/146 files、typecheck、personal scripts、五构建/Worker产物、diff均通过；17源/构建manifest前后相同。300装载不冒充模型压缩，旧三长/两短不冒充本候选真实provider；完整GUI/threshold/overflow/watch/安装包等未测限制不变。
+- **记录与下一步**：同步PERSONAL、backlog和GoalSSOT当前候选状态，保留原独立不通过历史；额外唯一复审6及新只读验收尚待实际执行，测试通过不等于验收。不改维护规则或长期协作记忆，版本/依赖/lock不变；仅功能分支提交，不合并/推送/打包/安装。

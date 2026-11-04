@@ -370,6 +370,60 @@ test('Goal Memory contracts stay immutable, CAS rejects stale state, pack never 
     await runEvidenceRootOwnershipRace({name:'stale-continuation',staleOffset:1})
     await runEvidenceRootOwnershipRace({name:'stale-root-return',staleOffset:0})
     await runEvidenceRootOwnershipRace({name:'stale-root-failure',staleOffset:0,failOldStat:true})
+    const runFirstBindOwnerRace=async()=>{
+      const sessionId='first-bind-owner-race';const directory=join(process.env.HOME,sessionId);mkdirSync(directory,{recursive:true})
+      const ids=['u0','a1','b0','b1','leaf'];const texts=['ALPHA first','ALPHA second','BETA first','BETA second','ALPHA BETA last'];const file=join(directory,'source.jsonl')
+      const sourceRows=ids.map((id,index)=>({type:'message',id,parentId:index?ids[index-1]:null,message:{role:index?'assistant':'user',content:[{type:'text',text:texts[index]}]}}))
+      writeFileSync(file,sourceRows.map((row)=>JSON.stringify(row)).join('\\n')+'\\n')
+      const contract=goal.createGoalContract({sessionId,workspaceId:'w',expectedRevision:0,originalText:'A superseded first binding must not advance the host checkpoint.',scope:[],nonGoals:[],hardConstraints:['latest root owns initial binding'],acceptance:['BETA b0/b1'],userMessageRef:'first-bind-owner-user'})
+      const binding={sessionId,workspaceId:'w',artifactId:'sdk-first-bind-owner',artifactIdentity:'first-bind-owner-identity',path:realpathSync(file),sessionsDirectory:realpathSync(directory)}
+      const owner=goal.createGoalMemoryCapability(sessionId,'w',async()=>binding)
+      const identity={ownerId:owner.ownerId,sessionId,workspaceId:'w',queryId:'first-bind-owner-query'}
+      const initial=goal.getGoalCheckpoint(contract.id,contract.revision)
+      assert.equal(initial.sequence,0);assert.equal(initial.artifactId,'');assert.equal(initial.entryWatermark.length,0)
+      const read=(query,offset=0)=>owner.request({...identity,operation:'evidence_read',mode:'keyword',query,offset,limit:1,branchEntryIds:ids,leafId:'leaf'})
+      const originalStat=fsp.stat;let armed=false;let intercepted=0
+      const release=[];const entered=[];const resolveEntered=[]
+      for(let index=0;index<2;index++){let signalEntered;entered.push(new Promise((resolve)=>{signalEntered=resolve}));resolveEntered.push(signalEntered)}
+      fsp.stat=async function(...args){const stat=await originalStat.apply(this,args);if(armed&&args[0]===binding.path&&intercepted<2){const slot=intercepted++;resolveEntered[slot]();await new Promise((resolve)=>{release[slot]=resolve})}return stat}
+      syncBuiltinESMExports()
+      const waitForEntered=async(index)=>{let timer;try{await Promise.race([entered[index],new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('first binding worker stat gate not reached')),4000)})])}finally{if(timer)clearTimeout(timer)}}
+      try{
+        armed=true
+        const oldRoot=read('ALPHA').then((value)=>({accepted:true,value}),error=>({accepted:false,error:String(error)}))
+        await waitForEntered(0)
+        const newRoot=read('BETA').then((value)=>({accepted:true,value}),error=>({accepted:false,error:String(error)}))
+        await waitForEntered(1)
+        const whileBothGated=goal.getGoalCheckpoint(contract.id,contract.revision)
+        assert.equal(whileBothGated.sequence,0,'两个未绑定root scans都在gate上时checkpoint应保持CP0')
+        assert.equal(whileBothGated.artifactId,'')
+        release[0]()
+        const oldOutcome=await oldRoot
+        assert.equal(oldOutcome.accepted,false,'superseded A must fail before first binding commit')
+        const afterOld=goal.getGoalCheckpoint(contract.id,contract.revision)
+        assert.equal(afterOld.sequence,0,'old A release must leave host sequence at CP0')
+        assert.equal(afterOld.artifactId,'','old A release must leave source binding empty')
+        assert.equal(afterOld.entryWatermark.length,0)
+        release[1]()
+        const newOutcome=await newRoot
+        assert.equal(newOutcome.accepted,true,'current B root must initialize successfully')
+        assert.equal(newOutcome.value.evidence.status,'ok')
+        assert.equal(newOutcome.value.evidence.nextOffset,1)
+        assert.equal(JSON.parse(newOutcome.value.evidence.lines[0]).id,'b0')
+        const betaPage=await read('BETA',1)
+        assert.equal(betaPage.evidence.status,'ok')
+        assert.equal(JSON.parse(betaPage.evidence.lines[0]).id,'b1')
+        const finalCheckpoint=goal.getGoalCheckpoint(contract.id,contract.revision)
+        assert.equal(finalCheckpoint.sequence,1)
+        assert.equal(finalCheckpoint.modelSequence,0)
+        assert.equal(finalCheckpoint.artifactId,binding.artifactIdentity)
+        assert.equal(finalCheckpoint.entryWatermark.length,ids.length)
+        assert.equal(intercepted,2,'both initial root scans reached the gated main source stat')
+        assert.equal(getGoalArtifactWorkerDiagnostics().activeWorkers,0)
+        assert.equal(getGoalArtifactWorkerDiagnostics().queuedJobs,0)
+      }finally{armed=false;for(const releaseGate of release)releaseGate?.();fsp.stat=originalStat;syncBuiltinESMExports();owner.revoke()}
+    }
+    await runFirstBindOwnerRace()
     goal.createGoalContract({sessionId:'worker-source-drift-session',workspaceId:'w',expectedRevision:0,originalText:'worker结果返回后必须重新验证artifact binding',scope:[],nonGoals:[],hardConstraints:['源变化不得提交/刷新快照'],acceptance:['拒绝迟到结果'],userMessageRef:'worker-source-drift-user'})
     const workerSourceDriftBinding={...originalBinding,sessionId:'worker-source-drift-session',artifactId:'worker-source-drift-artifact',artifactIdentity:'worker-source-drift:1:1'}
     const workerSourceDriftChanged={...workerSourceDriftBinding,artifactIdentity:'worker-source-drift:2:2'}
