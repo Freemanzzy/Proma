@@ -2245,3 +2245,10 @@
 - **完整检查**：旧六项/query/28页checkpoint/revoke/Evidence两页/host10/50k、实际SDK/path/budget、30×10装载、15证据、21hook/4mutation通过；876 pass/0 fail/2328 expect/146 files、typecheck/personal scripts/五构建及worker产物/diff通过，17源/构建hash前后一致。私有mutation只按入场身份捕获变量适配文本锚点，control先过且由断言失败计killed。
 - **状态及限制**：额外仅一轮复审5及全新只读计划验收尚待执行；本提交不标为已审查通过或可合入。未测完整GUI/大历史UI负载/真实threshold或overflow故障/图片与provider共存/实际watch及安装包/长期语义；SQLite同步段不可被Promise硬抢占。旧真实实验仍分版本，无新live材料或旧清理动作，不改版本/依赖/lock/SDK/AGENTS，不合并/推送/打包/安装。
 - **文档与记忆**：同步PERSONAL、backlog及功能SSOT；维护规则无需改，普通验证流水保留私有审计材料，不升级长期协作记忆。
+
+## 2026-11-04: Goal Memory M0 复审5记录与首次并发绑定暂缓
+
+- **实际审查**：唯一获准修复复审5已完成，产品9e6f7036，CLI0.165.0/base personal/review-rules，325秒、源未变、报告20261104-164552-base-personal。1项P2，不是无缺陷通过。
+- **独立核实**：首次CPseq0时，两个root并发初始化，旧A在被新B替换后仍提交正确host绑定并推进seq1；A因owner失效、B因seq变化双拒绝。父真实Worker双首chunk gate确认，断言失败控制保留。显式重试则精确回读b0/b1、绑定与watermark正确、revision不变、modelSequence0、active状态，所有Worker退出，无provider；没有新增产品自动重试。
+- **处理：P2暂缓修复**。按P2可登记backlog的裁决边界，本轮不改产品或自动追加第六轮。当前确认为低频初始化并发的可恢复失败，不是已证明的错源/权限扩张/数据损坏或假完成；保留真实缺陷，不写成已修复。候选最小修复为初始化beforeCommit同步加snapshot owner校验，未实施。全新只读计划验收独立判断是否阻塞原A/B/C/D/E及补充；若阻塞则停止请用户决定，不能以父裁决替代验收。
+- **状态**：仅同步PERSONAL、backlog、功能SSOT与本记录，产品仍9e6f7036。876全仓等既有通过记录不能抵消已知项；不再跑代码审查/模型/dev，不合并/推送/打包/安装，维护规则与长期记忆无需更新。
