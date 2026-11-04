@@ -2219,3 +2219,13 @@
 - **A-1采纳，未自行放宽**：计划A第16行要求“不在主线程扫描大历史”。scanBoundArtifact的逐行JSON解析、关键词遍历、hash与索引仍在main capability调用线程中；异步流式I/O满足有界读取，却不能代替线程隔离。上位研究另有“不在主线程同步读数百MB”的较弱表述，父不据此擅改已经批准的更严格条款。此为执行位置不符，不是已证明UI卡顿；50k容量/水位计时不作UI或线程隔离证明。后续需用户确认按严格条款移出扫描CPU工作（主进程保留授权/身份校验/权威写入），或明确调整验收标准。
 - **E-1采纳并补记**：本次只更新功能SSOT、PERSONAL、backlog和本记录，登记已完成的复审3及实际独立验收结论，不提前标成通过；产品源码保持903fb8eb。纯记录补齐不要求再跑Codex，不因此获得第四轮代码复审或新模型实验许可。
 - **保留证据与边界**：当前871/0/2322及SDK本地转换、配置根、预算和全部矩阵仍有效，但不抵消A的计划差距；旧三次长压缩与两次短run仍按旧源快照分开。既有清理/备份不重做，功能默认关闭。未改AGENTS/版本/lock/依赖/SDK，未合并、推送、制作安装包或安装。任务暂停于用户决定，不宣称M0全部验收完成。
+
+## 2026-11-04: Goal Memory M0 历史扫描线程隔离与父回归
+
+- **授权与目标**：用户09:33确认严格按原A条款返工，补真实worker、全矩阵、额外仅一轮修复复审4及全新只读验收；没有降低条款或增加M1。原Luna为唯一代码写者，完成后父经wait收敛再冻结验证。
+- **实现**：扫描/JSON解析/字面关键词/hash/索引和原文读取移入个人scan/protocol/worker/client模块，禁止main调用扫描或失败fallback。main仍掌握来源授权/会话与query/合同revision/sequence/CAS，worker后复核binding与文件stat再提交/ack或更新快照。2活跃/8排队/55s作业deadline，取消、畸形/错配消息、error/exit0、启动失败均终止线程并拒绝迟到结果。worker只读，不依赖数据库、Electron或SDK。
+- **必要上游触点**：在原六接线文件之外，本次修改package scripts、dev-bundle-readiness及electron-builder.yml精确worker asarUnpack项；新增对应测试。build/main与watch/main组合独立worker脚本，而非优先建议的命名多入口；保留原main outfile和固定worker产物/readiness，开发时新增watcher分支，本轮不实际运行watch。未改版本、依赖、lock、SDK、planning/schema或AGENTS。
+- **父独立证据**：旧903精确原文/hash正确但main解析6次、历史hash7次、Worker0的负向控制已保留。修后真实Worker threadId>0、main原始行parse/hash均0、原文/hash正确且线程退出；另13类原生Worker故障/取消/源变更/同跨owner并发/非法与错配响应通过，checkpoint无迟到变化。最初Bun私有CJS bundle将__filename改为源TS路径，造成测试伴随worker缺失；保留失败，改用与生产一致的esbuild编译核心/worker，不修改产品来适配测试。
+- **完整回归**：旧6/query/28页checkpoint/revoke/Evidence两页/host10/50k及SDK/path/budget全部通过；30×10装载、15证据、21hook、4类mutation重跑通过，control先过且突变因断言失败。全仓876 pass/0 fail/2328 assertions/146 files，typecheck、personal scripts、main/agent-runtime/preload/renderer/web-preload及worker产物、diff check通过；17源/构建输入hash前后一致。30×10不是实际模型压缩。
+- **边界与状态**：仅临时HOME本地验证，无新dev/provider或长压缩，不重做旧fixture清理。旧三长及两短模型实验仍分版本，不能用作本批实测。真实自动threshold/overflow故障、图片/provider共存、大历史UI负载、实际watch时序/安装包及长期语义仍未测，同步SQLite段不受Promise硬抢占。复审4与全新只读计划验收尚待执行；不称整体通过，不合并/推送/制作安装包/安装。
+- **文档与记忆**：同步功能SSOT、PERSONAL及backlog；共同维护规则无需变更，普通验证流水留私有审计材料，不写入长期协作记忆。

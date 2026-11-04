@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from '
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { build as esbuildBuild } from 'esbuild'
 
 const modulePath = join(import.meta.dir, 'personal-goal-memory.ts')
 const repoRoot = dirname(dirname(dirname(dirname(dirname(import.meta.dir)))))
@@ -17,6 +18,7 @@ test('Goal Memory contracts stay immutable, CAS rejects stale state, pack never 
   const outputPath = join(home, 'verify-goal-memory.mjs')
   const source = `
     import assert from 'node:assert/strict'
+    import { createHash } from 'node:crypto'
     import { DatabaseSync } from 'node:sqlite'
     import { mkdirSync, writeFileSync, existsSync, realpathSync, readFileSync } from 'node:fs'
     import { join } from 'node:path'
@@ -27,6 +29,8 @@ test('Goal Memory contracts stay immutable, CAS rejects stale state, pack never 
     import { serializePiToolResultPayload } from ${JSON.stringify(join(import.meta.dir, 'adapters/pi-tool-result-json.ts'))}
     import { AGENT_RUNTIME_METHODS } from ${JSON.stringify(join(repoRoot, 'packages/shared/src/types/agent-runtime.ts'))}
     import { createAgentRuntimeRequest } from ${JSON.stringify(join(repoRoot, 'packages/shared/src/utils/agent-runtime.ts'))}
+    import { GoalArtifactWorkerRunner, getGoalArtifactWorkerDiagnostics } from ${JSON.stringify(join(import.meta.dir, 'personal-goal-artifact-worker-client.ts'))}
+    assert.deepEqual(getGoalArtifactWorkerDiagnostics(),{created:false,activeWorkers:0,queuedJobs:0},'import alone不得spawn worker')
     const root = join(process.env.HOME, '.proma-dev', 'goal-memory')
     const markerUser={role:'user',content:'<goal-memory-task-data>这是用户原文，不应删除',timestamp:1}
     const packed=goal.injectGoalTaskData([markerUser],'目标恢复合同')
@@ -73,6 +77,7 @@ test('Goal Memory contracts stay immutable, CAS rejects stale state, pack never 
     assert.equal(existsSync(root), false)
     process.env.PROMA_PERSONAL_GOAL_MEMORY = '1'
     const c1 = goal.createGoalContract({sessionId:'s', workspaceId:'w', expectedRevision:0, originalText:'保留原文；先验证，再决定', scope:['当前仓库'], nonGoals:['不发布'], hardConstraints:['不删数据','须先询问'], acceptance:['测试通过'], userMessageRef:'msg-1'})
+    assert.deepEqual(getGoalArtifactWorkerDiagnostics(),{created:false,activeWorkers:0,queuedJobs:0},'合同创建/读写没有历史扫描时不得spawn worker')
     assert.equal(c1.revision, 1)
     assert.equal(goal.getGoalContract('s').hash, c1.hash)
     assert.throws(() => goal.createGoalContract({sessionId:'s', workspaceId:'w', expectedRevision:0, originalText:'stale', scope:[], nonGoals:[], hardConstraints:[], acceptance:[], userMessageRef:'msg-stale'}), /CAS 冲突/)
@@ -217,14 +222,29 @@ test('Goal Memory contracts stay immutable, CAS rejects stale state, pack never 
     }
     const artifactPath = join(process.env.HOME, 'artifact.jsonl')
     const branchEntryIds = Array.from({length:300}, (_,i) => 'entry-' + i)
-    const rows = branchEntryIds.map((id,i) => JSON.stringify({id,parentId:i?branchEntryIds[i-1]:null,type:'message',message:{role:i%2?'assistant':'user',content:i===0?'旧证据 '.repeat(6000)+'TAIL_SENTINEL_OLD':i===5?[{type:'toolCall',id:'call-5',name:'search',arguments:{query:'蓝色关键词'}}]:i===6?[{type:'toolResult',toolCallId:'call-5',content:'工具回执'}]:i===7?[{type:'toolCall',id:'call-7',name:'shell',arguments:{command:'git status ARGUMENT_SENTINEL',path:'/tmp/ARGUMENT_PATH_SENTINEL',values:Array.from({length:4002},(_,index)=>index===4000?'ARRAY_TAIL_SENTINEL':'x')}}]:'历史证据 '.repeat(1400)} }))
+    const mainThreadSentinel='PROMA_GOAL_ARTIFACT_MAIN_THREAD_SENTINEL'
+    const rows = branchEntryIds.map((id,i) => JSON.stringify({id,parentId:i?branchEntryIds[i-1]:null,type:'message',message:{role:i%2?'assistant':'user',content:i===0?'旧证据 '.repeat(6000)+'TAIL_SENTINEL_OLD '+mainThreadSentinel:i===5?[{type:'toolCall',id:'call-5',name:'search',arguments:{query:'蓝色关键词'}}]:i===6?[{type:'toolResult',toolCallId:'call-5',content:'工具回执'}]:i===7?[{type:'toolCall',id:'call-7',name:'shell',arguments:{command:'git status ARGUMENT_SENTINEL',path:'/tmp/ARGUMENT_PATH_SENTINEL',values:Array.from({length:4002},(_,index)=>index===4000?'ARRAY_TAIL_SENTINEL':'x')}}]:'历史证据 '.repeat(1400)} }))
     const entries=rows.join('\\n')+'\\n'
     writeFileSync(artifactPath, entries)
     goal.createGoalContract({sessionId:'artifact-session',workspaceId:'w',expectedRevision:0,originalText:'读取当轮原文',scope:['current-turn'],nonGoals:[],hardConstraints:['不得回溯其他branch'],acceptance:['精确entry读取'],userMessageRef:'artifact-user'})
     let hostBinding = {sessionId:'artifact-session',workspaceId:'w',artifactId:'artifact-sdk-session',artifactIdentity:'artifact-sdk-session:1:1',path:realpathSync(artifactPath),sessionsDirectory:realpathSync(process.env.HOME)}
     const artifactOwner = goal.createGoalMemoryCapability('artifact-session','w',async () => hostBinding)
     const artifactIdentity = {ownerId:artifactOwner.ownerId,sessionId:'artifact-session',workspaceId:'w',queryId:'query-artifact'}
-    const recorded = await artifactOwner.request({...artifactIdentity,operation:'turn_end',artifactId:hostBinding.artifactId,leafId:'entry-299',entryIds:['entry-299'],branchEntryIds})
+    const nativeJsonParse=JSON.parse
+    let mainThreadSentinelParseCount=0
+    JSON.parse=function(value,...args){if(typeof value==='string'&&value.includes(mainThreadSentinel))mainThreadSentinelParseCount++;return nativeJsonParse.call(JSON,value,...args)}
+    let recorded
+    try { recorded = await artifactOwner.request({...artifactIdentity,operation:'turn_end',artifactId:hostBinding.artifactId,leafId:'entry-299',entryIds:['entry-299'],branchEntryIds}) }
+    finally { JSON.parse=nativeJsonParse }
+    assert.equal(mainThreadSentinelParseCount,0,'Goal artifact JSON.parse必须不在main thread执行，当前探针记录'+mainThreadSentinelParseCount+'次')
+    const productionWorkerRunner=new GoalArtifactWorkerRunner({workerPath:join(process.env.HOME,'personal-goal-artifact-worker.cjs'),maxActiveWorkers:1,maxQueuedJobs:1})
+    const workerExecution=await productionWorkerRunner.run({binding:{path:hostBinding.path,sessionsDirectory:hostBinding.sessionsDirectory},branchEntryIds:['entry-0'],leafId:'entry-0',mode:'entry',query:'entry-0',offset:0,limit:1,requiredIds:['entry-0'],expectedHashes:{},hashOnly:false,allowUnpersistedSuffix:false,options:{captureEvidenceSnapshot:true}})
+    assert.ok(workerExecution.workerThreadId>0,'生产worker返回真实Node worker_threads.threadId')
+    assert.equal(workerExecution.result.status,'ok')
+    assert.deepEqual(workerExecution.result.lines,[rows[0]],'生产worker返回精确原始JSONL行')
+    assert.equal(workerExecution.result.entryHashes['entry-0'],createHash('sha256').update(rows[0]).digest('hex'),'生产worker返回精确source hash')
+    assert.equal(productionWorkerRunner.diagnostics().activeWorkers,0)
+    assert.equal(productionWorkerRunner.diagnostics().queuedJobs,0)
     assert.equal(recorded.checkpoint.counts.entryWatermark,300)
     assert.equal('entryWatermark' in recorded.checkpoint,false)
     assert.equal('entryHashes' in recorded.checkpoint,false)
@@ -275,6 +295,64 @@ test('Goal Memory contracts stay immutable, CAS rejects stale state, pack never 
     const firstEvidenceCheckpoint=goal.getGoalCheckpoint(goal.getGoalContract('first-evidence-session').id,1)
     assert.equal(firstEvidenceCheckpoint.artifactId,firstEvidenceBinding.artifactIdentity)
     assert.equal(firstEvidenceCheckpoint.entryWatermark.length,300)
+    goal.createGoalContract({sessionId:'worker-source-drift-session',workspaceId:'w',expectedRevision:0,originalText:'worker结果返回后必须重新验证artifact binding',scope:[],nonGoals:[],hardConstraints:['源变化不得提交/刷新快照'],acceptance:['拒绝迟到结果'],userMessageRef:'worker-source-drift-user'})
+    const workerSourceDriftBinding={...originalBinding,sessionId:'worker-source-drift-session',artifactId:'worker-source-drift-artifact',artifactIdentity:'worker-source-drift:1:1'}
+    const workerSourceDriftChanged={...workerSourceDriftBinding,artifactIdentity:'worker-source-drift:2:2'}
+    const workerSourceDriftResponses=[]
+    const workerSourceDriftOwner=goal.createGoalMemoryCapability('worker-source-drift-session','w',async()=>workerSourceDriftResponses.length?workerSourceDriftResponses.shift():workerSourceDriftBinding)
+    const workerSourceDriftIdentity={ownerId:workerSourceDriftOwner.ownerId,sessionId:'worker-source-drift-session',workspaceId:'w',queryId:'worker-source-drift-query'}
+    const workerSourceDriftRoot={...workerSourceDriftIdentity,operation:'context',artifactId:workerSourceDriftBinding.artifactId,leafId:'entry-299',branchEntryIds}
+    assert.ok((await workerSourceDriftOwner.request(workerSourceDriftRoot)).context)
+    const workerSourceDriftBefore=goal.getGoalCheckpoint(goal.getGoalContract('worker-source-drift-session','w').id,1)
+    workerSourceDriftResponses.push(workerSourceDriftBinding,workerSourceDriftChanged)
+    await assert.rejects(()=>workerSourceDriftOwner.request({...workerSourceDriftIdentity,operation:'evidence_read',mode:'keyword',query:'历史证据',offset:0,limit:1,branchEntryIds,leafId:'entry-299'}),/binding changed during worker scan/)
+    const workerSourceDriftAfter=goal.getGoalCheckpoint(goal.getGoalContract('worker-source-drift-session','w').id,1)
+    assert.equal(workerSourceDriftAfter.sequence,workerSourceDriftBefore.sequence,'worker source漂移不得迟到写checkpoint')
+    assert.equal(workerSourceDriftAfter.artifactId,workerSourceDriftBefore.artifactId)
+    assert.equal(workerSourceDriftAfter.entryWatermark.length,workerSourceDriftBefore.entryWatermark.length)
+    await assert.rejects(()=>workerSourceDriftOwner.request({...workerSourceDriftIdentity,operation:'evidence_read',mode:'keyword',query:'历史证据',offset:1,limit:1,branchEntryIds,leafId:'entry-299'}),/snapshot unavailable/,'source漂移不得刷新root分页快照')
+    const workerFileDriftDir=join(process.env.HOME,'worker-file-drift');mkdirSync(workerFileDriftDir,{recursive:true})
+    const workerFileDriftPath=join(workerFileDriftDir,'session.jsonl')
+    const workerFileDriftIds=['file-drift-0','file-drift-1']
+    const workerFileDriftOriginal=workerFileDriftIds.map((id,index)=>JSON.stringify({id,parentId:index?workerFileDriftIds[index-1]:null,type:'message',message:{content:'FILE_DRIFT_SENTINEL '+id}})).join('\\n')+'\\n'
+    writeFileSync(workerFileDriftPath,workerFileDriftOriginal)
+    const workerFileDriftSession='worker-file-drift-session'
+    const workerFileDriftContract=goal.createGoalContract({sessionId:workerFileDriftSession,workspaceId:'w',expectedRevision:0,originalText:'复核worker期间源文件变化',scope:[],nonGoals:[],hardConstraints:['不能基于旧快照写入'],acceptance:['source fingerprint变更拒绝'],userMessageRef:'worker-file-drift-user'})
+    const workerFileDriftBinding={sessionId:workerFileDriftSession,workspaceId:'w',artifactId:'worker-file-drift-artifact',artifactIdentity:'worker-file-drift:1:1',path:realpathSync(workerFileDriftPath),sessionsDirectory:realpathSync(workerFileDriftDir)}
+    let mutateOnSecondResolve=false;let workerFileDriftResolveCount=0
+    const workerFileDriftOwner=goal.createGoalMemoryCapability(workerFileDriftSession,'w',async()=>{
+      if(mutateOnSecondResolve&&++workerFileDriftResolveCount===2)writeFileSync(workerFileDriftPath,workerFileDriftOriginal+JSON.stringify({id:'file-drift-external',parentId:'file-drift-1',type:'message',message:{content:'changed after worker result'}})+'\\n')
+      return workerFileDriftBinding
+    })
+    const workerFileDriftIdentity={ownerId:workerFileDriftOwner.ownerId,sessionId:workerFileDriftSession,workspaceId:'w',queryId:'worker-file-drift-query'}
+    assert.ok((await workerFileDriftOwner.request({...workerFileDriftIdentity,operation:'context',artifactId:workerFileDriftBinding.artifactId,leafId:workerFileDriftIds[1],branchEntryIds:workerFileDriftIds})).context)
+    const workerFileDriftBefore=goal.getGoalCheckpoint(workerFileDriftContract.id,1)
+    mutateOnSecondResolve=true
+    await assert.rejects(()=>workerFileDriftOwner.request({...workerFileDriftIdentity,operation:'evidence_read',mode:'keyword',query:'FILE_DRIFT_SENTINEL',offset:0,limit:1,branchEntryIds:workerFileDriftIds,leafId:workerFileDriftIds[1]}),/source changed immediately after worker scan/)
+    assert.equal(goal.getGoalCheckpoint(workerFileDriftContract.id,1).sequence,workerFileDriftBefore.sequence,'worker完成后文件变更不得迟到提交')
+    await assert.rejects(()=>workerFileDriftOwner.request({...workerFileDriftIdentity,operation:'evidence_read',mode:'keyword',query:'FILE_DRIFT_SENTINEL',offset:1,limit:1,branchEntryIds:workerFileDriftIds,leafId:workerFileDriftIds[1]}),/snapshot unavailable/,'source fingerprint失败不得刷新分页快照')
+    const makeConcurrentOwner=(name)=>{
+      const directory=join(process.env.HOME,'worker-owner-'+name);mkdirSync(directory,{recursive:true})
+      const ids=['worker-'+name+'-0','worker-'+name+'-1']
+      const artifact=join(directory,'session.jsonl')
+      writeFileSync(artifact,ids.map((id,index)=>JSON.stringify({id,parentId:index?ids[index-1]:null,type:'message',message:{role:'user',content:name+' '+id}})).join('\\n')+'\\n')
+      const sessionId='worker-owner-'+name
+      const contract=goal.createGoalContract({sessionId,workspaceId:'w',expectedRevision:0,originalText:'worker owner isolation '+name,scope:[],nonGoals:[],hardConstraints:['不得串owner状态'],acceptance:['水位独立'],userMessageRef:'worker-owner-user-'+name})
+      const binding={sessionId,workspaceId:'w',artifactId:'sdk-'+name,artifactIdentity:'identity-'+name,path:realpathSync(artifact),sessionsDirectory:realpathSync(directory)}
+      const capability=goal.createGoalMemoryCapability(sessionId,'w',async()=>binding)
+      return {sessionId,contract,binding,ids,capability,identity:{ownerId:capability.ownerId,sessionId,workspaceId:'w',queryId:'query-'+name}}
+    }
+    const concurrentOwnerA=makeConcurrentOwner('a');const concurrentOwnerB=makeConcurrentOwner('b')
+    const [concurrentResultA,concurrentResultB]=await Promise.all([concurrentOwnerA.capability.request({...concurrentOwnerA.identity,operation:'turn_end',artifactId:concurrentOwnerA.binding.artifactId,leafId:concurrentOwnerA.ids[1],entryIds:[concurrentOwnerA.ids[1]],branchEntryIds:concurrentOwnerA.ids}),concurrentOwnerB.capability.request({...concurrentOwnerB.identity,operation:'turn_end',artifactId:concurrentOwnerB.binding.artifactId,leafId:concurrentOwnerB.ids[1],entryIds:[concurrentOwnerB.ids[1]],branchEntryIds:concurrentOwnerB.ids})])
+    assert.equal(concurrentResultA.checkpoint.counts.entryWatermark,2)
+    assert.equal(concurrentResultB.checkpoint.counts.entryWatermark,2)
+    assert.deepEqual(Object.keys(goal.getGoalCheckpoint(concurrentOwnerA.contract.id,1).entryHashes),concurrentOwnerA.ids)
+    assert.deepEqual(Object.keys(goal.getGoalCheckpoint(concurrentOwnerB.contract.id,1).entryHashes),concurrentOwnerB.ids)
+    const sameOwnerConcurrent=makeConcurrentOwner('same')
+    const sameOwnerRequests=await Promise.allSettled([0,1].map(()=>sameOwnerConcurrent.capability.request({...sameOwnerConcurrent.identity,operation:'turn_end',artifactId:sameOwnerConcurrent.binding.artifactId,leafId:sameOwnerConcurrent.ids[1],entryIds:[sameOwnerConcurrent.ids[1]],branchEntryIds:sameOwnerConcurrent.ids})))
+    assert.equal(sameOwnerRequests.filter((item)=>item.status==='fulfilled').length,1)
+    assert.equal(sameOwnerRequests.filter((item)=>item.status==='rejected').length,1)
+    assert.equal(goal.getGoalCheckpoint(sameOwnerConcurrent.contract.id,1).sequence,1,'同owner并发只允许一个基于旧sequence的worker结果提交')
     const largeResultPath=join(process.env.HOME,'large-tool-result.jsonl')
     const largeSourceLine=JSON.stringify({id:'source-entry',parentId:null,type:'message',message:{content:'z'.repeat(150_000)}})
     writeFileSync(largeResultPath,largeSourceLine+'\\n')
@@ -657,10 +735,13 @@ test('Goal Memory contracts stay immutable, CAS rejects stale state, pack never 
     assert.equal(schemaCheckDb.prepare("SELECT value FROM metadata WHERE key='schemaVersion'").get().value,'99')
     assert.deepEqual(schemaCheckDb.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all(),tablesBeforeFutureSchema)
     assert.equal(schemaCheckDb.prepare('SELECT payload FROM contracts WHERE id=? AND revision=?').get(c2.id,2).payload,contractPayloadBeforeFutureSchema)
+    assert.deepEqual(getGoalArtifactWorkerDiagnostics(),{created:true,activeWorkers:0,queuedJobs:0},'真实历史扫描使用过的worker在所有请求settle后必须关闭')
     schemaCheckDb.close();db.close()
   `
   writeFileSync(sourcePath, source)
   try {
+    const workerBuild = await esbuildBuild({ entryPoints: [join(import.meta.dir, 'personal-goal-artifact-worker.ts')], bundle: true, platform: 'node', format: 'cjs', outfile: join(home, 'personal-goal-artifact-worker.cjs'), logLevel: 'silent' })
+    expect(workerBuild.errors.map((error) => error.text).join('\n')).toBe('')
     const build = await Bun.build({ entrypoints: [sourcePath], target: 'node', format: 'esm', external: ['node:sqlite'] })
     expect(build.success, build.logs.map((log) => log.message).join('\n')).toBe(true)
     const compiled = build.outputs[0]

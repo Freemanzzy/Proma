@@ -2,6 +2,8 @@ import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { getConfigDir } from './config-paths'
+import { runGoalArtifactScan } from './personal-goal-artifact-worker-client'
+import type { ArtifactScanJob, ArtifactScanResult, GoalEvidenceSnapshotEntry } from './personal-goal-artifact-scan'
 import type { ExtensionFactory, ToolDefinition } from '@earendil-works/pi-coding-agent'
 import type { AgentToolResult } from '@earendil-works/pi-agent-core'
 import { Type } from 'typebox'
@@ -635,166 +637,50 @@ export interface GoalMemoryCapability {
   request: (request: GoalMemoryCapabilityRequest, signal?: AbortSignal) => Promise<{ context?: string; checkpoint?: GoalCheckpointModelDto; acknowledged?: boolean; evidence?: ArtifactScanResult }>
 }
 
-const GOAL_ARTIFACT_SCAN_MAX_BYTES = 128 * 1024 * 1024
 const GOAL_ARTIFACT_MAX_ENTRIES = 50_000
-const GOAL_ARTIFACT_MAX_LINE_BYTES = 256 * 1024
-const GOAL_ARTIFACT_PAGE_BYTES = 512 * 1024
 const GOAL_EVIDENCE_SNAPSHOT_BUDGET_BYTES = 16 * 1024 * 1024
 
-type ArtifactMeta = { id:string; parentId:string|null; offset:number; length:number; tooLarge:boolean; toolCallIds:string[]; sha256?:string }
-type GoalEvidenceSnapshotEntry = { id:string; sha256:string; matched:boolean }
 type GoalEvidencePageSnapshot = {
   goalId:string; revision:number; artifactIdentity:string; mode:'entry'|'keyword'|'toolCall'; query:string
   entries:GoalEvidenceSnapshotEntry[]; nextOffset:number
 }
-type ArtifactScanOptions = { captureEvidenceSnapshot?:boolean; fixedEvidenceMatchIds?:ReadonlySet<string> }
-type ArtifactScanResult = {status:'ok'|'not-found'|'changed'|'invalid'|'too-large'; lines:string[]; nextOffset?:number; entryHashes?:Record<string,string>; snapshotEntries?:GoalEvidenceSnapshotEntry[]; incomplete?:boolean}
+type GoalEvidenceScanOptions = { captureEvidenceSnapshot?:boolean; fixedEvidenceMatchIds?:ReadonlySet<string> }
 
-type LiteralSearchBudget = { nodes: number; exhausted: boolean }
-
-function containsArtifactLiteral(value:unknown,needle:string,depth=0,budget:LiteralSearchBudget={nodes:10_000,exhausted:false}):boolean {
-  if (value == null) return false
-  if (depth > 16 || budget.nodes <= 0) { budget.exhausted = true; return false }
-  budget.nodes -= 1
-  if(typeof value==='string')return value.toLocaleLowerCase().includes(needle.toLocaleLowerCase())
-  if(Array.isArray(value))return value.some((item)=>containsArtifactLiteral(item,needle,depth+1,budget))
-  if(typeof value==='object')return Object.values(value as Record<string,unknown>).some((item)=>containsArtifactLiteral(item,needle,depth+1,budget))
-  return false
+async function verifyWorkerSourceSnapshot(binding:HostGoalArtifactBinding,snapshot:NonNullable<Awaited<ReturnType<typeof runGoalArtifactScan>>['sourceSnapshot']>,signal?:AbortSignal):Promise<void> {
+  if(signal?.aborted)throw new Error('Goal artifact source snapshot check canceled')
+  const fs=await import('node:fs/promises');const pathApi=await import('node:path')
+  try {
+    if((await fs.lstat(binding.path)).isSymbolicLink())throw new Error('symlink')
+    const canonicalPath=await fs.realpath(binding.path);const root=await fs.realpath(binding.sessionsDirectory)
+    const relative=pathApi.relative(root,canonicalPath)
+    if(!relative||relative.startsWith('..')||pathApi.isAbsolute(relative)||canonicalPath!==binding.path)throw new Error('path')
+    const stat=await fs.stat(canonicalPath)
+    if(stat.dev!==snapshot.dev||stat.ino!==snapshot.ino||stat.size!==snapshot.size||stat.mtimeMs!==snapshot.mtimeMs)throw new Error('stat')
+  } catch { throw new Error('Goal artifact source changed immediately after worker scan') }
+  if(signal?.aborted)throw new Error('Goal artifact source snapshot check canceled')
 }
 
-async function scanBoundArtifact(binding:HostGoalArtifactBinding, branchEntryIds:string[], leafId:string, mode:'entry'|'keyword'|'toolCall', query:string, offset:number, limit:number, signal?:AbortSignal, requiredIds:string[]=[], expectedHashes:Record<string,string>={}, hashOnly=false, allowUnpersistedSuffix=false, options:ArtifactScanOptions={}):Promise<ArtifactScanResult> {
-  const fs=await import('node:fs'); const fsp=await import('node:fs/promises'); const pathApi=await import('node:path')
-  if (!Array.isArray(branchEntryIds)||branchEntryIds.length<1||branchEntryIds.length>GOAL_ARTIFACT_MAX_ENTRIES||branchEntryIds.at(-1)!==leafId||!Number.isSafeInteger(offset)||offset<0||!query||query.length>500) return {status:'invalid',lines:[]}
-  let canonicalPath:string; let before:Awaited<ReturnType<typeof fsp.stat>>; let root:string
-  try {
-    if ((await fsp.lstat(binding.path)).isSymbolicLink()) return {status:'invalid',lines:[]}
-    canonicalPath=await fsp.realpath(binding.path); root=await fsp.realpath(binding.sessionsDirectory)
-    const relative=pathApi.relative(root,canonicalPath)
-    if (!relative||relative.startsWith('..')||pathApi.isAbsolute(relative)||canonicalPath!==binding.path) return {status:'invalid',lines:[]}
-    before=await fsp.stat(canonicalPath)
-    if (before.size>GOAL_ARTIFACT_SCAN_MAX_BYTES) return {status:'too-large',lines:[]}
-  } catch (error) { if ((error as NodeJS.ErrnoException).code==='ENOENT'||(error as NodeJS.ErrnoException).code==='ELOOP') return {status:'not-found',lines:[]}; throw error }
-  const index=new Map<string,ArtifactMeta>(); const branchSet=new Set(branchEntryIds); const hits:string[]=[]
-  if(signal?.aborted)return {status:'changed',lines:[]}
-  const sourceHandle=await fsp.open(canonicalPath,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW)
-  if(signal?.aborted){await sourceHandle.close().catch(()=>{});return {status:'changed',lines:[]}}
-  let stream:ReturnType<typeof sourceHandle.createReadStream>|undefined
-  const abortMainStream=():void=>{stream?.destroy(new Error('Goal artifact scan canceled'))}
-  signal?.addEventListener('abort',abortMainStream,{once:true})
-  let absolute=0,lineStart=0,lineLength=0,parts:Buffer[]=[],prefix:Buffer[]=[]; let lineDigest=createHash('sha256');let tooLargeLine=false,oversizedBranch=false,scanFailed=false,keywordScanIncomplete=false,toolCallScanIncomplete=false
-  const processLine=(raw:Buffer, start:number, length:number, oversized:boolean,lineHash:string):void=>{
-    let row:Record<string,unknown>|undefined
-    if (!oversized) { try { const parsed=JSON.parse(raw.toString('utf8')); if(parsed&&typeof parsed==='object'&&!Array.isArray(parsed)) row=parsed } catch { return } }
-    else {
-      const head=Buffer.concat(prefix).toString('utf8')
-      const id=head.match(/\"id\"\s*:\s*\"([A-Za-z0-9_-]{1,160})\"/)?.[1]
-      const parentId=head.match(/\"parentId\"\s*:\s*(?:\"([A-Za-z0-9_-]{1,160})\"|null)/)
-      if(id) row={id,parentId:parentId?.[1]??null,type:'oversized'}
-    }
-    if(typeof row?.id!=='string'||! /^[A-Za-z0-9_-]{1,160}$/.test(row.id)) return
-    if(index.has(row.id)||index.size>=GOAL_ARTIFACT_MAX_ENTRIES){scanFailed=true;return}
-    const toolCallIds:string[]=[]
-    const visit=(v:unknown,d=0,budget={nodes:10_000}):void=>{
-      if(v==null)return
-      if(d>16||budget.nodes<=0||toolCallIds.length>=100){toolCallScanIncomplete=true;return}
-      budget.nodes-=1
-      if(Array.isArray(v)){for(const item of v)visit(item,d+1,budget)}
-      else if(typeof v==='object'){
-        const object=v as Record<string,unknown>
-        if(typeof object.toolCallId==='string')toolCallIds.push(object.toolCallId)
-        if(object.type==='toolCall'&&typeof object.id==='string')toolCallIds.push(object.id)
-        for(const item of Object.values(object))visit(item,d+1,budget)
-      }
-    }
-    const parent=typeof row.parentId==='string'?row.parentId:null
-    const meta:ArtifactMeta={id:row.id,parentId:parent,offset:start,length,tooLarge:oversized,toolCallIds,sha256:lineHash}
-    index.set(row.id,meta)
-    if(branchSet.has(row.id)){
-      if(oversized)oversizedBranch=true
-      else if(options.fixedEvidenceMatchIds===undefined)visit(row)
-      const budget:LiteralSearchBudget={nodes:10_000,exhausted:false}
-      const matched=options.fixedEvidenceMatchIds!==undefined
-        ? options.fixedEvidenceMatchIds.has(row.id)
-        : mode==='entry'?row.id===query:mode==='toolCall'?toolCallIds.includes(query):!oversized&&containsArtifactLiteral(row,query,0,budget)
-      if(budget.exhausted&&options.fixedEvidenceMatchIds===undefined)keywordScanIncomplete=true
-      if(matched)hits.push(row.id)
-    }
+async function requestArtifactScan(binding:HostGoalArtifactBinding, branchEntryIds:string[], leafId:string, mode:'entry'|'keyword'|'toolCall', query:string, offset:number, limit:number, signal?:AbortSignal, requiredIds:string[]=[], expectedHashes:Record<string,string>={}, hashOnly=false, allowUnpersistedSuffix=false, options:GoalEvidenceScanOptions={}, afterWorkerScan?:()=>Promise<void>):Promise<ArtifactScanResult> {
+  const job:ArtifactScanJob = {
+    binding:{path:binding.path,sessionsDirectory:binding.sessionsDirectory}, branchEntryIds, leafId, mode, query, offset, limit,
+    requiredIds, expectedHashes, hashOnly, allowUnpersistedSuffix,
+    options:{captureEvidenceSnapshot:options.captureEvidenceSnapshot??false,...(options.fixedEvidenceMatchIds===undefined?{}:{fixedEvidenceMatchIds:[...options.fixedEvidenceMatchIds]})},
   }
-  const pushBytes=(buf:Buffer,start:number):void=>{ if(buf.length===0)return; lineDigest.update(buf);const wasSmall=!tooLargeLine; lineLength+=buf.length; if(wasSmall&&lineLength<=GOAL_ARTIFACT_MAX_LINE_BYTES)parts.push(buf); else { if(wasSmall){prefix=parts.slice(0);parts=[];tooLargeLine=true} const have=prefix.reduce((n,b)=>n+b.length,0);if(have<16*1024)prefix.push(buf.subarray(0,Math.max(0,16*1024-have))) } }
-  try {
-    stream=sourceHandle.createReadStream({highWaterMark:64*1024,autoClose:false})
-    if(signal?.aborted)abortMainStream()
-    for await(const value of stream){
-      if(signal?.aborted){stream.destroy();return {status:'changed',lines:[]}}
-      const chunk=Buffer.isBuffer(value)?value:Buffer.from(value);const chunkBase=absolute;let pos=0
-      while(pos<chunk.length){
-        const nl=chunk.indexOf(10,pos);const end=nl<0?chunk.length:nl;pushBytes(chunk.subarray(pos,end),chunkBase+pos)
-        if(nl>=0){processLine(tooLargeLine?Buffer.alloc(0):Buffer.concat(parts),lineStart,lineLength,tooLargeLine,lineDigest.digest('hex'));lineStart=chunkBase+nl+1;lineLength=0;parts=[];prefix=[];lineDigest=createHash('sha256');tooLargeLine=false;pos=nl+1}
-        else pos=chunk.length
-      }
-      absolute=chunkBase+chunk.length
-    }
-    if(lineLength>0)processLine(tooLargeLine?Buffer.alloc(0):Buffer.concat(parts),lineStart,lineLength,tooLargeLine,lineDigest.digest('hex'))
-  } catch(error){ if(signal?.aborted)return {status:'changed',lines:[]}; throw error }
-  finally { signal?.removeEventListener('abort',abortMainStream);stream?.destroy();await sourceHandle.close().catch(() => {}) }
-  if(scanFailed)return {status:'too-large',lines:[]}
-  if(options.fixedEvidenceMatchIds===undefined&&(keywordScanIncomplete||mode==='toolCall'&&toolCallScanIncomplete))return {status:'too-large',lines:[],incomplete:true}
-  const after=await fsp.stat(canonicalPath)
-  if(before.dev!==after.dev||before.ino!==after.ino||before.size!==after.size||before.mtimeMs!==after.mtimeMs)return {status:'changed',lines:[]}
-  let missingBranchSuffix=false
-  const persistedBranchIds:string[]=[]
-  for(let i=0;i<branchEntryIds.length;i++){
-    const id=branchEntryIds[i]!
-    const item=index.get(id)
-    if(!item){if(allowUnpersistedSuffix){missingBranchSuffix=true;continue}return {status:'invalid',lines:[]}}
-    if(missingBranchSuffix)return {status:'invalid',lines:[]}
-    if(i>0&&item.parentId!==branchEntryIds[i-1])return {status:'invalid',lines:[]}
-    persistedBranchIds.push(id)
-  }
-  if(!persistedBranchIds.length&& !allowUnpersistedSuffix)return {status:'invalid',lines:[]}
-  for(const [id,expected] of Object.entries(expectedHashes)){const meta=index.get(id);if(!branchSet.has(id)||!meta)return {status:'invalid',lines:[]};if(!meta.sha256||meta.sha256!==expected)return {status:'changed',lines:[]}}
-  if(oversizedBranch&&mode!=='entry'&&!hashOnly&&options.fixedEvidenceMatchIds===undefined)return {status:'too-large',lines:[]}
-  const entryHashes:Record<string,string>={}
-  for(const id of requiredIds){const meta=index.get(id);if(!meta){if(allowUnpersistedSuffix&&missingBranchSuffix)continue;return {status:'invalid',lines:[]}}if(!branchSet.has(id)||!meta.sha256)return {status:'invalid',lines:[]};entryHashes[id]=meta.sha256}
-  if(hashOnly)return {status:'ok',lines:[],...(requiredIds.length?{entryHashes}:{})}
-  let snapshotEntries:GoalEvidenceSnapshotEntry[]|undefined
-  if(options.captureEvidenceSnapshot){
-    const matchedIds=new Set(hits)
-    snapshotEntries=[]
-    for(const id of persistedBranchIds){
-      const sha256=index.get(id)?.sha256
-      if(!sha256)return {status:'invalid',lines:[]}
-      snapshotEntries.push({id,sha256,matched:matchedIds.has(id)})
-    }
-  }
-  const selected=hits.slice(offset,offset+Math.min(Math.max(limit,1),20)); if(!selected.length)return {status:'not-found',lines:[],...(requiredIds.length?{entryHashes}:{}),...(snapshotEntries?{snapshotEntries}:{})}
-  for(const id of selected){const meta=index.get(id)!;if(meta.tooLarge)return {status:'too-large',lines:[]};if(expectedHashes[id]&&meta.sha256!==expectedHashes[id])return {status:'changed',lines:[]}}
-  const lines:string[]=[];let total=0
-  for(const id of selected){const item=index.get(id)!;if(item.tooLarge||item.length>GOAL_ARTIFACT_MAX_LINE_BYTES||total+item.length>GOAL_ARTIFACT_PAGE_BYTES){if(lines.length===0)return {status:'too-large',lines:[]};break}
-    if(signal?.aborted)return {status:'changed',lines:[]}
-    const chunks:Buffer[]=[];let read=0;const pageHandle=await fsp.open(canonicalPath,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW)
-    let pageStream:ReturnType<typeof pageHandle.createReadStream>|undefined
-    const abortPageStream=():void=>{pageStream?.destroy(new Error('Goal artifact page scan canceled'))}
-    signal?.addEventListener('abort',abortPageStream,{once:true})
-    try {
-      pageStream=pageHandle.createReadStream({start:item.offset,end:item.offset+item.length-1,autoClose:false})
-      if(signal?.aborted)abortPageStream()
-      for await(const chunk of pageStream){if(signal?.aborted)return {status:'changed',lines:[]};const b=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);read+=b.length;if(read>GOAL_ARTIFACT_MAX_LINE_BYTES)return {status:'too-large',lines:[]};chunks.push(b)}
-    } catch(error) { if(signal?.aborted)return {status:'changed',lines:[]};throw error }
-    finally { signal?.removeEventListener('abort',abortPageStream);pageStream?.destroy();await pageHandle.close().catch(() => {}) }
-    if(read!==item.length)return {status:'changed',lines:[]};const rawLine=Buffer.concat(chunks);if(item.sha256!==createHash('sha256').update(rawLine).digest('hex'))return {status:'changed',lines:[]};const line=rawLine.toString('utf8');lines.push(line);total+=read
-  }
-  const finalStat=await fsp.stat(canonicalPath);if(before.dev!==finalStat.dev||before.ino!==finalStat.ino||before.size!==finalStat.size||before.mtimeMs!==finalStat.mtimeMs)return {status:'changed',lines:[]}
-  return lines.length?{status:'ok',lines,...(offset+lines.length<hits.length?{nextOffset:offset+lines.length}:{}),...(requiredIds.length?{entryHashes}:{}),...(snapshotEntries?{snapshotEntries}:{})}:{status:'not-found',lines:[],...(requiredIds.length?{entryHashes}:{}),...(snapshotEntries?{snapshotEntries}:{})}
+  const execution=await runGoalArtifactScan(job,signal)
+  if(signal?.aborted)throw new Error('Goal artifact scan canceled')
+  await afterWorkerScan?.()
+  if(execution.sourceSnapshot)await verifyWorkerSourceSnapshot(binding,execution.sourceSnapshot,signal)
+  else if(execution.result.status==='ok')throw new Error('Goal artifact worker omitted source snapshot')
+  return execution.result
 }
 
 async function initializeGoalArtifactBinding(
   contract:GoalContract, checkpoint:GoalCheckpoint, binding:HostGoalArtifactBinding, artifactId:string,
-  leafId:string, branchEntryIds:string[], signal?:AbortSignal,
+  leafId:string, branchEntryIds:string[], signal?:AbortSignal, afterWorkerScan?:()=>Promise<void>,
 ):Promise<GoalCheckpoint> {
   if(binding.sessionId!==contract.sessionId||binding.workspaceId!==contract.workspaceId||binding.artifactId!==artifactId||branchEntryIds.at(-1)!==leafId)
     throw new Error('Goal initial artifact/session/workspace binding changed')
-  const scan=await scanBoundArtifact(binding,branchEntryIds,leafId,'entry',leafId,0,1,signal,branchEntryIds,{},true,true)
+  const scan=await requestArtifactScan(binding,branchEntryIds,leafId,'entry',leafId,0,1,signal,branchEntryIds,{},true,true,{},afterWorkerScan)
   if(signal?.aborted)throw new Error('Goal initial source binding canceled')
   if(scan.status!=='ok')throw new Error(`Goal initial source binding failed: ${scan.status}`)
   const entryHashes=scan.entryHashes??{}
@@ -807,14 +693,14 @@ async function initializeGoalArtifactBinding(
   })
 }
 
-async function validateCurrentSource(binding:HostGoalArtifactBinding|null, checkpoint:GoalCheckpoint, sessionId:string, workspaceId:string, artifactId:string, leafId:string|null, branchEntryIds:string[], signal?:AbortSignal):Promise<void> {
+async function validateCurrentSource(binding:HostGoalArtifactBinding|null, checkpoint:GoalCheckpoint, sessionId:string, workspaceId:string, artifactId:string, leafId:string|null, branchEntryIds:string[], signal?:AbortSignal, afterWorkerScan?:()=>Promise<void>):Promise<void> {
   if(!checkpoint.artifactId)return // first contract-only turn: no persisted source is claimed yet
   if(!binding||binding.sessionId!==sessionId||binding.workspaceId!==workspaceId||binding.artifactId!==artifactId||binding.artifactIdentity!==checkpoint.artifactId)throw new Error('Goal current artifact/session/workspace binding changed')
   if(!leafId||branchEntryIds.at(-1)!==leafId)throw new Error('Goal current SessionManager branch/leaf unavailable')
   const watermarkIndex=branchEntryIds.indexOf(checkpoint.leafId)
   if(watermarkIndex<0)throw new Error('Goal current branch no longer descends from the checkpoint leaf')
   const persistedBranch=branchEntryIds.slice(0,watermarkIndex+1)
-  const result=await scanBoundArtifact(binding,persistedBranch,checkpoint.leafId,'entry',checkpoint.leafId,0,1,signal,[],checkpoint.entryHashes,true)
+  const result=await requestArtifactScan(binding,persistedBranch,checkpoint.leafId,'entry',checkpoint.leafId,0,1,signal,[],checkpoint.entryHashes,true,false,{},afterWorkerScan)
   if(signal?.aborted)throw new Error('Goal source validation canceled')
   if(result.status!=='ok')throw new Error(`Goal current source validation failed: ${result.status}`)
 }
@@ -849,6 +735,20 @@ export function createGoalMemoryCapability(sessionId: string, workspaceId: strin
     if (!boundQueryId) boundQueryId = queryId
     if (signal?.aborted) throw new Error('Goal capability 已取消')
   }
+  const assertCurrentContractAndSequence = (contract:GoalContract, expectedSequence:number):void => {
+    const latest=getGoalContract(sessionId,workspaceId)
+    if(!latest||latest.id!==contract.id||latest.revision!==contract.revision||latest.hash!==contract.hash)throw new Error('Goal contract revision changed during artifact worker scan')
+    const latestCheckpoint=getGoalCheckpoint(contract.id,contract.revision)
+    if(!latestCheckpoint||latestCheckpoint.sequence!==expectedSequence)throw new Error('Goal checkpoint sequence changed during artifact worker scan')
+  }
+  const verifyAfterWorkerScan = async (queryId:string, signal:AbortSignal, contract:GoalContract, expectedSequence:number, expectedBinding:HostGoalArtifactBinding):Promise<void> => {
+    assertActiveQuery(queryId,signal)
+    const latestBinding=await awaitWithAbort(Promise.resolve(resolveArtifactBinding?.(signal)??null),signal)
+    assertActiveQuery(queryId,signal)
+    if(!latestBinding||latestBinding.sessionId!==expectedBinding.sessionId||latestBinding.workspaceId!==expectedBinding.workspaceId||latestBinding.artifactId!==expectedBinding.artifactId||latestBinding.artifactIdentity!==expectedBinding.artifactIdentity||latestBinding.path!==expectedBinding.path||latestBinding.sessionsDirectory!==expectedBinding.sessionsDirectory)throw new Error('Goal artifact binding changed during worker scan')
+    assertCurrentContractAndSequence(contract,expectedSequence)
+    assertActiveQuery(queryId,signal)
+  }
   const revoke = (): void => {
     if (revoked) return
     revoked = true
@@ -875,8 +775,9 @@ export function createGoalMemoryCapability(sessionId: string, workspaceId: strin
         const binding=await awaitWithAbort(Promise.resolve(resolveArtifactBinding?.(signal)??null),signal)
         assertActiveQuery(request.queryId, signal)
         if(binding&&(binding.sessionId!==sessionId||binding.workspaceId!==workspaceId))throw new Error('Goal compact workspace/session binding changed')
-        await validateCurrentSource(binding,checkpoint,sessionId,workspaceId,request.artifactId,request.leafId,request.branchEntryIds,signal)
+        await validateCurrentSource(binding,checkpoint,sessionId,workspaceId,request.artifactId,request.leafId,request.branchEntryIds,signal,binding?()=>verifyAfterWorkerScan(request.queryId,signal,contract,checkpoint.sequence,binding):undefined)
         assertActiveQuery(request.queryId, signal)
+        assertCurrentContractAndSequence(contract,checkpoint.sequence)
         acknowledgeGoalBeforeCompact(sessionId)
         response = { acknowledged: true }
       } else {
@@ -895,10 +796,11 @@ export function createGoalMemoryCapability(sessionId: string, workspaceId: strin
             if (binding && (binding.sessionId !== sessionId || binding.workspaceId !== workspaceId || request.artifactId !== binding.artifactId)) throw new Error('Goal context workspace/session/artifact identity changed')
             let currentCheckpoint = checkpoint
             if (!currentCheckpoint.artifactId && binding && request.leafId && request.branchEntryIds.at(-1) === request.leafId) {
-              currentCheckpoint = await initializeGoalArtifactBinding(contract, currentCheckpoint, binding, request.artifactId, request.leafId, request.branchEntryIds, signal)
+              currentCheckpoint = await initializeGoalArtifactBinding(contract, currentCheckpoint, binding, request.artifactId, request.leafId, request.branchEntryIds, signal,()=>verifyAfterWorkerScan(request.queryId,signal,contract,currentCheckpoint.sequence,binding))
             }
-            await validateCurrentSource(binding, currentCheckpoint, sessionId, workspaceId, request.artifactId, request.leafId, request.branchEntryIds, signal)
+            await validateCurrentSource(binding, currentCheckpoint, sessionId, workspaceId, request.artifactId, request.leafId, request.branchEntryIds, signal,binding?()=>verifyAfterWorkerScan(request.queryId,signal,contract,currentCheckpoint.sequence,binding):undefined)
             assertActiveQuery(request.queryId, signal)
+            assertCurrentContractAndSequence(contract,currentCheckpoint.sequence)
             response = { context: buildGoalContextPack(contract, currentCheckpoint) }
           } else if (request.operation === 'checkpoint_read') {
             if (request.cursor) {
@@ -922,7 +824,7 @@ export function createGoalMemoryCapability(sessionId: string, workspaceId: strin
             if (!entryPattern.test(request.leafId) || request.entryIds.length < 1 || request.entryIds.length > 100 || request.branchEntryIds.length > GOAL_ARTIFACT_MAX_ENTRIES || request.entryIds.some((id) => !entryPattern.test(id) || !branchSet.has(id)) || !branchSet.has(request.leafId)) throw new Error('Goal turn_end entry IDs 不合法')
             if (checkpoint.artifactId && checkpoint.artifactId !== binding.artifactIdentity) throw new Error('Goal artifact identity changed')
             if (checkpoint.leafId && !request.branchEntryIds.includes(checkpoint.leafId)) throw new Error('Goal branch rewind detected; explicit rebind required')
-            const persisted = await scanBoundArtifact(binding, request.branchEntryIds, request.leafId, 'entry', request.leafId, 0, 1, signal, request.branchEntryIds, checkpoint.entryHashes, true)
+            const persisted = await requestArtifactScan(binding, request.branchEntryIds, request.leafId, 'entry', request.leafId, 0, 1, signal, request.branchEntryIds, checkpoint.entryHashes, true,false,{},()=>verifyAfterWorkerScan(request.queryId,signal,contract,checkpoint.sequence,binding))
             assertActiveQuery(request.queryId, signal)
             if (persisted.status !== 'ok' || Object.keys(persisted.entryHashes ?? {}).length !== request.branchEntryIds.length) throw new Error(`Goal turn_end artifact verification failed: ${persisted.status}`)
             const nextCheckpoint = recordGoalObservedCheckpoint({
@@ -958,7 +860,7 @@ export function createGoalMemoryCapability(sessionId: string, workspaceId: strin
               throw new Error('Goal evidence branch leaf mismatch')
             }
             let currentCheckpoint = checkpoint
-            if (!currentCheckpoint.artifactId) currentCheckpoint = await initializeGoalArtifactBinding(contract, currentCheckpoint, binding, binding.artifactId, request.leafId, request.branchEntryIds, signal)
+            if (!currentCheckpoint.artifactId) currentCheckpoint = await initializeGoalArtifactBinding(contract, currentCheckpoint, binding, binding.artifactId, request.leafId, request.branchEntryIds, signal,()=>verifyAfterWorkerScan(request.queryId,signal,contract,currentCheckpoint.sequence,binding))
             if (currentCheckpoint.artifactId && binding.artifactIdentity !== currentCheckpoint.artifactId) {
               evidencePageSnapshot = undefined
               throw new Error('Goal evidence artifact binding changed')
@@ -968,7 +870,7 @@ export function createGoalMemoryCapability(sessionId: string, workspaceId: strin
               throw new Error('Goal evidence branch rewind or leaf mismatch')
             }
             let expectedHashes:Record<string,string> = currentCheckpoint.entryHashes
-            let scanOptions:ArtifactScanOptions = {captureEvidenceSnapshot:true}
+            let scanOptions:GoalEvidenceScanOptions = {captureEvidenceSnapshot:true}
             if (!isRootRead) {
               const snapshot = evidencePageSnapshot!
               if (snapshot.artifactIdentity !== binding.artifactIdentity || snapshot.entries.some((entry,index)=>request.branchEntryIds[index]!==entry.id)) {
@@ -986,7 +888,10 @@ export function createGoalMemoryCapability(sessionId: string, workspaceId: strin
               }
               scanOptions = {fixedEvidenceMatchIds:new Set(snapshot.entries.filter((entry)=>entry.matched).map((entry)=>entry.id))}
             }
-            const result = await scanBoundArtifact(binding, request.branchEntryIds, request.leafId, request.mode, request.query, request.offset, requestedLimit, signal, [], expectedHashes, false, true, scanOptions)
+            let result:ArtifactScanResult
+            try {
+              result = await requestArtifactScan(binding, request.branchEntryIds, request.leafId, request.mode, request.query, request.offset, requestedLimit, signal, [], expectedHashes, false, true, scanOptions,()=>verifyAfterWorkerScan(request.queryId,signal,contract,currentCheckpoint.sequence,binding))
+            } catch(error) { evidencePageSnapshot=undefined; throw error }
             assertActiveQuery(request.queryId, signal)
             if (isRootRead && result.snapshotEntries && result.nextOffset !== undefined && result.status === 'ok') {
               const snapshot:GoalEvidencePageSnapshot = {

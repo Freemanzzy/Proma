@@ -17,8 +17,8 @@
 
 ## 本分支实验（尚未合入）
 
-- **Goal Memory M0**：默认关闭的目标合同、checkpoint、证据回读与手动恢复实验。功能权威说明见 [`docs/personal/goal-memory.md`](./docs/personal/goal-memory.md)，验收状态见 [`docs/personal/backlog.md`](./docs/personal/backlog.md)。已完成两次分版本短模型回归；随后复审发现的无 user 压缩上下文、配置根及临界预算问题已补修，最新源码通过实际 SDK 本地转换与完整确定性矩阵，未再调用真实模型；额外复审3无缺陷报告，但全新独立计划验收需要返工：主线程扫描不满足计划A条款，B/C/D通过，审查记录缺口已补；尚未验收，待用户确认线程隔离或条款调整；不代表当前安装版已具备该能力，不加入自动续跑或完成判定。
-  - 上游触点：`agent-orchestrator.ts` 只接宿主命令和 bootstrap；`adapters/pi-agent-adapter.ts` 接 context、工具与压缩 hook；`adapters/pi-utility-adapter.ts`、`utility/agent-runtime.ts`、`utility/agent-runtime-request-timeout.ts` 与 shared `agent-runtime.ts` 接内部 capability/timeout。存储与策略位于独立 `personal-goal-memory.ts`。
+- **Goal Memory M0**（截至2026-11-04）：默认关闭的目标合同、checkpoint、证据回读与手动恢复实验。功能权威见 [`docs/personal/goal-memory.md`](./docs/personal/goal-memory.md)，验收状态见 [`docs/personal/backlog.md`](./docs/personal/backlog.md)。903fb8eb的独立计划验收曾因主线程扫描要求返工；用户09:33批准严格线程隔离及额外一次复审4。现扫描/解析/关键词/hash/索引由真实Node Worker执行，main保留授权/来源复核和SQLite权威。父独立14项原生线程/故障探针及全部既有矩阵、全仓876测试、typecheck/scripts/五构建通过，17个源/构建输入hash前后相同。复审4与全新只读计划验收仍待完成，不是已验收或合入结论。当前无新dev/provider实验，旧两次短run与三长压缩只属于各旧快照；不自动续跑或判业务完成。
+  - 上游触点：原六处orchestrator、Pi/utility adapters、utility runtime/timeout及shared runtime类型接线不扩展新行为；本次另改Electron `package.json` 的worker build/watch scripts、`scripts/dev-bundle-readiness.ts`及`electron-builder.yml`精确worker解包项。策略/SQLite仍在`personal-goal-memory.ts`，新增个人artifact scan/protocol/worker/client模块；worker无数据库/SDK/Electron依赖。
   - 兼容与回退：不修改 Pi transcript、会话索引或 planning schema，不新增依赖；取消 `PROMA_PERSONAL_GOAL_MEMORY=1` 即关闭新路径，独立 sidecar 保留。未获合并、推送、打包或安装授权。
 
 ## 同步规则

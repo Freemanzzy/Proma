@@ -1,6 +1,6 @@
 # Goal Memory（M0）功能 SSOT 草稿
 
-状态（2026-11-04）：**独立计划验收需要返工。对903fb8eb，B/C/D通过；A未满足“不在主线程扫描大历史”，当前解析/hash仍在主线程。E指出审查结论未同步，本次已补记，但整体不得标为已验收。Codex额外复审3无需要报告的缺陷；871测试及完整矩阵通过不替代计划符合性。功能默认关闭、未合入/安装，后续线程隔离或条款调整及新增复审须用户确认。**
+状态（2026-11-04）：**903fb8eb曾因主线程扫描约束需要返工。用户09:33明确批准严格线程隔离、额外一次复审4及全新只读验收。现扫描已接入真实Node worker_threads；父独立14项原生线程/故障探针、全部既有矩阵、全仓876 pass/0 fail、typecheck/scripts/五构建与worker产物检查通过，17个源/构建输入hash一致。复审4和新独立计划验收仍待完成，不把本地测试当整体验收。默认关闭、未合入/安装；本批无新开发实例或真实provider/长压缩实验。**
 
 ## 范围与启用
 
@@ -30,6 +30,14 @@ Goal Memory 将本会话用户明确提交的目标作为版本化恢复合同�
 
 Pi `turn_end` hook只提交SDK提供的持久`messageEntryId/toolResultEntryIds`、当前branch entry IDs和leaf；主进程从当前会话metadata解析Pi artifact路径，校验session/workspace/sdkSessionId、规范session目录、symlink及文件身份，并扫描有界JSONL artifact验证branch的ID/parent链与已有hash。超大leaf可走hash-only水位校验，不读取/返回正文；正文读取仍受单行上限约束并明确返回too-large，绝不截断。新合同在首次有持久历史的context/evidence读取前，绑定当前已验证artifact与branch的持久前缀；尚无持久entry时不伪称已建立水位。后续context、compact ack、turn_end/evidence read验证旧entry hashes，防止替换、迁移、rewind或篡改后重新baseline。`GoalEvidenceRead`只接受当前SessionManager branch，支持entry ID、toolCall ID和字面关键词定位，可分页读取完整entry。`offset=0`建立单次有界main-only快照，固定当时的branch ID、source hash与命中集合；后续`nextOffset`页沿用命中集合，不会把当前工具产生的新receipt纳入原查询。每页仍重新解析当前artifact，验证session/workspace/artifact identity、当前branch ancestry、已有hash及合同revision；新root或mode/query selector变化、source变化、branch rewind、合同revision变化、功能关闭或query revoke会清空/失效旧快照。新`offset=0`会对当前branch重新搜索。快照JSON不超过16 MiB，不通过utility/工具结果暴露。扫描上限128 MiB、最多50,000 entries（只在内存保留ID、parent、toolCall定位元数据，不建立无界文本索引）、单行256 KiB、输出页512 KiB/最多20条；关键词遍历完整对象值与数组，在16层/10,000节点预算内字面匹配，预算耗尽明确返回不完整/too-large，不误报not-found。超大媒体行只解析有界ID/parent前缀并完整流式hash。越限、文件变化、错误branch/session均返回明确too-large/changed/invalid/not-found，不会静默声称没有证据。旧branch不继承；不支持跨session读取。
 
+## 扫描线程隔离与Worker运行
+
+经批准的线程隔离补充计划下，Goal artifact扫描（首次source绑定、已有source校验、`context`/compact ack、`turn_end` hash-watermark与`evidence_read`）统一经`runGoalArtifactScan`提交到真实Node `worker_threads`。逐行JSON解析、branch/index构建、关键词遍历、hash与原文读取都只在`personal-goal-artifact-worker.ts`入口创建的Worker中执行；`personal-goal-artifact-scan.ts`仅由Worker入口导入，不存在主线程fallback。入口在`isMainThread`时拒绝启动；扫描Worker只依赖Node `worker_threads`、`fs`、`path`、`crypto`，不导入Electron、Pi SDK、SQLite或网络能力。原128 MiB、50,000 entries、单行256 KiB、每页最多20条/512 KiB、关键词节点/深度及媒体hash限制保持不变。
+
+主进程仍是唯一授权与提交方：组装和边界校验有界job；Worker仅返回扫描结果及内部source stat快照（dev/ino/size/mtime），快照不会暴露到模型工具。Worker返回后，main按当前query/lifecycle重新验证owner、artifact/session/workspace binding、contract revision及checkpoint sequence，并在SQLite事务/CAS、保存evidence page snapshot或发送compact ack前复查规范路径与source stat。取消、owner revoke、deadline、启动失败、Worker error/exit、错误协议/关联ID、畸形/空响应均fail closed；受限的2个active Worker与8个排队job计入55秒总deadline，取消/失败会等待Worker terminate并释放队列槽，不能在旧query写checkpoint或刷新分页快照。协议载荷有显式job/result byte上限，worker result不经过Pi/utility工具结果。
+
+`build:main`会同时生成`dist/main.cjs`与`dist/personal-goal-artifact-worker.cjs`；`watch:main`也会编译独立CJS Worker。运行时从main bundle同目录解析Worker；打包到`app.asar`时只把精确的`dist/personal-goal-artifact-worker.cjs`纳入`asarUnpack`，入口将该文件映射至`app.asar.unpacked`。开发bundle readiness把Worker列为必需产物；缺失时不得启动。ESM测试路径临时编译相同生产Worker入口，CJS路径由`build:main`覆盖检查；不执行main bundle或启动dev来做语法验证。
+
 ## 压缩行为与未实现项
 
 Pi `session_before_compact`扩展覆盖`manual`、`threshold`、`overflow`三类原因，通过main-owned capability等待SQLite `compaction_acks`，并要求回复严格为`acknowledged===true`。主进程capability首次请求绑定到单一`queryId`，并在run结束/失败/取消时撤销；跨query、关闭后及await期间已撤销的迟到写入拒绝。compact ack的utility/hook等待为5秒；有界全artifact的context/evidence/turn_end capability utility等待放宽到60秒，取消仍受query signal和上限约束。hook拒绝、false ack、超时或事件取消时abort本次capability请求、明确cancel并设置当前Pi run fail latch：transform阻挡后续provider请求、`tool_call`返回block，query队列报告错误。SQLite使用main线程同步小事务，JS event loop同步段不可由Promise.race/deadline抢占；取消可阻止utility继续等待及迟到回执后的继续运行，但不能中止已开始的同步事务。定向故障注入测试覆盖三种reason与失败路径；另有开发实例真实utility与模型验证，摘要生成usage未由接口报告。
@@ -57,8 +65,17 @@ Pi `session_before_compact`扩展覆盖`manual`、`threshold`、`overflow`三类
 - 第二次新会话通过应用删除，新增设备撤销、测试空间结束、own live artifact/sidecar及配对材料清理，dev/8443关闭而正式443保留。恢复20个原会话ID和4配置hash；草稿metadata与本次启动备份完全相同。原备份及本次恢复前的index/channel备份保留，不重建整个fixture。所有合成审计材料仅在私有工作台。
 - 2026-11-04最后三项review P2修复：`injectGoalTaskData`支持无原始user的Pi cut-turn上下文；测试通过安装版Pi SDK `buildSessionContext`与`convertToLlm`实测compactionSummary/assistant/toolResult cut-turn与单份恢复包；独立边界单元测试覆盖system-only/empty上下文，另检查重复包、相似用户marker及previous-transform/图片处理顺序。sidecar改用统一`config-paths.getConfigDir()`，并以临时HOME、mock `app.isPackaged`覆盖未打包默认/合法开发目录名/非法名称/打包版/显式测试override；验证flag=0不创建正式或开发配置根。合同创建会预留固定短进度省略标记预算；新增父11,650 ASCII复现、最大合法进度与状态、ASCII/Unicode精确边界及CAS失败不改现有合同回归。最终`bun test apps/electron/src/main/lib/personal-goal-memory.test.ts`为2 pass；`bun run typecheck`所有包通过；`git diff --check`通过。未启动dev、未新增真实模型调用、未改schema/自动迁移/版本/lock/依赖，未commit。
 - 最后三项修复后的父独立验证：同版SDK实际cut-turn context为compactionSummary/assistant/toolResult，转换后恰一份完整Goal包，空/system-only、重复注入、原始marker及图片对象保留；官方配置根的未打包默认/合法fixture名/非法名/打包态及flag0均通过（临时HOME、Electron API stub，不是完整GUI启动）。ASCII/Unicode各二分至接受边界，本文测试合同的必需原文11,676 bytes、包正文恰12,000 bytes，模型三组数组各100×5,000 bytes、nextAction 5,000 bytes，在active/waiting_user/blocked/paused/claimed_done五态均只省略可选进度，不阻断或截必需字段。旧6项、query、28页checkpoint、revoke无迟到写、Evidence两页与host10项全部重跑；30×10/15/21/4矩阵通过。全仓871 pass/0 fail、2322 assertions，typecheck、personal scripts、五目标构建与diff-check通过；源码hash前后相同。
-- 额外Codex复审3已完成：CLI0.165.0、310秒，针对903fb8eb，未发现需要报告的缺陷；只读快照缺依赖，未重跑父完整矩阵。随后全新Astra只读验收（初次额度失败无结论，09:15重试）裁决需要返工：A的扫描CPU工作仍在Electron主线程，不满足批准计划第16行；B/C/D通过；E的审查结论缺记已由父补齐本节及相关文档。没有据此声称全部通过或擅自放宽条款。当前不新增实验、改代码或追加复审，等待用户选择线程隔离返工或明确调整条款。
-- 未新增真实模型调用、未重做长压缩。真实自动threshold/overflow故障、图片附件provider共存及大历史UI负载仍未测；异步流式读取不等于worker隔离，也未证明实际UI卡顿。既有结果不构成合入/发布许可或长期语义遵循证明。
+- 额外Codex复审3已完成：CLI0.165.0、310秒，针对903fb8eb，未发现需要报告的缺陷；只读快照缺依赖，未重跑父完整矩阵。随后全新Astra只读验收（初次额度失败无结论，09:15重试）裁决需要返工：A的扫描CPU工作仍在Electron主线程，不满足批准计划第16行；B/C/D通过；E的审查结论缺记已由父补齐本节及相关文档。没有据此声称全部通过或擅自放宽条款。该裁决之后用户批准线程隔离补充计划；实现与当前有限验证见“扫描线程隔离与Worker运行”及本节末尾，父会话仍负责独立验收。
+- 本轮线程隔离实现的本地验证：`bun test ./apps/electron/src/main/lib/personal-goal-memory.test.ts`（2 pass；内部ElectronRunAsNode capability harness覆盖source漂移不提交checkpoint/不刷新cursor快照、同owner旧sequence并发CAS、不同owner并发及原有扫描/来源回归）；`bun test ./apps/electron/src/main/lib/personal-goal-artifact-worker-client.test.ts`（3 pass；真实CJS Worker thread exact-source/hash与threadId、queue/cancel/failure边界）；`bun test ./apps/electron/scripts/dev-bundle-readiness.test.ts`（2 pass）；`bun run typecheck`全部包通过；`bun run build:main`成功并生成独立18.4 KiB Worker CJS；对main与Worker生成物`node --check`通过；`git diff --check`通过。最初对未隔离基线的sentinel测试确实在Electron主线程命中一次JSON.parse；接入后同一真实扫描主线程命中0次，负例记录在当轮私有workbench。本地只重跑了上述定向测试与typecheck/build，不是全仓测试。
+- 执行工交接时未运行dev/服务、完整test suite、打包/安装、真实provider/模型、长压缩或parent独立native复审/全矩阵；真实自动threshold/overflow故障、图片附件provider共存及大历史UI负载仍未测。父会话负责重新运行独立探针、全矩阵、审查与最终验收；当前不声称代码已合入、安装或最终验收通过。异步扫描线程隔离实现本身也不证明应用整体无UI延迟或模型长期语义遵循。
+
+## 2026-11-04 父独立线程隔离验证
+
+本轮执行工已交接，父在冻结的17个源/构建输入上重跑验证：原生production CJS Worker的threadId大于0，主线程不再解析sentinel原始行或计算其历史hash，精确原文/entry hashes正确，成功后所有线程退出。另有两项无Worker边界验证import/flag0与合同-only、尚无持久artifact时不spawn且不伪造绑定；13类实际Worker故障注入涵盖owner revoke四路径、caller abort、deadline、运行崩溃、exit0无结果、启动失败、读取中source变化、同/跨owner并发、malformed与correlation mismatch；请求失败时checkpoint/绑定/水位不迟到更新，其他owner可继续。
+
+旧六项/query/28页checkpoint/revoke/Evidence两页/host10/50k，SDK cut-turn/规范配置根/预算边界，30×10装载、15证据、21hook及4类mutation全部通过；mutation仍先验证control，再仅把断言失败计为killed。全仓876 pass、0 fail、2328 assertions；typecheck、personal scripts、五既有构建（main含worker）、生成物与diff检查通过，源hash前后相同。原生探针的核心与worker均以生产esbuild Node/CJS方式编译；父最初沿用Bun CJS私有harness时，Bun将__filename改写为源TS路径而导致伴随worker定位缺失，保留该失败并改为生产编译方式，未为harness改产品行为。
+
+本批没有dev/真实provider/长压缩或制作安装包。asarUnpack仅配置核对与临时布局路径测试，watch入口仅脚本/产物及readiness检查，不冒称实际运行watch/安装包已验。构建实现使用独立worker build/watch脚本，由main脚本组合，而非补充计划优先建议的命名多入口；固定CJS产物与ready护栏保留，但开发时新增worker watcher分支。复审4和全新只读计划验收仍待完成；旧真实实验限制不变。
 
 ## 回滚
 

@@ -22,7 +22,7 @@
 
 ## 开发中（未验收，不属于已验证分支）
 
-- **Goal Memory M0**（截至2026-11-04，`feat/goal-memory-m0-20261103`，基于 `personal` `1c373673`）：默认关闭的独立持久化与手动恢复实验，功能 SSOT 见 [`goal-memory.md`](./goal-memory.md)。此前各批审查及父发现的问题已修；修复复审2再发现的无user压缩上下文漏包、配置根漂移、临界合同进度更新阻塞三项P2也已补修。最新源码重跑871测试、typecheck、personal scripts、五目标构建及全部独立矩阵通过，并用同版SDK实际buildSessionContext/convertToLlm验证cut-turn、用临时HOME和Electron API stub验证规范配置根、以ASCII/Unicode精确12KB包和最大合法进度验证预算。最新这批未再调用真实模型；前一1664e7f1的33.2秒短run（4工具/5请求）、f568c35c的28.3秒run及更早三次长压缩均独立保留，不冒充最新源码实测。fixture已清理恢复20原会话及4配置hash，dev/8443已关、正式443保留。用户已明确批准额外一次CodeX复审（原两轮上限之外，仅一次、不新增真实模型调用）；该轮已完成，310秒、无需要报告的缺陷。全新Astra只读计划验收已返回需要返工：A未满足“不在主线程扫描大历史”（当前解析/hash在主线程），B/C/D通过；E审查记录未同步已由父补记。整体尚未验收，等待用户选择线程隔离返工或明确调整条款，不能把异步I/O当线程隔离或因测试全绿自动通过。新增代码复审次数已用完，不擅自追加。无M1控制器，不合并、推送、升版、打包或安装；真实自动threshold/overflow故障、图片共存、大历史UI负载仍未测。
+- **Goal Memory M0**（截至2026-11-04，`feat/goal-memory-m0-20261103`，基线`personal` `1c373673`）：独立计划验收原判903fb8eb的A线程要求未过，B/C/D通过，E记录缺口已补。用户09:33确认严格返工、额外复审4仅一次及全新只读验收。现已接入真实Node worker_threads，main不扫描且无fallback，仍掌握授权/绑定/合同/CAS/ack；worker结果后重新检查来源身份与stat。父14项原生线程/故障/源变化/同跨owner并发、原全部矩阵、全仓876 pass/0 fail/2328 assertions、typecheck/scripts/五构建与worker产物均通过，17源/构建hash一致。当前等待复审4和新独立验收，不宣称整体通过。只在临时HOME做本地测试；无新dev/真实provider/长压缩，原三次长压缩及f568c35c、1664e7f1短run不得冒充本批实测。旧fixture清理与备份保持，不重做。未测完整GUI、大历史UI负载、真实threshold/overflow故障、图片与provider共存、实际安装包/运行watch时序与长期语义遵循；SQLite同步段不受Promise硬抢占。默认关闭、无M1，不合并、推送、升版、打包或安装；复审4若有新发现不得自动追加第五轮。功能SSOT见[goal-memory.md](./goal-memory.md)。
 
 ## 用户反馈收集（2026-10-01 起，下一批一并实现）
 
