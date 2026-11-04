@@ -2296,3 +2296,10 @@
 - 试用方式（用户 2026-11-05 确定）：先在关闭状态下安装验证无回归；再全局设置 `PROMA_PERSONAL_GOAL_MEMORY=1`（`launchctl setenv`）并由 Claude Code 重启 Proma；用户指定 3–5 个真实长任务对话，由 Proma 起草合同、用户在对应对话发送 `/goal set`。未登记合同的对话不装 Goal 工具、不注入恢复包、不挂压缩钩子（按 `agent-orchestrator.ts` 中 `activeGoal` 判断核对）；数据库在开启后首次发消息时创建。
 - 本次打包不启动 iOS 模拟器（用户决定），serve-sim 模拟器冒烟将跳过。
 - 同步文档：`docs/personal/backlog.md`（已合入未安装）、本记录。
+
+## 2026-11-05: Goal Memory 子进程测试超时放宽（打包时误报）
+
+- **现象**：M0 合入后首次打包（`/tmp/proma-package-20261105.log`）全量测试 3 fail / 1 error，打包在测试阶段中止。`personal-goal-memory.test.ts` 的第一项测试（通过 Electron 子进程验证合同、CAS、恢复包与证据绑定）在默认 5000 ms 超时被判失败；随后 `personal-goal-artifact-worker-client.test.ts` 与 `web-remote-bundle.test.ts` 报 esbuild `The service is no longer running`，为前一项超时后的连带失败。
+- **核实**：同一提交在主目录连续两次全量 `bun test` 均 876 pass / 0 fail；该测试文件单独运行 3 次耗时 4.62–4.86 s，紧贴 5 s 默认超时，打包时紧接 typecheck 运行、负载较高即超时。与 2026-10-29 两个慢测试的情况相同。
+- **修复**：只给该测试加 30 s 超时，不改断言与生产代码（`eb63b6b9`）。定向测试与全仓 typecheck 通过。Codex 独立审查（`--commit`，报告 `code-review/20261105-042618-commit-eb63b6b9.md`）：未发现问题。
+- 同步文档：本记录。

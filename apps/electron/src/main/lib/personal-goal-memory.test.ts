@@ -883,7 +883,7 @@ test('Goal Memory contracts stay immutable, CAS rejects stale state, pack never 
     })
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
   } finally { rmSync(home, { recursive: true, force: true }) }
-})
+}, 30_000) // 子进程 Electron 验证单独运行约 4.6 s，默认 5 s 超时在打包时的全量测试负载下会误报
 
 test('Goal sidecar resolves shared packaged/dev config roots and stays filesystem-lazy when disabled', async () => {
   const suiteHome=mkdtempSync(join(tmpdir(),'proma-goal-config-suite-'))
