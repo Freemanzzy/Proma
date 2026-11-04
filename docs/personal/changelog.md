@@ -2288,3 +2288,11 @@
 - **材料验证**：三份479/481/481文件整目录副本逐hash一致，SQLite integrity均ok；9轮消息处理无流错误、9次本机provider请求，43项离线材料断言通过，17源码/构建输入与最终独立验收一致。材料harness首次误用SQL列名已按payload.id修正；一次UI原生button选择器未命中后按真实DOM定位，均非产品缺陷、未改产品凑过。
 - **限制与收束**：本次补充了真实watch启动及小样本GUI，不覆盖真实provider/模型语义、完整GUI性能/大历史/附件/压缩/损坏、菜单退出或安装版降级。在轮次完成后只SIGTERM自有dev、再停自有watcher，无force kill；不声称菜单app.quit完整清理已测或未落盘内容可保留。dev/本机stub/Ego均关闭，测试数据及三份副本保留，正式数据/应用与服务不改。
 - **文档与停止边界**：更新Goal SSOT当前状态及本次结果，PERSONAL/backlog增加日期化摘要；原11月4日状态保留其历史时间。纯文档记录，不重跑全套876/不追加第七轮代码复审，不合并/推送/启用正式M0/打包/安装或进入M1；无需修改维护规则/AGENTS或长期协作记忆。正式回退仍须先备份最新数据，仅回应用；恢复旧数据需另批。
+
+## 2026-11-05: Goal Memory M0 合入 personal（默认关闭）
+
+- 用户 2026-11-05 授权：M0 单独合并、打包、写安装申请，在正式版真实对话中受控试用。功能分支维护会话（`f6822a3c`）确认验证与文档已结束、不再修改分支后，由默认工作区会话 `67d5783e` 接手合并（单写者）。
+- 删除 dev 往返演练用的 detached worktree `.worktrees/goal-m0-rollback-old-20261105`；推送 `feat/goal-memory-m0-20261103`（`44740d6a`）并 `--no-ff` 合入 `personal`（`48e4e038`），移除功能 worktree。合并前 diff 扫描无绝对路径/IP/主机名，14 个提交邮箱均为 noreply 且各有一行 `Made-with: Proma`。
+- 试用方式（用户 2026-11-05 确定）：先在关闭状态下安装验证无回归；再全局设置 `PROMA_PERSONAL_GOAL_MEMORY=1`（`launchctl setenv`）并由 Claude Code 重启 Proma；用户指定 3–5 个真实长任务对话，由 Proma 起草合同、用户在对应对话发送 `/goal set`。未登记合同的对话不装 Goal 工具、不注入恢复包、不挂压缩钩子（按 `agent-orchestrator.ts` 中 `activeGoal` 判断核对）；数据库在开启后首次发消息时创建。
+- 本次打包不启动 iOS 模拟器（用户决定），serve-sim 模拟器冒烟将跳过。
+- 同步文档：`docs/personal/backlog.md`（已合入未安装）、本记录。
