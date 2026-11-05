@@ -1026,6 +1026,17 @@ export function isGoalManagementCommandMessage(message: string): boolean {
   return /^\/goal(?:\s|$)/i.test(message.trimStart())
 }
 
+/** /goal 命令失败时给用户的宿主回复（不调用模型；合同未改变）。 */
+export function buildGoalCommandFailureReply(error: unknown): string {
+  const reason = error instanceof Error && error.message ? error.message : '未知错误'
+  return `Goal 命令未执行：${reason}。本会话的 Goal 合同未改变。用法：/goal set <JSON合同>、/goal revise <JSON合同>、/goal status、/goal restore、/goal off。`
+}
+
+/** 还原输入框 Markdown 序列化（renderer/lib/markdown-rich-text.ts escapeMarkdownText）加入的反斜杠转义。 */
+export function unescapeEditorMarkdown(value: string): string {
+  return value.replace(/\\([\\`*_[\]<>|#+\-.])/g, '$1')
+}
+
 export function parseGoalCommand(message: string): GoalCommand | null {
   const match = /^\/goal(?:\s+([a-z-]+))?(?:\s+([\s\S]*))?\s*$/.exec(message)
   if (!match) return null
@@ -1037,7 +1048,11 @@ export function parseGoalCommand(message: string): GoalCommand | null {
   }
   if (command === 'set' || command === 'revise') {
     let parsed: unknown
-    try { parsed = JSON.parse(body) } catch { throw new Error('Goal 合同必须以 JSON 对象提供完整字段') }
+    try { parsed = JSON.parse(body) } catch {
+      // 桌面/手机输入框发送前会把文本序列化为 Markdown（转义 \ ` * _ [ ] < > | 及行首 # > + - N.），
+      // 合同必含数组，转义后的文本一定不是合法 JSON；只在原文解析失败时还原这些转义再试一次。
+      try { parsed = JSON.parse(unescapeEditorMarkdown(body)) } catch { throw new Error('Goal 合同必须以 JSON 对象提供完整字段（JSON 解析失败）') }
+    }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Goal 合同必须是 JSON 对象')
     const data = parsed as Record<string, unknown>
     const allowed = new Set(['expectedRevision', 'originalText', 'scope', 'nonGoals', 'hardConstraints', 'acceptance'])

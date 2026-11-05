@@ -83,7 +83,7 @@ import { cleanUserMessageForTitle, createFallbackTitle, sanitizeGeneratedTitle, 
 import { fetchAgentTitleWithFallback } from './agent-title-retry'
 import { claimWorkspaceMemoryRefreshOpportunity } from './agent-memory-refresh-service'
 import { resolveRuntimeAdditionalDirectories } from './agent-orchestrator-vault-access'
-import { buildGoalRestoreReply, createGoalContract, createGoalMemoryCapability, disableGoalForSession, getGoalCheckpoint, getGoalContract, isGoalCommandSourceAllowed, isGoalManagementCommandMessage, isGoalMemoryEnabled, parseGoalCommand } from './personal-goal-memory'
+import { buildGoalRestoreReply, createGoalContract, createGoalMemoryCapability, disableGoalForSession, getGoalCheckpoint, getGoalContract, isGoalCommandSourceAllowed, isGoalManagementCommandMessage, isGoalMemoryEnabled, parseGoalCommand, buildGoalCommandFailureReply } from './personal-goal-memory'
 import type { GoalMemoryCapability } from './personal-goal-memory'
 
 // ===== 类型定义 =====
@@ -804,8 +804,16 @@ export class AgentOrchestrator {
           return
         }
       } catch (error) {
-        callbacks.onError(error instanceof Error ? error.message : 'Goal 命令失败')
-        completeBeforeRun()
+        // 个人版：失败原因作为宿主回复持久化并显示，避免命令“发出后无任何反馈”。
+        try {
+          const reply = buildGoalCommandFailureReply(error)
+          const failedReply = { type: 'assistant', message: { content: [{ type: 'text', text: reply }] }, parent_tool_use_id: null, uuid: randomUUID(), _createdAt: Date.now() } as unknown as SDKMessage
+          appendSDKMessages(sessionId, [failedReply])
+          callbacks.onComplete([{ id: (failedReply as unknown as { uuid: string }).uuid, role: 'assistant', content: reply, createdAt: Date.now() }], { startedAt: streamStartedAt, ...(input.runGeneration != null ? { runGeneration: input.runGeneration } : {}) })
+        } catch {
+          callbacks.onError(error instanceof Error ? error.message : 'Goal 命令失败')
+          completeBeforeRun()
+        }
         return
       }
     }
