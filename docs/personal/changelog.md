@@ -2303,3 +2303,12 @@
 - **核实**：同一提交在主目录连续两次全量 `bun test` 均 876 pass / 0 fail；该测试文件单独运行 3 次耗时 4.62–4.86 s，紧贴 5 s 默认超时，打包时紧接 typecheck 运行、负载较高即超时。与 2026-10-29 两个慢测试的情况相同。
 - **修复**：只给该测试加 30 s 超时，不改断言与生产代码（`eb63b6b9`）。定向测试与全仓 typecheck 通过。Codex 独立审查（`--commit`，报告 `code-review/20261105-042618-commit-eb63b6b9.md`）：未发现问题。
 - 同步文档：本记录。
+
+## 2026-11-05: 安装 ea92ba72（Goal Memory M0，Claude Code）
+
+- **阶段一（关闭状态）通过**：标准 `install-update.sh` EXIT=0；备份 BACKUP VERIFY PASS（43,929 条目）；`SNAPSHOT MATCH (draft cleanup): removed=1 backups=1`（删除 `c0c0242d`、跳过所属工作区已不存在的 `6bf4b3e2`，与预演一致）。钥匙串弹 1 次。`scheduler-start enabledTasks=20` 在 `web-remote-start` 后 3 ms；`[FATAL]`/`[ERROR]` 0；`goal-memory/` 未创建；无 CDP 端口；定时任务与共享 Skill 不变。用户确认桌面与手机正常。
+- **安装前复核**：commit/证书 leaf/无 `app-update.yml`/876 pass 均符合；打包配置逐行复核（`asarUnpack` +worker、`build:main` 追加 worker 构建、`watch:main` 并行监听、dev readiness 加 worker）；`app.asar.unpacked/dist/personal-goal-artifact-worker.cjs` 存在（18,803 B）。
+- **阶段二（开启）未完成，已退回关闭**：`PROMA_PERSONAL_GOAL_MEMORY=1` 重启后，未绑定会话无 Goal 工具、`goals.sqlite` 首次发消息时创建、`/goal status` 由宿主处理；但桌面输入框把 `[ ]` 序列化为 `\[ \]`（`markdown-rich-text.ts` `escapeMarkdownText`，上游行为），`/goal set` 的 JSON 必然解析失败，且失败只走 `onError`、界面无提示，无法绑定合同，打包版 worker 未被调用。用户选择 unsetenv 并重启回到关闭状态；应用不回滚。
+- **数据**：`goals.sqlite` 保留（仅 metadata，合同 0），关闭重启前后 SHA-256 一致；下一次备份应包含 `goal-memory/`。
+- **版本**：previous = `1286ff19`；`46909718` 移入废纸篓；`20261102-122651-42117` 归档外置硬盘并复核 SNAPSHOT MATCH。
+- 详见交接单 `install-result-2026-11-05.md`（含两个缺陷与待办）。
