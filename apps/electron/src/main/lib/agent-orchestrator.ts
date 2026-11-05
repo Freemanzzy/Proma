@@ -766,12 +766,13 @@ export class AgentOrchestrator {
 
     // Goal 指令只在明确启用时由宿主解析；模型从未获得创建/修订合同的工具。
     if (isGoalMemoryEnabled() && isGoalCommandSourceAllowed({ triggeredBy: input.triggeredBy, automationContext, userMessage })) {
+      // 个人版：命令解析/执行失败时把原因作为宿主回复显示；回复落盘失败另行报错，避免误报“合同未改变”。
+      let reply: string | null = null
       try {
         const goalWorkspaceId = sessionMeta?.workspaceId ?? requestedWorkspaceId ?? 'default'
         const command = parseGoalCommand(userMessage)
         if (command) {
           const userRef = initialUserMessageUuid ?? userMessageUuid ?? randomUUID()
-          let reply: string
           if (command.command === 'set' || command.command === 'revise') {
             const contract = createGoalContract({
               sessionId,
@@ -794,6 +795,12 @@ export class AgentOrchestrator {
               reply = checkpoint ? buildGoalRestoreReply(contract, checkpoint) : 'Goal checkpoint 不可用。'
             }
           }
+        }
+      } catch (error) {
+        reply = buildGoalCommandFailureReply(error)
+      }
+      if (reply !== null) {
+        try {
           const assistantMessage: AgentMessage = { id: randomUUID(), role: 'assistant', content: reply, createdAt: Date.now() }
           const persistedReply: SDKMessage = {
             type: 'assistant', message: { content: [{ type: 'text', text: reply }] }, parent_tool_use_id: null,
@@ -801,17 +808,8 @@ export class AgentOrchestrator {
           } as unknown as SDKMessage
           appendSDKMessages(sessionId, [persistedReply])
           callbacks.onComplete([assistantMessage], { startedAt: streamStartedAt, ...(input.runGeneration != null ? { runGeneration: input.runGeneration } : {}) })
-          return
-        }
-      } catch (error) {
-        // 个人版：失败原因作为宿主回复持久化并显示，避免命令“发出后无任何反馈”。
-        try {
-          const reply = buildGoalCommandFailureReply(error)
-          const failedReply = { type: 'assistant', message: { content: [{ type: 'text', text: reply }] }, parent_tool_use_id: null, uuid: randomUUID(), _createdAt: Date.now() } as unknown as SDKMessage
-          appendSDKMessages(sessionId, [failedReply])
-          callbacks.onComplete([{ id: (failedReply as unknown as { uuid: string }).uuid, role: 'assistant', content: reply, createdAt: Date.now() }], { startedAt: streamStartedAt, ...(input.runGeneration != null ? { runGeneration: input.runGeneration } : {}) })
-        } catch {
-          callbacks.onError(error instanceof Error ? error.message : 'Goal 命令失败')
+        } catch (error) {
+          callbacks.onError(`Goal 命令回复保存失败：${error instanceof Error ? error.message : String(error)}`)
           completeBeforeRun()
         }
         return

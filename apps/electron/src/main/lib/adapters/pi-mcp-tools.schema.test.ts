@@ -32,4 +32,7 @@ test('MCP tools reaching Pi have no top-level combinators; the constraint moves 
   expect(fetch.description).toBe('Fetch thread\n参数约束：需提供 thread_id，或 需提供 thread_reference')
   expect(plain.description).toBe('Plain tool')
   expect(JSON.parse(JSON.stringify(plain.parameters)).required).toEqual(['q'])
+  await expect(fetch.execute('call-1', {}, undefined as never, undefined as never, undefined as never)).rejects.toThrow('参数不满足工具约束（anyOf）')
+  const ok = await fetch.execute('call-2', { thread_id: 't1' }, undefined as never, undefined as never, undefined as never)
+  expect(JSON.stringify(ok)).toContain('ok')
 }, 30_000)

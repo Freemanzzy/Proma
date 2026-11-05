@@ -42,3 +42,18 @@ test('truncates very long notes and warns once per tool', () => {
     expect(warns.length).toBe(1)
   } finally { console.warn = original }
 })
+
+test('re-checks removed required-only combinators before execution', async () => {
+  const { checkRemovedTopLevelConstraints } = await import('./personal-mcp-schema')
+  const anyOf = { type: 'object', anyOf: [{ required: ['a'] }, { required: ['b'] }] }
+  expect(checkRemovedTopLevelConstraints(anyOf, {})).toBe('参数不满足工具约束（anyOf）：需提供 a，或 需提供 b')
+  expect(checkRemovedTopLevelConstraints(anyOf, { b: 'x' })).toBeNull()
+  const oneOf = { type: 'object', oneOf: [{ required: ['a'] }, { required: ['b'] }] }
+  expect(checkRemovedTopLevelConstraints(oneOf, { a: 1, b: 2 })).not.toBeNull()
+  expect(checkRemovedTopLevelConstraints(oneOf, { a: 1 })).toBeNull()
+  const allOf = { type: 'object', allOf: [{ required: ['a'] }, { required: ['c'] }] }
+  expect(checkRemovedTopLevelConstraints(allOf, { a: 1 })).not.toBeNull()
+  expect(checkRemovedTopLevelConstraints(allOf, { a: 1, c: 0 })).toBeNull()
+  // 非 required-only 形状不在本地校验，交给服务端
+  expect(checkRemovedTopLevelConstraints({ type: 'object', anyOf: [{ properties: { a: { const: 1 } } }] }, {})).toBeNull()
+})

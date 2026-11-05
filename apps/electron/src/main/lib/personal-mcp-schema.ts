@@ -45,5 +45,31 @@ export function normalizeMcpInputSchema(schema: Record<string, unknown>, toolKey
   return { schema: copy, note }
 }
 
+function requiredOnly(branch: unknown): string[] | null {
+  if (!branch || typeof branch !== 'object' || Array.isArray(branch)) return null
+  const record = branch as Record<string, unknown>
+  const keys = Object.keys(record)
+  if (keys.length !== 1 || keys[0] !== 'required' || !Array.isArray(record.required)) return null
+  return record.required.every((item) => typeof item === 'string') ? record.required as string[] : null
+}
+
+/**
+ * 执行前补回被移出的顶层约束校验（仅限 `{ required: [...] }` 形状的分支，这是 MCP 工具最常见的写法）。
+ * 其他形状无法在本地等价校验，交由 MCP 服务端校验。返回错误说明；满足或无法检查时返回 null。
+ */
+export function checkRemovedTopLevelConstraints(original: Record<string, unknown>, args: Record<string, unknown>): string | null {
+  const has = (key: string) => Object.prototype.hasOwnProperty.call(args, key) && args[key] !== undefined
+  for (const key of TOP_LEVEL_COMBINATORS) {
+    if (!(key in original)) continue
+    const raw = Array.isArray(original[key]) ? original[key] as unknown[] : [original[key]]
+    const branches = raw.map(requiredOnly)
+    if (branches.some((branch) => branch === null)) continue
+    const satisfied = (branches as string[][]).filter((fields) => fields.every(has)).length
+    const ok = key === 'anyOf' ? satisfied >= 1 : key === 'oneOf' ? satisfied === 1 : satisfied === branches.length
+    if (!ok) return `参数不满足工具约束（${key}）：${raw.map(describeBranch).join(key === 'allOf' ? '，且 ' : '，或 ')}`
+  }
+  return null
+}
+
 /** 测试用：重置 WARN 去重 */
 export function resetPersonalMcpSchemaWarningsForTest(): void { warned.clear() }

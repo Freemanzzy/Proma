@@ -7,7 +7,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import { normalizeMcpInputSchema } from '../personal-mcp-schema'
+import { checkRemovedTopLevelConstraints, normalizeMcpInputSchema } from '../personal-mcp-schema'
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
@@ -541,6 +541,8 @@ function createPiMcpToolDefinition(binding: McpToolBinding): ToolDefinition {
     parameters: toTypeBoxSchema(binding.tool.inputSchema, toolName),
     async execute(_toolCallId, params, signal) {
       const args = isObjectSchema(params) ? params as Record<string, unknown> : {}
+      const constraintError = schemaNote && isObjectSchema(binding.tool.inputSchema) ? checkRemovedTopLevelConstraints(binding.tool.inputSchema, args) : null
+      if (constraintError) throw new Error(constraintError)
       const result = await binding.manager.callTool(binding.serverName, binding.managerConfig, binding.originalToolName, args, signal)
       return convertMcpResult(result)
     },
