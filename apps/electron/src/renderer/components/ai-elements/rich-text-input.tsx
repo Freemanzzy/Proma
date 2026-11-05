@@ -62,6 +62,7 @@ import {
   createSkillMentionSuggestion,
 } from '@/components/agent/mention-suggestions'
 import { shouldConvertClipboardTextToAttachment } from '@/lib/clipboard-text-attachment'
+import { isSlashCommandPasteText } from '@/lib/personal-paste'
 import { measurePerformance } from '@/lib/performance-monitor'
 import {
   VOICE_DICTATION_CLEAR_PREVIEW_EVENT,
@@ -777,6 +778,13 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
           }
           event.preventDefault()
           view.dispatch(view.state.tr.insertText(plainText).setMeta('uiEvent', 'paste'))
+          return true
+        }
+
+        // 个人版：/命令 粘贴按纯文本插入，不经 Markdown/HTML 解析；不带 uiEvent=paste，避免 TipTap 粘贴规则把 *x* 等转成格式（见 personal-paste.ts）
+        if (isSlashCommandPasteText(plainText)) {
+          event.preventDefault()
+          view.dispatch(view.state.tr.insertText(plainText).scrollIntoView())
           return true
         }
 

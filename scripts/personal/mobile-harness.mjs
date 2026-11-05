@@ -675,7 +675,7 @@ async function createHarness(options) {
     }
     throw new Error(`未找到中止后的 assistant 记录: ${userText}; historyTail=${JSON.stringify(last.slice(-6).map((message) => ({ role: sdkMessageRole(message), text: sdkMessageText(message).slice(0, 220), stopReason: message.stop_reason ?? message.message?.stop_reason })))}`)
   }
-  const inputAndSend = async (message) => {
+  const inputAndSend = async (message, { submissionText } = {}) => {
     const input = await client.evaluate(`(() => { const n=document.querySelector('textarea:not([disabled]),[contenteditable="true"]'); if(!n)return null; const r=n.getBoundingClientRect(); n.focus(); return {x:r.left+r.width/2,y:r.top+r.height/2,tag:n.tagName}; })()`)
     if (!input) {
       const diagnostic = await client.evaluate('({body:document.body.innerText.slice(-1200),ask:Boolean(document.querySelector(".ask-user-banner")),plan:document.body.innerText.includes("Agent 计划待审批")})')
@@ -704,7 +704,7 @@ async function createHarness(options) {
       throw new Error(`找不到发送按钮 controls=${JSON.stringify(controls)}`)
     }
     await touchAt(client, send.x, send.y)
-    await waitForUserSubmission(message)
+    await waitForUserSubmission(submissionText ?? message)
     return { submitted: true, userText: message }
   }
   const waitText = (text, timeoutMs = 60_000) => waitUntil(client, `document.body.innerText.includes(${quoteJs(text)})`, timeoutMs)
@@ -2045,18 +2045,81 @@ async function runImageBudget(harness, options, result) {
 }
 
 // 个人版 Goal Memory：经真实输入框发送 /goal 命令（需 dev 以 PROMA_PERSONAL_GOAL_MEMORY=1 启动）。
+// 从 dev 数据目录的 goals.sqlite 读该会话最新合同（只读；python3 自带 sqlite3）
+function readLatestGoalContract(sessionId) {
+  const dbPath = join(homedir(), process.env.PROMA_DEV_DATA_DIR_NAME || '.proma-dev', 'goal-memory', 'goals.sqlite')
+  const script = 'import sqlite3,sys,json\ndb=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro",uri=True)\nrow=db.execute("select payload from contracts where session_id=? order by revision desc limit 1",(sys.argv[2],)).fetchone()\nprint(row[0] if row else "null")'
+  return JSON.parse(execFileSync('python3', ['-c', script, dbPath, sessionId], { encoding: 'utf8', timeout: 15_000 }).trim())
+}
+
+// 模拟系统粘贴：剪贴板只有 text/plain，派发真实 paste 事件给编辑器（走 rich-text-input 的 handlePaste）
+async function pasteAndSend(harness, text) {
+  const client = harness.client
+  const input = await client.evaluate(`(() => { const n=[...document.querySelectorAll('[contenteditable="true"]')].find((x)=>{const r=x.getBoundingClientRect();return r.width>0&&r.height>0}); if(!n)return null; const r=n.getBoundingClientRect(); n.focus(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`)
+  if (!input) throw new Error('找不到富文本输入框')
+  await touchAt(client, input.x, input.y)
+  const dispatched = await client.evaluate(`(() => { const n=[...document.querySelectorAll('[contenteditable="true"]')].find((x)=>{const r=x.getBoundingClientRect();return r.width>0&&r.height>0}); if(!n)return false; n.focus(); const dt=new DataTransfer(); dt.setData('text/plain', ${quoteJs(text)}); return n.dispatchEvent(new ClipboardEvent('paste',{clipboardData:dt,bubbles:true,cancelable:true})) === false })()`)
+  if (!dispatched) throw new Error('paste 事件未被编辑器处理（未 preventDefault）')
+  await delay(150)
+  const editorText = await client.evaluate(`(() => { const n=[...document.querySelectorAll('[contenteditable="true"]')].find((x)=>{const r=x.getBoundingClientRect();return r.width>0&&r.height>0}); return n ? n.innerText : null })()`)
+  if (typeof editorText !== 'string' || editorText.trim() !== text.trim()) throw new Error(`粘贴后输入框内容被改写: ${JSON.stringify({ editorText: editorText?.slice(0, 400), expected: text.slice(0, 400) })}`)
+  const send = await client.evaluate(`(() => { const nodes=[...document.querySelectorAll('button,[role="button"]')]; const visible=(x)=>{const r=x.getBoundingClientRect();return r.width>0&&r.height>0&&r.bottom>innerHeight-110&&x.getAttribute('aria-disabled')!=='true'&&!x.disabled}; const named=nodes.find(x=>visible(x)&&/^(发送|Send)$/.test((x.innerText||x.getAttribute('aria-label')||'').trim())); const bottom=nodes.filter(visible).sort((a,b)=>b.getBoundingClientRect().right-a.getBoundingClientRect().right)[0]; const n=named||bottom; if(!n)return null; const r=n.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`)
+  if (!send) throw new Error('找不到发送按钮')
+  await touchAt(client, send.x, send.y)
+}
+
+// 个人版 Goal Memory：经真实输入框发送 /goal 命令（需 dev 以 PROMA_PERSONAL_GOAL_MEMORY=1 启动）。
+// 缺陷 3 只在富文本模式出现：临时打开 dev fixture 的 richTextRenderingEnabled（web remote 禁止 settings:update），结束后恢复
+async function withDevRichText(harness, run) {
+  const dirName = process.env.PROMA_DEV_DATA_DIR_NAME || '.proma-dev'
+  if (!/^\.proma-dev/.test(dirName)) throw new Error(`拒绝修改非 dev 数据目录设置: ${dirName}`)
+  const settingsPath = join(homedir(), dirName, 'settings.json')
+  const original = readFileSync(settingsPath, 'utf8')
+  const settings = JSON.parse(original)
+  const reload = async () => {
+    await harness.client.evaluate('location.reload()')
+    await waitUntil(harness.client, 'Boolean(document.querySelector(\'[contenteditable="true"],textarea\')) || document.readyState === "complete"', 30_000)
+    await delay(1500)
+  }
+  if (settings.richTextRenderingEnabled === true) return run()
+  writeFileSync(settingsPath, JSON.stringify({ ...settings, richTextRenderingEnabled: true }, null, 2))
+  try {
+    await reload()
+    return await run()
+  } finally {
+    writeFileSync(settingsPath, original)
+  }
+}
+
 async function runGoalCommand(harness, options, result) {
+  return withDevRichText(harness, () => runGoalCommandInner(harness, options, result))
+}
+
+async function runGoalCommandInner(harness, options, result) {
   const title = `goal-command-harness-${Date.now()}`
   const session = await harness.createHarnessSession(title)
   result.harnessSession = { id: session.id, title: session.title, workspaceId: session.workspaceId }
-  const contract = { expectedRevision: 0, originalText: 'harness 验证 a_b *重要* <tag> | C:\\temp', scope: ['验证 /goal set 经输入框'], nonGoals: ['不修改任何文件'], hardConstraints: ['保留 x_y [原样]'], acceptance: ['1. status 显示 revision 1'] }
-  const setMessage = `/goal set ${JSON.stringify(contract)}`
-  await harness.inputAndSend(setMessage)
-  await harness.waitForAssistantReply(setMessage, '已保存 Goal 合同 revision 1', 20_000)
-  result.steps.push({ name: 'goal-set-via-editor', ok: true })
+  const probe = `PASTEPROBE${Date.now()}`
+  // 粘贴路径：含 \\、<tag>、_ * | [ ]，且多行（pretty JSON）
+  const pastedContract = { expectedRevision: 0, originalText: `${probe} a_b *重要* <tag> | 路径 C:\\temp [x]`, scope: ['验证 /goal set 经粘贴'], nonGoals: ['不修改任何文件'], hardConstraints: ['保留 x_y [原样] <b>'], acceptance: ['1. status 显示 revision 1'] }
+  await pasteAndSend(harness, `/goal set ${JSON.stringify(pastedContract, null, 2)}`)
+  await harness.waitForAssistantReply(probe, '已保存 Goal 合同 revision 1', 20_000)
+  const pastedStored = readLatestGoalContract(session.id)
+  result.goalPaste = { stored: pastedStored?.originalText ?? null, expected: pastedContract.originalText }
+  if (!pastedStored || pastedStored.originalText !== pastedContract.originalText || JSON.stringify(pastedStored.hardConstraints) !== JSON.stringify(pastedContract.hardConstraints)) throw new Error(`粘贴后落库合同与输入不一致: ${JSON.stringify(result.goalPaste)}`)
+  result.steps.push({ name: 'goal-set-via-paste-db-exact', ok: true })
   await harness.inputAndSend('/goal status')
   await harness.waitForAssistantReply('/goal status', 'Goal revision 1', 20_000)
   result.steps.push({ name: 'goal-status', ok: true })
+  // 逐字输入路径（经 Markdown 序列化）
+  const typedProbe = `TYPEDPROBE${Date.now()}`
+  const typedContract = { expectedRevision: 1, originalText: `${typedProbe} a_b *重要* <tag> | C:\\temp`, scope: ['验证 /goal 经输入框'], nonGoals: ['不修改任何文件'], hardConstraints: ['保留 x_y [原样]'], acceptance: ['1. status 显示 revision 2'] }
+  // 富文本模式下历史里是编辑器转义后的文本，按探针匹配提交
+  await harness.inputAndSend(`/goal revise ${JSON.stringify(typedContract)}`, { submissionText: typedProbe })
+  await harness.waitForAssistantReply(typedProbe, '已保存 Goal 合同 revision 2', 20_000)
+  const typedStored = readLatestGoalContract(session.id)
+  if (!typedStored || typedStored.originalText !== typedContract.originalText) throw new Error(`输入后落库合同与输入不一致: ${JSON.stringify({ stored: typedStored?.originalText, expected: typedContract.originalText })}`)
+  result.steps.push({ name: 'goal-revise-via-editor-db-exact', ok: true })
   await harness.inputAndSend('/goal set {not json')
   await harness.waitForAssistantReply('/goal set {not json', 'Goal 命令未执行', 20_000)
   result.steps.push({ name: 'goal-failure-visible', ok: true })

@@ -83,7 +83,7 @@ import { cleanUserMessageForTitle, createFallbackTitle, sanitizeGeneratedTitle, 
 import { fetchAgentTitleWithFallback } from './agent-title-retry'
 import { claimWorkspaceMemoryRefreshOpportunity } from './agent-memory-refresh-service'
 import { resolveRuntimeAdditionalDirectories } from './agent-orchestrator-vault-access'
-import { buildGoalRestoreReply, createGoalContract, createGoalMemoryCapability, disableGoalForSession, getGoalCheckpoint, getGoalContract, isGoalCommandSourceAllowed, isGoalManagementCommandMessage, isGoalMemoryEnabled, parseGoalCommand, buildGoalCommandFailureReply } from './personal-goal-memory'
+import { buildGoalRestoreReply, createGoalContract, createGoalMemoryCapability, disableGoalForSession, getGoalCheckpoint, getGoalContract, isGoalCommandSourceAllowed, isGoalManagementCommandMessage, isGoalMemoryEnabled, parseGoalCommand, buildGoalCommandFailureReply, formatGoalOriginalTextEcho } from './personal-goal-memory'
 import type { GoalMemoryCapability } from './personal-goal-memory'
 
 // ===== 类型定义 =====
@@ -780,7 +780,7 @@ export class AgentOrchestrator {
               ...command.input,
               userMessageRef: userRef,
             })
-            reply = `已保存 Goal 合同 revision ${contract.revision}（${contract.hash.slice(0, 12)}）。原文保留；未声明内容不会被推断为授权。`
+            reply = `已保存 Goal 合同 revision ${contract.revision}（${contract.hash.slice(0, 12)}）。未声明内容不会被推断为授权。请核对${formatGoalOriginalTextEcho(contract.originalText)}`
           } else if (command.command === 'off') {
             disableGoalForSession(sessionId)
             reply = '已在本会话关闭 Goal 恢复；已保存合同与历史数据保留。'
