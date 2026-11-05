@@ -47,6 +47,7 @@ import { useSkillMentionNames } from '@/components/agent/SkillMentionNamesProvid
 import type { HTMLAttributes, ComponentProps, ReactNode } from 'react'
 import type { FileAttachment } from '@proma/shared'
 import type { QuotedSelection } from '@/atoms/preview-atoms'
+import { formatHostSlashCommandForDisplay } from '@/lib/personal-slash-command-display'
 
 // ===== Message 根容器 =====
 
@@ -855,6 +856,7 @@ export const UserMessageContent = React.memo(
     const [isExpanded, setIsExpanded] = React.useState(false)
     const [shouldCollapse, setShouldCollapse] = React.useState(false)
     const contentRef = React.useRef<HTMLDivElement>(null)
+    const hostCommandText = React.useMemo(() => formatHostSlashCommandForDisplay(children), [children])
 
     // 观察内部自然高度而非带 max-height 的外壳，避免折叠动画触发测量反馈。
     // 名称异步更新与容器宽度变化都可能改变换行；不需要订阅全局名称 Context。
@@ -889,7 +891,10 @@ export const UserMessageContent = React.memo(
           )}
         >
           <AgentHistoryQuoteClickContext.Provider value={onAgentHistoryQuoteClick}>
-            <MessageResponse className="prose-p:my-0.5 prose-headings:my-1.5" remarkPlugins={USER_REMARK_PLUGINS}>{children}</MessageResponse>
+            {hostCommandText !== null
+              // 个人版：/goal 等宿主命令按纯文本显示（见 personal-slash-command-display.ts）
+              ? <div data-host-command-text className="whitespace-pre-wrap break-words text-[length:var(--md-preview-font-size,15px)] leading-[1.6]">{hostCommandText}</div>
+              : <MessageResponse className="prose-p:my-0.5 prose-headings:my-1.5" remarkPlugins={USER_REMARK_PLUGINS}>{children}</MessageResponse>}
           </AgentHistoryQuoteClickContext.Provider>
         </div>
         {shouldCollapse && (

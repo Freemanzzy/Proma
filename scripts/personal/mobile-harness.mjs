@@ -2052,6 +2052,11 @@ function readLatestGoalContract(sessionId) {
   return JSON.parse(execFileSync('python3', ['-c', script, dbPath, sessionId], { encoding: 'utf8', timeout: 15_000 }).trim())
 }
 
+// 读取包含 marker 的最后一个用户/assistant 气泡的可见文本
+async function lastBubble(harness, role, marker) {
+  return harness.client.evaluate(`(() => { const nodes=[...document.querySelectorAll('[data-message-role=${quoteJs(role)}]')].filter((n)=>(n.innerText||'').includes(${quoteJs(marker)})); const n=nodes[nodes.length-1]; if(!n)return null; return {text:n.innerText, katex:n.querySelectorAll('.katex,.katex-error').length, hostCommand:Boolean(n.querySelector('[data-host-command-text]'))} })()`)
+}
+
 // 模拟系统粘贴：剪贴板只有 text/plain，派发真实 paste 事件给编辑器（走 rich-text-input 的 handlePaste）
 async function pasteAndSend(harness, text) {
   const client = harness.client
@@ -2117,6 +2122,12 @@ async function runGoalCommandInner(harness, options, result) {
   result.goalPaste = { stored: pastedStored?.originalText ?? null, expected: pastedContract.originalText }
   if (!pastedStored || pastedStored.originalText !== pastedContract.originalText || JSON.stringify(pastedStored.hardConstraints) !== JSON.stringify(pastedContract.hardConstraints)) throw new Error(`粘贴后落库合同与输入不一致: ${JSON.stringify(result.goalPaste)}`)
   result.steps.push({ name: 'goal-set-via-paste-db-exact', ok: true })
+  // 用户气泡：/goal 消息按纯文本显示（还原转义、无 KaTeX）
+  const bubble = await lastBubble(harness, 'user', probe)
+  result.goalUserBubble = bubble
+  const expectedBubbleFragments = [`${probe} a_b *重要* <tag> | 路径 C:\\\\temp [x]`, '"scope": [', '"hardConstraints": [', '保留 x_y [原样] <b>']
+  if (!bubble || bubble.katex > 0 || !bubble.hostCommand || expectedBubbleFragments.some((fragment) => !bubble.text.includes(fragment))) throw new Error(`用户气泡显示与输入不一致: ${JSON.stringify(bubble)}`)
+  result.steps.push({ name: 'goal-user-bubble-plain-text', ok: true })
   await harness.inputAndSend('/goal status')
   await harness.waitForAssistantReply('/goal status', 'Goal revision 1', 20_000)
   result.steps.push({ name: 'goal-status', ok: true })
@@ -2129,6 +2140,18 @@ async function runGoalCommandInner(harness, options, result) {
   const typedStored = readLatestGoalContract(session.id)
   if (!typedStored || typedStored.originalText !== typedContract.originalText) throw new Error(`输入后落库合同与输入不一致: ${JSON.stringify({ stored: typedStored?.originalText, expected: typedContract.originalText })}`)
   result.steps.push({ name: 'goal-revise-via-editor-db-exact', ok: true })
+  const typedBubble = await lastBubble(harness, 'user', typedProbe)
+  if (!typedBubble || typedBubble.katex > 0 || !typedBubble.text.includes('"scope":["验证 /goal 经输入框"],"nonGoals":[') || !typedBubble.text.includes('C:\\\\temp')) throw new Error(`逐字输入的用户气泡显示与输入不一致: ${JSON.stringify(typedBubble)}`)
+  // 控制字符兜底：JSON 里单个反斜杠 \t 解析成制表符 → 拒绝；失败提示在 Markdown 渲染后应显示两个反斜杠与 <JSON合同>
+  const ctrlProbe = `CTRLPROBE${Date.now()}`
+  const ctrlMessage = `/goal revise {"expectedRevision":2,"originalText":"${ctrlProbe} C:\\temp","scope":[],"nonGoals":[],"hardConstraints":[],"acceptance":[]}`
+  await pasteAndSend(harness, ctrlMessage)
+  await harness.waitForAssistantReply(ctrlProbe, 'Goal 命令未执行', 20_000)
+  const failure = await lastBubble(harness, 'assistant', 'Goal 命令未执行')
+  result.goalFailureBubble = failure
+  if (!failure || !failure.text.includes('含控制字符 U+0009') || !failure.text.includes('把反斜杠写成 \\\\') || !failure.text.includes('/goal set <JSON合同>')) throw new Error(`失败提示可见文本不符: ${JSON.stringify(failure)}`)
+  if (readLatestGoalContract(session.id)?.originalText !== typedContract.originalText) throw new Error('控制字符被拒后合同不应改变')
+  result.steps.push({ name: 'goal-control-char-failure-visible-text', ok: true })
   await harness.inputAndSend('/goal set {not json')
   await harness.waitForAssistantReply('/goal set {not json', 'Goal 命令未执行', 20_000)
   result.steps.push({ name: 'goal-failure-visible', ok: true })
