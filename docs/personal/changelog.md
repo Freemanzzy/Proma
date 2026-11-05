@@ -2328,3 +2328,13 @@
   第 2 轮针对修复提交（`--commit`）：未发现问题。
 - **验证**：全量 `bun test` 887 pass / 0 fail（需在未导出 `PROMA_DEV_DATA_DIR_NAME` 的环境中运行：该变量会被 `planning-manager.test.ts` 子进程继承而误报）；全仓 typecheck、`test-personal-scripts.py`、`build:main` 通过。fixture dev（`PROMA_PERSONAL_GOAL_MEMORY=1`）：`desktop:goal-command` PASS，合同落库 `originalText` 与输入一致（`_ * < | \ [ ]` 均原样），iphone/android `smoke` PASS；结束后 dev 已停。MCP 修复未在 dev 中用真实 Anthropic 请求验证（fixture 无带顶层 `anyOf` 的 MCP），安装后可重新启用 nowledge-mem 在 Anthropic 渠道会话中核实。
 - **同步文档**：`docs/personal/goal-memory.md`（输入转义与失败回复）、`PERSONAL.md`（MCP schema 兼容化）、`docs/personal/backlog.md`（当前安装、已合入未安装）、本记录。
+
+## 2026-11-05: 安装 4fefcd5f（M0 缺陷修复，重做阶段二，Claude Code）
+
+- **安装**：标准 `install-update.sh` EXIT=0；备份 BACKUP VERIFY PASS（43,948 条目，含 `goal-memory/`）；启动前后 SNAPSHOT MATCH；`draft-cleanup removed=0 skipped=1`（与预演一致）。钥匙串弹 1 次。`scheduler-start enabledTasks=20` 在 `web-remote-start` 后 3 ms；`[FATAL]`/`[ERROR]`/`[WARN]` 0；定时任务 20/20 ID 一致；无 CDP 端口；`goals.sqlite` SHA-256 安装前后不变。
+- **阶段二（开启）部分通过**：`/goal set`/`status`/`restore`/`off` 正常；非法 JSON 显示“Goal 命令未执行”（缺陷 2 已修）；GoalCheckpointRead/GoalEvidenceRead 正常返回，**打包版 worker 首次运行通过**，main.log 无 worker 失败或超时；未登记会话无 Goal 工具。
+- **未通过**：合同 `originalText` 与输入不一致。粘贴的 `<tag>` 丢失，`C:\\temp` 落库为 `C:<TAB>emp`。根因是富文本输入框 `handlePaste` 把粘贴的纯文本经 `markdownToHtml` 按 Markdown 解析（`\\`→`\`、`<tag>` 当 HTML 丢弃），发生在序列化转义之前，Goal 端无法还原。harness 走逐字输入，未覆盖粘贴。记为缺陷 3，交 Proma。
+- **收尾**：用户决定关闭，`launchctl unsetenv` 后重启，启动正常；应用不回滚。`goals.sqlite` 保留测试合同 1 条（已 off）。
+- **版本**：previous = `ea92ba72`；`1286ff19` 移入废纸篓；`20261105-115200-29138` 归档外置硬盘并复核 SNAPSHOT MATCH。
+- MCP 顶层组合约束修复的真实 Anthropic 验证待 Proma 在会话中完成（用户已重新启用 nowledge-mem）。
+- 详见交接单 `install-result-2026-11-05-2.md`。
