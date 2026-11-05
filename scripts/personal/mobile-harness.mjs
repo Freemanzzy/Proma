@@ -2044,6 +2044,28 @@ async function runImageBudget(harness, options, result) {
   result.steps.push({ name: 'image-budget-real-session', ok: true })
 }
 
+// 个人版 Goal Memory：经真实输入框发送 /goal 命令（需 dev 以 PROMA_PERSONAL_GOAL_MEMORY=1 启动）。
+async function runGoalCommand(harness, options, result) {
+  const title = `goal-command-harness-${Date.now()}`
+  const session = await harness.createHarnessSession(title)
+  result.harnessSession = { id: session.id, title: session.title, workspaceId: session.workspaceId }
+  const contract = { expectedRevision: 0, originalText: 'harness 验证 a_b *重要* <tag> | C:\\temp', scope: ['验证 /goal set 经输入框'], nonGoals: ['不修改任何文件'], hardConstraints: ['保留 x_y [原样]'], acceptance: ['1. status 显示 revision 1'] }
+  const setMessage = `/goal set ${JSON.stringify(contract)}`
+  await harness.inputAndSend(setMessage)
+  await harness.waitForAssistantReply(setMessage, '已保存 Goal 合同 revision 1', 20_000)
+  result.steps.push({ name: 'goal-set-via-editor', ok: true })
+  await harness.inputAndSend('/goal status')
+  await harness.waitForAssistantReply('/goal status', 'Goal revision 1', 20_000)
+  result.steps.push({ name: 'goal-status', ok: true })
+  await harness.inputAndSend('/goal set {not json')
+  await harness.waitForAssistantReply('/goal set {not json', 'Goal 命令未执行', 20_000)
+  result.steps.push({ name: 'goal-failure-visible', ok: true })
+  await harness.inputAndSend('/goal off')
+  await harness.waitForAssistantReply('/goal off', '已在本会话关闭 Goal 恢复', 20_000)
+  result.steps.push({ name: 'goal-off', ok: true })
+  result.screenshots.push(await harness.screenshot('goal-command'))
+}
+
 async function runCopy(harness, options, result) {
   const origin = new URL(options.url).origin
   await harness.client.command('Browser.grantPermissions', { origin, permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] }).catch(() => {})
@@ -2127,6 +2149,7 @@ async function main() {
     else if (options.suite === 'abort') await runAbort(harness, options, result)
     else if (options.suite === 'extra') await runExtra(harness, options, result)
     else if (options.suite === 'copy') await runCopy(harness, options, result)
+    else if (options.suite === 'goal-command') await runGoalCommand(harness, options, result)
     else if (options.suite === 'attachments') await runAttachments(harness, options, result)
     else if (options.suite === 'file-preview') await runFilePreview(harness, options, result)
     else if (options.suite === 'preload-recovery') await runPreloadRecovery(harness, options, result)
