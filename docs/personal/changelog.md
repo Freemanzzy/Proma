@@ -2312,3 +2312,19 @@
 - **数据**：`goals.sqlite` 保留（仅 metadata，合同 0），关闭重启前后 SHA-256 一致；下一次备份应包含 `goal-memory/`。
 - **版本**：previous = `1286ff19`；`46909718` 移入废纸篓；`20261102-122651-42117` 归档外置硬盘并复核 SNAPSHOT MATCH。
 - 详见交接单 `install-result-2026-11-05.md`（含两个缺陷与待办）。
+
+## 2026-11-05: 修复 `/goal` 输入转义与失败无提示；MCP 顶层组合约束兼容 Anthropic
+
+- **来源**：install-result-2026-11-05 待办 1（缺陷 1、2）与待办 7。
+- **缺陷 1：桌面输入框发不出合法 `/goal set`**。输入框发送前经 `htmlToMarkdown` 转义 `` \ ` * _ [ ] < > | `` 与行首 `# > + - N.`，合同数组的方括号被加反斜杠，JSON 解析必然失败；dev 验证未暴露，因为此前测试直接经 IPC 发送原文。修复（`personal-goal-memory.ts`）：`parseGoalCommand` 先按原文解析，失败时只用 `unescapeEditorMarkdown` 还原上述转义再解析一次。合同必含数组，转义后文本一定不是合法 JSON，所以不会误改直接发送的原始 JSON；`originalText` 存还原后的真实原文。新增 `personal-goal-command-input.test.ts`：经真实 `htmlToMarkdown` 序列化（含 `_ * < | \ [ ]`、`#`、`1.`）后解析结果与原合同完全一致；原始 JSON 不被还原；revise 同理。
+- **缺陷 2：失败无提示**。`agent-orchestrator.ts` 的 Goal 命令分支：解析或执行失败时生成宿主回复“Goal 命令未执行：<原因>。本会话的 Goal 合同未改变……”并与成功分支一样持久化、完成本轮；回复落盘失败另报“Goal 命令回复保存失败”，避免合同已提交时误报“未改变”。
+- **待办 7：Anthropic 400**。nowledge-mem 的两个 MCP 工具 `inputSchema` 顶层含 `anyOf`，Anthropic 拒绝（`input_schema does not support oneOf, allOf, or anyOf at the top level`），整次请求失败。修复：新个人版模块 `personal-mcp-schema.ts`，在 `pi-mcp-tools.ts` 构建工具时移除顶层 `oneOf`/`anyOf`/`allOf`（嵌套位置保留），约束压缩成一句写入工具描述（≤400 字，每个工具只记一次 WARN）；`{ required: [...] }` 形状的约束在 `execute` 前本地补回校验，不满足时抛出带说明的错误，不调用服务端；其他形状交由服务端校验。所有 provider 一致处理。新增单测与 `pi-mcp-tools.schema.test.ts`（起一个最小 stdio MCP 服务器：发给 Pi 的 schema 无顶层组合约束、描述含约束、`{}` 被拒、合法参数正常调用）。上游 `pi-mcp-tools.ts` 改动约 7 行。
+- **harness**：新增 `goal-command` 套件，经真实输入框依次发送 `/goal set`（含特殊字符）、`/goal status`、非法 JSON、`/goal off`，断言宿主回复。需 dev 以 `PROMA_PERSONAL_GOAL_MEMORY=1` 启动。
+- **变异检验**：去掉转义还原 → 输入测试 2 处失败；去掉 schema 规范化 → 集成测试失败；去掉 WARN 去重 → 单测失败；去掉执行前约束校验 → 集成测试失败。
+- **Codex 独立审查**：第 1 轮（`--base personal`，报告 `code-review/` 下 2026-11-05 base-personal）3 条 P2——
+  1. 移除组合约束同时丢掉了 Pi 的执行前参数校验 → **采纳**，补回 required 形状的本地校验；
+  2. Goal 失败回复与合同已提交后的回复落盘失败混在同一个 catch，可能误报“合同未改变” → **采纳**，缩小捕获范围、分别报告；
+  3. harness 按原文匹配用户消息，经编辑器转义后会超时 → **反驳**：`desktop:goal-command` 在 fixture dev 中实际运行 3 次均 4/4 通过（历史读取的是渲染后文本），有运行证据。
+  第 2 轮针对修复提交（`--commit`）：未发现问题。
+- **验证**：全量 `bun test` 887 pass / 0 fail（需在未导出 `PROMA_DEV_DATA_DIR_NAME` 的环境中运行：该变量会被 `planning-manager.test.ts` 子进程继承而误报）；全仓 typecheck、`test-personal-scripts.py`、`build:main` 通过。fixture dev（`PROMA_PERSONAL_GOAL_MEMORY=1`）：`desktop:goal-command` PASS，合同落库 `originalText` 与输入一致（`_ * < | \ [ ]` 均原样），iphone/android `smoke` PASS；结束后 dev 已停。MCP 修复未在 dev 中用真实 Anthropic 请求验证（fixture 无带顶层 `anyOf` 的 MCP），安装后可重新启用 nowledge-mem 在 Anthropic 渠道会话中核实。
+- **同步文档**：`docs/personal/goal-memory.md`（输入转义与失败回复）、`PERSONAL.md`（MCP schema 兼容化）、`docs/personal/backlog.md`（当前安装、已合入未安装）、本记录。

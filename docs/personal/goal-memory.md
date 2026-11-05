@@ -18,6 +18,8 @@ Goal Memory 将本会话用户明确提交的目标作为版本化恢复合同�
 
 命令由主进程编排器解析。`set`/`revise` 的 JSON schema 要求 `expectedRevision`（非负整数）、`originalText`（字符串）、`scope`、`nonGoals`、`hardConstraints`、`acceptance`（均为字符串数组，可为空）；未知字段拒绝而非忽略。`expectedRevision` 必须等于已存最新版本，CAS 在 SQLite `BEGIN IMMEDIATE` 事务内完成。命令来源 gate 拒绝 automation、delegation、带 `automationContext` 的运行及已知子任务自动唤醒通知；保留手动用户和人类 web-remote `external` 入口，不把所有 `external` 一概拒绝。模型没有创建或修订合同的工具。Goal 相关 workspace 统一先取持久会话 metadata 的 `workspaceId`；仅缺失时才回退请求 workspace，最终使用 `default`，不能由后续请求改写会话归属。功能启用时，活跃轮次中的 `queueMessage` 在 adapter 注入、enrichment 与 JSONL 持久化前拒绝所有 `/goal` 管理命令（含未知子命令），提示等待当前轮结束或停止后再发；普通queued文本不受影响，功能关闭时保留既有路径。合同字段另含用户消息引用与 hash。`/goal restore` 会把 `userMessageRef` 标为历史来源，说明 checkpoint 只是历史快照、本命令未核验当前artifact/branch，待下次query验证，并明确不构成本轮新授权。
 
+经桌面或手机输入框发送时，文本会先被序列化为 Markdown（转义 `\ ` * _ [ ] < > |` 与行首 `# > + - N.`）。`set`/`revise` 先按原文解析 JSON；失败时只还原这些转义再解析一次（合同必含数组，转义后的文本一定不是合法 JSON，因此不会误改直接发送的原始 JSON），`originalText` 保存还原后的真实原文。任何 `/goal` 命令失败都以宿主回复显示原因（“Goal 命令未执行：…本会话的 Goal 合同未改变”），不调用模型。（2026-11-05）
+
 ## 存储与一致性
 
 使用独立 SQLite sidecar，schemaVersion=1、DELETE journal、`synchronous=FULL`。合同记录以 `(goal_id, revision)` 追加保存，当前会话只维护指向当前 revision 的索引。Checkpoint 的宿主观察使用单调递增 `sequence` 做严格 CAS；模型报告使用独立 `modelSequence` CAS，因此合法 `turn_end` observation 不会使报告必然冲突，而同一旧 model token 的并发/迟到报告会被拒绝。模型工具必须提交读取时的 `goalId`、合同 `revision` 与 `expectedModelSequence`，不会先读最新checkpoint再把旧报告重基线到新合同。报告在事务中保留最新 host `observed`/artifact hash，不可写host-only事实。旧合同revision写入拒绝。模型状态最多`claimed_done`，没有`verified/completed`。历史schemaVersion=1 checkpoint 缺少 `modelSequence` 时按初值0读取；存在但无效的值会 fail closed。
