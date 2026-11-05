@@ -7,6 +7,7 @@ import type { ArtifactScanJob, ArtifactScanResult, GoalEvidenceSnapshotEntry } f
 import type { ExtensionFactory, ToolDefinition } from '@earendil-works/pi-coding-agent'
 import type { AgentToolResult } from '@earendil-works/pi-agent-core'
 import { Type } from 'typebox'
+import { unescapeEditorMarkdown } from '../../renderer/lib/personal-slash-command-display'
 
 export const GOAL_CONTEXT_BUDGET_CHARS = 12_000
 export const GOAL_EVIDENCE_MAX_BYTES = 2 * 1024 * 1024
@@ -1043,13 +1044,11 @@ export function formatGoalOriginalTextEcho(value: string): string {
 /** /goal 命令失败时给用户的宿主回复（不调用模型；合同未改变）。 */
 export function buildGoalCommandFailureReply(error: unknown): string {
   const reason = error instanceof Error && error.message ? error.message : '未知错误'
-  return `Goal 命令未执行：${reason}。本会话的 Goal 合同未改变。用法：/goal set <JSON合同>、/goal revise <JSON合同>、/goal status、/goal restore、/goal off。`
+  return `Goal 命令未执行：${reason}。本会话的 Goal 合同未改变。用法：\`/goal set <JSON合同>\`、\`/goal revise <JSON合同>\`、\`/goal status\`、\`/goal restore\`、\`/goal off\`。`
 }
 
-/** 还原输入框 Markdown 序列化（renderer/lib/markdown-rich-text.ts escapeMarkdownText）加入的反斜杠转义。 */
-export function unescapeEditorMarkdown(value: string): string {
-  return value.replace(/\\([\\`*_[\]<>|#+\-.])/g, '$1')
-}
+/** 还原输入框 Markdown 序列化（renderer/lib/markdown-rich-text.ts escapeMarkdownText）加入的反斜杠转义；实现与用户气泡显示共用。 */
+export { unescapeEditorMarkdown }
 
 export function parseGoalCommand(message: string): GoalCommand | null {
   const match = /^\/goal(?:\s+([a-z-]+))?(?:\s+([\s\S]*))?\s*$/.exec(message)
@@ -1083,13 +1082,13 @@ export function parseGoalCommand(message: string): GoalCommand | null {
     const fields: Array<[string, string]> = [['originalText', data.originalText], ...Object.entries(lists).flatMap(([key, items]) => items.map((item) => [key, item] as [string, string]))]
     for (const [field, value] of fields) {
       const bad = findGoalControlCharacter(value)
-      if (bad) throw new Error(`${field} 含控制字符 ${bad}（除换行外不允许）；若是 Windows 路径，请在 JSON 中把反斜杠写成 \\\\`)
+      if (bad) throw new Error(`${field} 含控制字符 ${bad}（除换行外不允许）；若是 Windows 路径，请在 JSON 中把反斜杠写成 \`\\\\\``)
     }
     return { command, input: {
       expectedRevision: data.expectedRevision as number, originalText: data.originalText, ...lists,
     } }
   }
-  throw new Error('用法：/goal set <JSON合同>、/goal revise <JSON合同>、/goal status、/goal restore、/goal off')
+  throw new Error('未知的 Goal 子命令') // 回复末尾统一附用法（行内代码，避免 <JSON合同> 被当 HTML 丢弃）
 }
 
 export function disableGoalMemoryForTestOnly(): void { /* test seam; deliberately does not delete persisted user data */ }
