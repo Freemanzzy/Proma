@@ -20,6 +20,8 @@ Goal Memory 将本会话用户明确提交的目标作为版本化恢复合同�
 
 经桌面或手机输入框发送时，文本会先被序列化为 Markdown（转义 `\ ` * _ [ ] < > |` 与行首 `# > + - N.`）。`set`/`revise` 先按原文解析 JSON；失败时只还原这些转义再解析一次（合同必含数组，转义后的文本一定不是合法 JSON，因此不会误改直接发送的原始 JSON），`originalText` 保存还原后的真实原文。任何 `/goal` 命令失败都以宿主回复显示原因（“Goal 命令未执行：…本会话的 Goal 合同未改变”），不调用模型。（2026-11-05）
 
+粘贴同样要逐字保留：富文本模式下带参数的 `/命令` 粘贴按纯文本插入（见 `PERSONAL.md` “富文本粘贴 `/命令`”），否则上游会把粘贴文本当 Markdown 渲染，改写 `\\` 与 `<tag>`。Goal 端兜底：合同任一文本字段含换行以外的控制字符（如未转义的 `C:\temp` 解析成制表符）时拒绝；“已保存”回复在代码块中回显 `originalText`（超过 300 字截断），供用户核对。（2026-11-05）
+
 ## 存储与一致性
 
 使用独立 SQLite sidecar，schemaVersion=1、DELETE journal、`synchronous=FULL`。合同记录以 `(goal_id, revision)` 追加保存，当前会话只维护指向当前 revision 的索引。Checkpoint 的宿主观察使用单调递增 `sequence` 做严格 CAS；模型报告使用独立 `modelSequence` CAS，因此合法 `turn_end` observation 不会使报告必然冲突，而同一旧 model token 的并发/迟到报告会被拒绝。模型工具必须提交读取时的 `goalId`、合同 `revision` 与 `expectedModelSequence`，不会先读最新checkpoint再把旧报告重基线到新合同。报告在事务中保留最新 host `observed`/artifact hash，不可写host-only事实。旧合同revision写入拒绝。模型状态最多`claimed_done`，没有`verified/completed`。历史schemaVersion=1 checkpoint 缺少 `modelSequence` 时按初值0读取；存在但无效的值会 fail closed。

@@ -2338,3 +2338,25 @@
 - **版本**：previous = `ea92ba72`；`1286ff19` 移入废纸篓；`20261105-115200-29138` 归档外置硬盘并复核 SNAPSHOT MATCH。
 - MCP 顶层组合约束修复的真实 Anthropic 验证待 Proma 在会话中完成（用户已重新启用 nowledge-mem）。
 - 详见交接单 `install-result-2026-11-05-2.md`。
+
+## 2026-11-05: 修复富文本粘贴改写 `/goal set` 合同（缺陷 3）；MCP 修复真实 Anthropic 验证通过
+
+- **来源**：install-result-2026-11-05-2 待办 1、2。
+- **缺陷 3 根因**：富文本模式下 `rich-text-input.tsx` `handlePaste` 对“看起来像 Markdown”且剪贴板无富文本 HTML 的纯文本调用 `markdownToHtml`，`\\` 被当作 Markdown 转义吃掉一个反斜杠（之后 JSON 里的 `\t` 解析成制表符），`<tag>` 被当作内联 HTML（`raw-html-inline`）丢弃。改写发生在发送序列化之前，Goal 端无法还原。
+- **上游预期评估**：“粘贴 Markdown 渲染为富文本”是上游在富文本模式下有意提供的体验（粘贴 `**粗体**`、列表、表格直接成格式），且富文本默认关闭、只影响开启者。因此不扩大到所有纯文本粘贴，只接管带参数的 `/命令`（正则 `^\/[A-Za-z][\w-]*\s+\S`，忽略前导空白）。单独的 `/xxx` 仍走上游默认粘贴（纯单词不会被改写，也避免与 `/` Skill 提及弹窗交互的差异）；`/Users/...` 这类路径不匹配。
+- **修复**：
+  - 新模块 `renderer/lib/personal-paste.ts`（`isSlashCommandPasteText`）；`handlePaste` 在纯文本模式分支之后、HTML/Markdown 处理之前插入约 7 行：命中时 `insertText` 原文。插入时**不带** `uiEvent=paste`：dev harness 首轮实测发现 TipTap 粘贴规则会把 `*重要*` 转成斜体（之后序列化虽能还原，但其他规则如链接不一定可逆）。
+  - Goal 端兜底（`personal-goal-memory.ts`）：`originalText`、`scope`、`nonGoals`、`hardConstraints`、`acceptance` 任一项含换行以外的控制字符（U+0000–U+0009、U+000B–U+001F、U+007F）时拒绝，错误写明字段与码位，并提示 Windows 路径的反斜杠在 JSON 中要写成 `\\\\`。“已保存”回复在 `text` 代码块中回显 `originalText`（超过 300 字截断，围栏长度随原文中的反引号自适应），供用户核对。
+- **测试**：`personal-goal-command-input.test.ts` 新增 5 项——上游 Markdown 粘贴路径确实改写该文本（`raw-html-inline`、`<em>`、反斜杠减半）；`/命令` 判定正反例；纯文本插入后经真实 `htmlToMarkdown` 序列化再解析，单行与多行 JSON 均与原合同逐字一致（含 `\\`、`<tag>`、`_ * | [ ]`、`<b>`）；控制字符拒绝；代码块回显。harness `goal-command`：临时打开 fixture 的 `richTextRenderingEnabled`（web remote 禁止 `settings:update`，改为直接改 `~/.proma-dev-fixture/settings.json`，仅允许该目录，独占创建唯一备份，结束只回退这一个键），派发只含 `text/plain` 的真实 `paste` 事件，断言输入框文本不变，再用 python3 只读打开 `goals.sqlite` 核对落库 `originalText`、`hardConstraints` 逐字一致；随后逐字输入 `/goal revise` 并同样核对落库。
+- **Codex 独立审查**：第 1 轮（`--base personal`，报告 `code-review/20261105-160912-base-personal.md`）——
+  1. [P1] harness 用运行前快照整文件写回开发设置，会丢失期间的设置写入 → **采纳**：只允许 `.proma-dev-fixture`，结束只回退 `richTextRenderingEnabled`；
+  2. [P2] 回显原文直接拼进 Markdown 回复，`*x*`、`\\` 会被二次解释 → **采纳**：改为代码块。
+  第 2 轮（`--commit 0370704f`）：[P2] 固定备份路径可能覆盖并删除上次中断遗留的备份 → **采纳**：唯一路径 + `wx` 独占创建，只删本次那份（`faab2ddd`，改动 3 行，已达 2 轮上限，未再送审，由 harness 复跑验证）。
+- **验证**：全量 `bun test` 892 pass / 0 fail（未导出 `PROMA_DEV_DATA_DIR_NAME`）；全仓 typecheck、`test-personal-scripts.py` 通过。fixture dev（`PROMA_PERSONAL_GOAL_MEMORY=1`）`desktop:goal-command` 5/5 PASS（最终提交上复跑）：落库 `PASTEPROBE… a_b *重要* <tag> | 路径 C:\temp [x]` 与输入一致；`iphone:smoke`、`android:smoke` 7/7 PASS；结束后 dev 已停，fixture 设置已回退（`richTextRenderingEnabled=false`，无遗留备份）。
+- **MCP 修复真实验证（待办 2，只读）：成功**。在 Anthropic 渠道 `clipproxyapi`（`a0c08014`，`http://localhost:8317`，模型 `claude-opus-5-5`）的会话 `67d5783e` 中发送普通消息（nowledge-mem 已由用户在默认工作区重新启用）。main.log 原文：
+  ```text
+  2026-11-05T07:15:25.406Z [WARN] main-process warning name=Error scope=Pi MCP message=[Pi MCP] 工具 mcp__nowledge_mem__thread_fetch_messages 的 inputSchema 顶层含 anyOf，已移入描述以兼容 Anthropic
+  2026-11-05T07:15:25.406Z [WARN] main-process warning name=Error scope=Pi MCP message=[Pi MCP] 工具 mcp__nowledge_mem__search_thread_messages 的 inputSchema 顶层含 anyOf，已移入描述以兼容 Anthropic
+  ```
+  其后该会话 `event=provider-request provider=anthropic channel=a0c08014` 共 63 次（截至 08:24Z）：59 次 `outcome=done`，4 次 `outcome=error`，均为 `ttfbMs≈300000` 的首字节超时（07:27–07:47Z，原因未查，之后的请求恢复正常），不是 schema 拒绝；自 07:09:53Z 重启以来 main.log 中 `input_schema`、`invalid_request_error` 均 0 条，`[ERROR]`/`[FATAL]` 0 条。注：工具名在日志中为 `mcp__nowledge_mem__…`（服务名中的连字符被规范为下划线）。未改任何设置。
+- **同步文档**：`PERSONAL.md`（富文本粘贴 `/命令`）、`docs/personal/goal-memory.md`（粘贴与控制字符兜底）、`docs/personal/backlog.md`（当前安装 `4fefcd5f`、已合入未安装）、本记录。
