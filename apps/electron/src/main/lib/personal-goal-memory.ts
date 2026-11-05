@@ -1026,6 +1026,20 @@ export function isGoalManagementCommandMessage(message: string): boolean {
   return /^\/goal(?:\s|$)/i.test(message.trimStart())
 }
 
+/** 返回首个非换行控制字符的可读形式（如 U+0009），没有时返回 null。 */
+export function findGoalControlCharacter(value: string): string | null {
+  const match = /[\u0000-\u0009\u000B-\u001F\u007F]/.exec(value)
+  return match ? `U+${match[0].charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}` : null
+}
+
+/** “已保存”回复中回显的原文（截断），供用户核对是否被输入框改写。 */
+export function formatGoalOriginalTextEcho(value: string): string {
+  const text = value.length > 300 ? `${value.slice(0, 300)}…` : value
+  // 回复按 Markdown 渲染：放进代码块，围栏长于原文中最长的反引号串，避免 *x*、\\ 等被二次解释
+  const fence = '`'.repeat(Math.max(3, ...[...text.matchAll(/`+/g)].map((match) => match[0].length + 1)))
+  return `原文：\n${fence}text\n${text}\n${fence}`
+}
+
 /** /goal 命令失败时给用户的宿主回复（不调用模型；合同未改变）。 */
 export function buildGoalCommandFailureReply(error: unknown): string {
   const reason = error instanceof Error && error.message ? error.message : '未知错误'
@@ -1064,9 +1078,15 @@ export function parseGoalCommand(message: string): GoalCommand | null {
       if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || !item.trim())) throw new Error(`${key} 必须是字符串数组（可为空）`)
       return value as string[]
     }
+    const lists = { scope: list('scope'), nonGoals: list('nonGoals'), hardConstraints: list('hardConstraints'), acceptance: list('acceptance') }
+    // 兜底：合同文本只允许换行这一种控制字符。出现 \t 等通常是路径反斜杠未转义或被输入框改写（2026-11-05 实测 C:\temp → 制表符）。
+    const fields: Array<[string, string]> = [['originalText', data.originalText], ...Object.entries(lists).flatMap(([key, items]) => items.map((item) => [key, item] as [string, string]))]
+    for (const [field, value] of fields) {
+      const bad = findGoalControlCharacter(value)
+      if (bad) throw new Error(`${field} 含控制字符 ${bad}（除换行外不允许）；若是 Windows 路径，请在 JSON 中把反斜杠写成 \\\\`)
+    }
     return { command, input: {
-      expectedRevision: data.expectedRevision as number, originalText: data.originalText,
-      scope: list('scope'), nonGoals: list('nonGoals'), hardConstraints: list('hardConstraints'), acceptance: list('acceptance'),
+      expectedRevision: data.expectedRevision as number, originalText: data.originalText, ...lists,
     } }
   }
   throw new Error('用法：/goal set <JSON合同>、/goal revise <JSON合同>、/goal status、/goal restore、/goal off')
