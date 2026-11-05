@@ -7,6 +7,7 @@
  */
 
 import { createHash } from 'node:crypto'
+import { normalizeMcpInputSchema } from '../personal-mcp-schema'
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
@@ -206,10 +207,10 @@ function isObjectSchema(schema: unknown): schema is Record<string, unknown> {
   return !!schema && typeof schema === 'object' && !Array.isArray(schema)
 }
 
-function toTypeBoxSchema(schema: unknown): TSchema {
+function toTypeBoxSchema(schema: unknown, toolKey = ''): TSchema {
   if (!isObjectSchema(schema)) return Type.Object({})
   if (schema.type !== 'object') return Type.Object({})
-  return Type.Unsafe(schema)
+  return Type.Unsafe(normalizeMcpInputSchema(schema, toolKey).schema)
 }
 
 function stringifyForTool(content: unknown): string {
@@ -528,14 +529,16 @@ const manager = new PiMcpClientManager()
 
 function createPiMcpToolDefinition(binding: McpToolBinding): ToolDefinition {
   const toolName = mcpToolName(binding.serverName, binding.originalToolName)
-  const description = binding.tool.description || `Call MCP tool ${binding.originalToolName} from server ${binding.serverName}`
+  const baseDescription = binding.tool.description || `Call MCP tool ${binding.originalToolName} from server ${binding.serverName}`
+  const schemaNote = isObjectSchema(binding.tool.inputSchema) && binding.tool.inputSchema.type === 'object' ? normalizeMcpInputSchema(binding.tool.inputSchema).note : null
+  const description = schemaNote ? `${baseDescription}\n${schemaNote}` : baseDescription
 
   return {
     name: toolName,
     label: toolName,
     description,
     promptSnippet: `${toolName}: ${description}`,
-    parameters: toTypeBoxSchema(binding.tool.inputSchema),
+    parameters: toTypeBoxSchema(binding.tool.inputSchema, toolName),
     async execute(_toolCallId, params, signal) {
       const args = isObjectSchema(params) ? params as Record<string, unknown> : {}
       const result = await binding.manager.callTool(binding.serverName, binding.managerConfig, binding.originalToolName, args, signal)
