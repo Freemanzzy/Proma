@@ -2379,3 +2379,21 @@
 - **收尾**：用户决定 **Goal 保持开启**；重启电脑后需要重新 `launchctl setenv`。两条测试合同（`29a447fc`、`5bd413ec`）保留。
 - **版本**：previous 为 `4fefcd5f`；`ea92ba72` 移入废纸篓；`20261105-132742-76307` 已归档到外置硬盘，并复核 SNAPSHOT MATCH。
 - 低优先级显示问题（用户气泡显示转义、失败提示里 `\\` 被渲染成 `\`）见交接单 `install-result-2026-11-05-3.md`。
+
+## 2026-11-06: `/goal` 用户气泡与失败提示显示修复；Goal 开关持久化方案；Anthropic 首字节超时排查
+
+- **来源**：install-result-2026-11-05-3 待办 1、2、4、5。
+- **用户气泡显示转义（待办 1）根因**：富文本输入框发送前把 `` \ ` * _ [ ] < > | `` 加反斜杠转义，落盘的就是转义后的文本；用户气泡按 Markdown 渲染，且 `normalizeLatexDelimiters` 会把 `\[ … \]` 当 LaTeX 块公式转成 `$$ … $$`，KaTeX 解析失败显示红色错误，于是 revise 那条显示为 `"scope":\],"nonGoals":\[`。
+- **修复（个人版范围）**：新模块 `renderer/lib/personal-slash-command-display.ts`。用户消息以 `/goal` 开头时（`/goals`、`/compact`、Skill `/提及`、`/Users/...` 不命中），与 `parseGoalCommand` 相同的规则：合同 JSON 按原文能解析（纯文本模式发送）就原样显示，否则还原转义后显示；整条按纯文本（`whitespace-pre-wrap`）渲染，不经 Markdown/LaTeX。复制按钮复制还原后的文本（复制转义文本再粘贴会二次转义，导致合同无法解析）。`unescapeEditorMarkdown` 移到该模块，main 端改为 re-export，两边共用一个实现。上游触点：`message.tsx` `UserMessageContent`（约 5 行）、`SDKMessageRenderer.tsx` 复制按钮（2 行）。普通消息渲染不变。
+- **失败提示反斜杠（待办 2）**：“请在 JSON 中把反斜杠写成 `\\`”的 `\\` 放进行内代码；顺带把回复末尾的用法改为行内代码（`<JSON合同>` 在 Markdown 中有被当 HTML 处理的风险），未知子命令的报错改为“未知的 Goal 子命令”（之前与末尾用法重复）。合同解析逻辑与数据未改。
+- **测试**：新增 `personal-goal-display.test.ts` 10 项——用安装验证会话 `5bd413ec` 落盘的两条原文证明旧路径产生 `$$`；还原后与输入一致且与宿主解析结果相同；原始 JSON 不还原；其他子命令与非法 JSON；普通消息/Skill 提及/`/goals`/路径不接管；失败提示经 `mdast-util-from-markdown` 解析后可见文本含 `写成 \\` 与 `/goal set <JSON合同>`。harness `goal-command` 增至 7 步：断言粘贴与逐字输入两条用户气泡的可见文本（含 `<tag>`、`C:\\temp`、`"scope": [`）、无 `.katex`、走纯文本节点；新增控制字符用例，断言失败气泡可见文本含 `把反斜杠写成 \\` 与 `/goal set <JSON合同>`，且合同未变。注意：bun 会把 `String.raw` 模板里的中文转成 `\u` 转义，测试中改用普通字符串。
+- **Codex 独立审查**：`--base personal`（报告 `code-review/20261106-021951-base-personal.md`）未发现问题。
+- **验证**：全量 `bun test` 902 pass / 0 fail（未导出 `PROMA_DEV_DATA_DIR_NAME`）；全仓 typecheck、`build:main`、`test-personal-scripts.py` 通过。fixture dev（`PROMA_PERSONAL_GOAL_MEMORY=1`）`desktop:goal-command` 7/7 PASS；`iphone:smoke`、`android:smoke` 7/7 PASS；结束后 dev 已停，fixture 设置已回退。
+- **Goal 开关持久化（待办 4）**：只写方案，未实现，见 backlog #19（推荐配置目录下的开关文件，环境变量仍可覆盖）。`goal-memory.md` 写明重启电脑后需重新 `launchctl setenv PROMA_PERSONAL_GOAL_MEMORY 1` 并重启 Proma。
+- **另记观察**：普通用户消息在富文本模式下含 `[a] … [b]` 时同样会被渲染成公式（上游行为），未修，见 backlog #20。
+- **Anthropic 首字节超时排查（待办 5，只读）**：结论是**上游链路（CLIProxyAPI → 其上游代理 → api.anthropic.com）慢或中断，Proma 侧按设计超时并重试**。证据：
+  - Proma main.log（会话 `67d5783e`，渠道 `a0c08014` clipproxyapi，`claude-opus-5-5`）：07:27:46Z、07:32:47Z、07:37:49Z 三次 `ttfbMs≈300000 outcome=error`，是同一请求（`messages=1027`，`approxBodyBytes=2941234`，8 张图约 1.98 MB）的重试；第四次 07:42:18Z 成功但 `ttfbMs=253220`；07:47:18Z 下一条请求（`messages=1029`）再次 300 s 超时，07:48:18Z 重试 `ttfbMs=43248` 成功，之后恢复正常（ttfb 28–55 s）。错误行的 `errorKind` 被日志截断，看不到具体类型。300 s 是 `pi-request-proxy.ts` 的 `DEFAULT_HTTP_IDLE_TIMEOUT_MS`（无数据即中止）。
+  - CLIProxyAPI 日志（`~/.cli-proxy-api/logs/main.log`，本地时间）：15:23:27 请求 `f51f89e6` 向上游 POST 时 `upstream execution failed … duration=40.3s err=… write: broken pipe`（上传约 2.9 MB 请求体时上游连接断开）；该请求与随后两次在 CLIProxy 侧均记为 `200 | 4m59s`（已回 200 但 5 分钟内无数据，Proma 超时断开），第四次 `200 | 4m24s`，07:47Z 那次为 `499 | 4m59s`（客户端关闭）。CLIProxy 配置 `request-retry: 3`、`max-retry-interval: 30`，并经 `proxy-url` 访问上游；同一时段没有其他会话/渠道的请求可作对照。
+  - Proma 侧没有发现异常：请求按时发出，超时后自动重试，成功后继续。助长因素是请求体很大（会话已 1000+ 条消息、约 2.9 MB，正常 ttfb 也要 30–57 s，离 300 s 余量小）；该会话 07:53Z 压缩后降到 `messages=31`、约 49 KB。
+  - 对照 backlog #12c（调整 300 s timeout/retry）：本次请求体 >2 MiB，按该条规则“大请求体导致的超时不靠调参解决，不算触发”；但证据显示是上游慢/断而非上传慢，若再出现小请求体超时再评估。未改任何设置。
+- **同步文档**：`PERSONAL.md`（用户气泡 `/goal` 纯文本显示）、`docs/personal/goal-memory.md`（开启方式与重启电脑后的处理、气泡与失败提示显示）、`docs/personal/backlog.md`（当前安装 `b1f26910`、已合入未安装、#19、#20）、本记录。
