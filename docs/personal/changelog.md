@@ -2360,3 +2360,22 @@
   ```
   其后该会话 `event=provider-request provider=anthropic channel=a0c08014` 共 63 次（截至 08:24Z）：59 次 `outcome=done`，4 次 `outcome=error`，均为 `ttfbMs≈300000` 的首字节超时（07:27–07:47Z，原因未查，之后的请求恢复正常），不是 schema 拒绝；自 07:09:53Z 重启以来 main.log 中 `input_schema`、`invalid_request_error` 均 0 条，`[ERROR]`/`[FATAL]` 0 条。注：工具名在日志中为 `mcp__nowledge_mem__…`（服务名中的连字符被规范为下划线）。未改任何设置。
 - **同步文档**：`PERSONAL.md`（富文本粘贴 `/命令`）、`docs/personal/goal-memory.md`（粘贴与控制字符兜底）、`docs/personal/backlog.md`（当前安装 `4fefcd5f`、已合入未安装）、本记录。
+
+## 2026-11-06: 安装 b1f26910（缺陷 3 修复，重做阶段二“粘贴 + 数据库核对”，Claude Code）
+
+- **安装**：
+  - 标准 `install-update.sh` EXIT=0。
+  - 备份 BACKUP VERIFY PASS（43,956 条目），启动前后均为 SNAPSHOT MATCH。
+  - `draft-cleanup removed=0 skipped=1`，与预演一致。
+  - 钥匙串弹 1 次。
+  - `scheduler-start enabledTasks=20` 在 `web-remote-start` 后 1 ms 出现。
+  - `[FATAL]`/`[ERROR]`/`[WARN]` 均为 0；定时任务 20/20，ID 一致；无 CDP 端口。
+  - `goals.sqlite` SHA-256 安装前后不变。
+- **阶段二通过**：开启 `PROMA_PERSONAL_GOAL_MEMORY=1` 后，在新测试会话中粘贴 `/goal set`（富文本模式）：
+  - 输入框保持原样：`*重要*` 未变斜体，`<tag>`/`<b>` 在，`C:\\temp` 两个反斜杠在。
+  - 回复的回显代码块与原文一致。
+  - 只读核对 `goals.sqlite`：`originalText` 逐字等于 `安装验证：a_b *重要* <tag> | 路径 C:\temp`（无 0x09），`hardConstraints` 为 `["保留 x_y [原样] <b>"]`。
+  - 控制字符兜底按预期拒绝（U+0009），合同保持 revision 1；`/goal off` 正常。
+- **收尾**：用户决定 **Goal 保持开启**；重启电脑后需要重新 `launchctl setenv`。两条测试合同（`29a447fc`、`5bd413ec`）保留。
+- **版本**：previous 为 `4fefcd5f`；`ea92ba72` 移入废纸篓；`20261105-132742-76307` 已归档到外置硬盘，并复核 SNAPSHOT MATCH。
+- 低优先级显示问题（用户气泡显示转义、失败提示里 `\\` 被渲染成 `\`）见交接单 `install-result-2026-11-05-3.md`。
