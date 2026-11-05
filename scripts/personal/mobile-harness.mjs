@@ -2082,7 +2082,9 @@ async function withDevRichText(harness, run) {
     await waitUntil(harness.client, 'document.readyState === "complete" && Boolean(document.querySelector(\'[contenteditable="true"],textarea\'))', 30_000)
     await delay(1500)
   }
-  writeFileSync(`${settingsPath}.goal-command-backup`, JSON.stringify(settings, null, 2))
+  // 每次独占创建唯一备份，不覆盖既有备份；只删本次创建的那份
+  const backupPath = `${settingsPath}.goal-command-backup-${Date.now()}-${process.pid}`
+  writeFileSync(backupPath, JSON.stringify(settings, null, 2), { flag: 'wx' })
   writeFileSync(settingsPath, JSON.stringify({ ...settings, richTextRenderingEnabled: true }, null, 2))
   try {
     await reload()
@@ -2094,7 +2096,7 @@ async function withDevRichText(harness, run) {
     if ('richTextRenderingEnabled' in settings) restored.richTextRenderingEnabled = settings.richTextRenderingEnabled
     else delete restored.richTextRenderingEnabled
     writeFileSync(settingsPath, JSON.stringify(restored, null, 2))
-    unlinkSync(`${settingsPath}.goal-command-backup`)
+    unlinkSync(backupPath)
   }
 }
 
