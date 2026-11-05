@@ -2071,23 +2071,30 @@ async function pasteAndSend(harness, text) {
 // 个人版 Goal Memory：经真实输入框发送 /goal 命令（需 dev 以 PROMA_PERSONAL_GOAL_MEMORY=1 启动）。
 // 缺陷 3 只在富文本模式出现：临时打开 dev fixture 的 richTextRenderingEnabled（web remote 禁止 settings:update），结束后恢复
 async function withDevRichText(harness, run) {
-  const dirName = process.env.PROMA_DEV_DATA_DIR_NAME || '.proma-dev'
-  if (!/^\.proma-dev/.test(dirName)) throw new Error(`拒绝修改非 dev 数据目录设置: ${dirName}`)
+  // 只允许在隔离 fixture 中改设置；默认 .proma-dev 是用户日常开发数据，不碰
+  const dirName = process.env.PROMA_DEV_DATA_DIR_NAME
+  if (dirName !== '.proma-dev-fixture') throw new Error(`goal-command 需在 PROMA_DEV_DATA_DIR_NAME=.proma-dev-fixture 下运行（当前 ${dirName ?? '未设置'}）`)
   const settingsPath = join(homedir(), dirName, 'settings.json')
-  const original = readFileSync(settingsPath, 'utf8')
-  const settings = JSON.parse(original)
+  const settings = JSON.parse(readFileSync(settingsPath, 'utf8'))
+  if (settings.richTextRenderingEnabled === true) return run()
   const reload = async () => {
     await harness.client.evaluate('location.reload()')
-    await waitUntil(harness.client, 'Boolean(document.querySelector(\'[contenteditable="true"],textarea\')) || document.readyState === "complete"', 30_000)
+    await waitUntil(harness.client, 'document.readyState === "complete" && Boolean(document.querySelector(\'[contenteditable="true"],textarea\'))', 30_000)
     await delay(1500)
   }
-  if (settings.richTextRenderingEnabled === true) return run()
+  writeFileSync(`${settingsPath}.goal-command-backup`, JSON.stringify(settings, null, 2))
   writeFileSync(settingsPath, JSON.stringify({ ...settings, richTextRenderingEnabled: true }, null, 2))
   try {
     await reload()
     return await run()
   } finally {
-    writeFileSync(settingsPath, original)
+    // 只回退本套件改的键，保留测试期间应用写入的其他设置
+    const current = JSON.parse(readFileSync(settingsPath, 'utf8'))
+    const restored = { ...current }
+    if ('richTextRenderingEnabled' in settings) restored.richTextRenderingEnabled = settings.richTextRenderingEnabled
+    else delete restored.richTextRenderingEnabled
+    writeFileSync(settingsPath, JSON.stringify(restored, null, 2))
+    unlinkSync(`${settingsPath}.goal-command-backup`)
   }
 }
 

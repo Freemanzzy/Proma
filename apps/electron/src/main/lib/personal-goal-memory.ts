@@ -1034,8 +1034,10 @@ export function findGoalControlCharacter(value: string): string | null {
 
 /** “已保存”回复中回显的原文（截断），供用户核对是否被输入框改写。 */
 export function formatGoalOriginalTextEcho(value: string): string {
-  const single = value.length > 300 ? `${value.slice(0, 300)}…` : value
-  return `原文：「${single}」`
+  const text = value.length > 300 ? `${value.slice(0, 300)}…` : value
+  // 回复按 Markdown 渲染：放进代码块，围栏长于原文中最长的反引号串，避免 *x*、\\ 等被二次解释
+  const fence = '`'.repeat(Math.max(3, ...[...text.matchAll(/`+/g)].map((match) => match[0].length + 1)))
+  return `原文：\n${fence}text\n${text}\n${fence}`
 }
 
 /** /goal 命令失败时给用户的宿主回复（不调用模型；合同未改变）。 */

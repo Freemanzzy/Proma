@@ -119,8 +119,9 @@ describe('/goal set 经粘贴（剪贴板只有 text/plain）', () => {
     expect(findGoalControlCharacter('第一行\n第二行')).toBeNull()
   })
 
-  test('已保存回复回显原文（超长截断）', () => {
-    expect(formatGoalOriginalTextEcho('a<tag>\\b')).toBe('原文：「a<tag>\\b」')
-    expect(formatGoalOriginalTextEcho('x'.repeat(400))).toBe(`原文：「${'x'.repeat(300)}…」`)
+  test('已保存回复用代码块回显原文（不被 Markdown 二次解释；超长截断）', () => {
+    expect(formatGoalOriginalTextEcho('a<tag> *x* \\\\b')).toBe('原文：\n```text\na<tag> *x* \\\\b\n```')
+    expect(formatGoalOriginalTextEcho('用 ``` 包裹')).toBe('原文：\n````text\n用 ``` 包裹\n````')
+    expect(formatGoalOriginalTextEcho('x'.repeat(400))).toBe(`原文：\n\`\`\`text\n${'x'.repeat(300)}…\n\`\`\``)
   })
 })
