@@ -173,21 +173,8 @@ function handleQueryStart(request: RuntimeRequest): void {
   emitState()
   respond(request, { accepted: true, queryId })
 
-  const rawGoalOwner = queryInput.goalMemoryCapability && typeof queryInput.goalMemoryCapability === 'object'
-    ? queryInput.goalMemoryCapability as Record<string, unknown>
-    : undefined
   const utilityInput = {
     ...queryInput,
-    ...(rawGoalOwner && typeof rawGoalOwner.ownerId === 'string' && typeof rawGoalOwner.workspaceId === 'string' ? {
-      goalMemoryCapability: {
-        ...rawGoalOwner,
-        request: (capabilityRequest: Record<string, unknown>, signal?: AbortSignal) => requestParent(
-          AGENT_RUNTIME_METHODS.CAPABILITY_GOAL_MEMORY,
-          { ...capabilityRequest, ownerId: rawGoalOwner.ownerId, sessionId, workspaceId: rawGoalOwner.workspaceId, queryId },
-          signal,
-        ),
-      },
-    } : {}),
     canUseTool: (toolName: string, toolInput: Record<string, unknown>, options: Record<string, unknown>) => requestParent(
       AGENT_RUNTIME_METHODS.CAPABILITY_CAN_USE_TOOL,
       { queryId, sessionId, toolName, input: toolInput, options: serializeCanUseToolOptions(options) },

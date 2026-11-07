@@ -3,7 +3,6 @@ import { resolve } from 'node:path'
 
 export const DEV_BUNDLE_RELATIVE_PATHS = [
   'dist/main.cjs',
-  'dist/personal-goal-artifact-worker.cjs',
   'dist/agent-runtime.cjs',
   'dist/preload.cjs',
 ] as const
@@ -38,7 +37,7 @@ export function prepareDevBundles(root = electronRoot): void {
 }
 
 /**
- * 等待所有必需主进程、artifact worker、runtime与preload bundle首次构建，再允许electronmon启动Electron。
+ * 等待三个 watcher 完成首次构建，再允许 electronmon 启动 Electron。
  */
 export async function waitForDevBundles(options: WaitForDevBundlesOptions = {}): Promise<void> {
   const root = options.root ?? electronRoot

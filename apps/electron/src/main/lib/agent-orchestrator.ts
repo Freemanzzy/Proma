@@ -83,8 +83,6 @@ import { cleanUserMessageForTitle, createFallbackTitle, sanitizeGeneratedTitle, 
 import { fetchAgentTitleWithFallback } from './agent-title-retry'
 import { claimWorkspaceMemoryRefreshOpportunity } from './agent-memory-refresh-service'
 import { resolveRuntimeAdditionalDirectories } from './agent-orchestrator-vault-access'
-import { buildGoalRestoreReply, createGoalContract, createGoalMemoryCapability, disableGoalForSession, getGoalCheckpoint, getGoalContract, isGoalCommandSourceAllowed, isGoalManagementCommandMessage, isGoalMemoryEnabled, parseGoalCommand, buildGoalCommandFailureReply, formatGoalOriginalTextEcho } from './personal-goal-memory'
-import type { GoalMemoryCapability } from './personal-goal-memory'
 
 // ===== 类型定义 =====
 
@@ -685,7 +683,6 @@ export class AgentOrchestrator {
     let userMessagePersisted = false
     let initialUserMessageUuid: string | undefined
     let sessionMeta = getAgentSessionMeta(sessionId)
-    let goalMemoryCapability: GoalMemoryCapability | undefined
 
     const completeBeforeRun = (options: {
       stoppedByUser?: boolean
@@ -760,58 +757,6 @@ export class AgentOrchestrator {
         console.error('[Agent 编排] 持久化用户消息失败:', error)
         callbacks.onError(`消息保存失败：${message}`)
         completeBeforeRun()
-        return
-      }
-    }
-
-    // Goal 指令只在明确启用时由宿主解析；模型从未获得创建/修订合同的工具。
-    if (isGoalMemoryEnabled() && isGoalCommandSourceAllowed({ triggeredBy: input.triggeredBy, automationContext, userMessage })) {
-      // 个人版：命令解析/执行失败时把原因作为宿主回复显示；回复落盘失败另行报错，避免误报“合同未改变”。
-      let reply: string | null = null
-      try {
-        const goalWorkspaceId = sessionMeta?.workspaceId ?? requestedWorkspaceId ?? 'default'
-        const command = parseGoalCommand(userMessage)
-        if (command) {
-          const userRef = initialUserMessageUuid ?? userMessageUuid ?? randomUUID()
-          if (command.command === 'set' || command.command === 'revise') {
-            const contract = createGoalContract({
-              sessionId,
-              workspaceId: goalWorkspaceId,
-              ...command.input,
-              userMessageRef: userRef,
-            })
-            reply = `已保存 Goal 合同 revision ${contract.revision}（${contract.hash.slice(0, 12)}）。未声明内容不会被推断为授权。请核对${formatGoalOriginalTextEcho(contract.originalText)}`
-          } else if (command.command === 'off') {
-            disableGoalForSession(sessionId)
-            reply = '已在本会话关闭 Goal 恢复；已保存合同与历史数据保留。'
-          } else {
-            const contract = getGoalContract(sessionId, goalWorkspaceId)
-            if (!contract) reply = '本会话没有启用中的 Goal。可用 /goal set <JSON合同> 创建。'
-            else if (command.command === 'status') {
-              const checkpoint = getGoalCheckpoint(contract.id, contract.revision)
-              reply = checkpoint ? `Goal revision ${contract.revision} · 状态 ${checkpoint.status} · ${contract.hash}` : 'Goal checkpoint 不可用。'
-            } else {
-              const checkpoint = getGoalCheckpoint(contract.id, contract.revision)
-              reply = checkpoint ? buildGoalRestoreReply(contract, checkpoint) : 'Goal checkpoint 不可用。'
-            }
-          }
-        }
-      } catch (error) {
-        reply = buildGoalCommandFailureReply(error)
-      }
-      if (reply !== null) {
-        try {
-          const assistantMessage: AgentMessage = { id: randomUUID(), role: 'assistant', content: reply, createdAt: Date.now() }
-          const persistedReply: SDKMessage = {
-            type: 'assistant', message: { content: [{ type: 'text', text: reply }] }, parent_tool_use_id: null,
-            uuid: assistantMessage.id, _createdAt: assistantMessage.createdAt,
-          } as unknown as SDKMessage
-          appendSDKMessages(sessionId, [persistedReply])
-          callbacks.onComplete([assistantMessage], { startedAt: streamStartedAt, ...(input.runGeneration != null ? { runGeneration: input.runGeneration } : {}) })
-        } catch (error) {
-          callbacks.onError(`Goal 命令回复保存失败：${error instanceof Error ? error.message : String(error)}`)
-          completeBeforeRun()
-        }
         return
       }
     }
@@ -984,7 +929,6 @@ export class AgentOrchestrator {
     })
 
     const releaseActiveRun = (): void => {
-      goalMemoryCapability?.revoke()
       // 在发送 STREAM_COMPLETE 前释放 active slot，避免渲染进程已进入空闲态、
       // 主进程仍在 finally 前短暂拒绝下一条消息。
       const ownsActiveRun = this.activeSessions.get(sessionId) === runGeneration
@@ -1177,7 +1121,6 @@ export class AgentOrchestrator {
         console.log(`[Agent 编排] 注入 referenced_planning: ${mentionedTodoIds?.length ?? 0} todos, ${mentionedCalendarEventIds?.length ?? 0} calendar events`)
       }
 
-      const activeGoal = isGoalMemoryEnabled() ? getGoalContract(sessionId, workspaceId ?? 'default') : null
       const contextualMessage = [dynamicCtx, enrichedMessage].filter(Boolean).join('\n\n')
 
       const isCompactCommand = userMessage.trim() === '/compact'
@@ -1595,29 +1538,8 @@ export class AgentOrchestrator {
       let githubCopilotCredentialsSnapshot = githubCopilotOAuthCredentials
       const { feishuBridgeManager } = await import('./feishu-bridge-manager')
       const hasFeishuBinding = feishuBridgeManager.hasSessionBinding(sessionId)
-      const goalWorkspaceId = workspaceId ?? 'default'
-      goalMemoryCapability = activeGoal
-        ? createGoalMemoryCapability(sessionId, goalWorkspaceId, async (signal) => {
-            const meta = getAgentSessionMeta(sessionId)
-            if (!meta?.sdkSessionId || !meta.piSessionFile || signal?.aborted) return null
-            try {
-              const fs = await import('node:fs/promises')
-              const pathApi = await import('node:path')
-              const canonicalPath = await fs.realpath(meta.piSessionFile)
-              if (signal?.aborted) return null
-              const stat = await fs.stat(canonicalPath)
-              if (signal?.aborted) return null
-              return {
-                sessionId, workspaceId: meta.workspaceId ?? goalWorkspaceId, artifactId: meta.sdkSessionId,
-                artifactIdentity: `${meta.sdkSessionId}:${stat.dev}:${stat.ino}`,
-                path: canonicalPath, sessionsDirectory: pathApi.join(getSdkConfigDir(), 'sessions'),
-              }
-            } catch { return null }
-          })
-        : undefined
       const queryOptions: PiAgentQueryOptions = {
         sessionId,
-        ...(goalMemoryCapability ? { goalMemoryCapability } : {}),
         prompt: finalPrompt,
         // 旧持久化模型 ID 可能带 `[1m]` 上下文后缀；Pi runtime 不支持该变体：
         // 智谱等端点不识别 glm-5.2[1m] 这类后缀，会返回 1211「模型不存在」。
@@ -2435,10 +2357,6 @@ export class AgentOrchestrator {
   ): Promise<string> {
     if (!this.activeSessions.has(sessionId)) {
       throw new Error(`[Agent 编排] 会话未运行，无法追加消息: ${sessionId}`)
-    }
-
-    if (isGoalMemoryEnabled() && isGoalManagementCommandMessage(text)) {
-      throw new Error('Goal 管理命令不能在当前运行中执行；请等待当前轮结束或停止后再发。')
     }
 
     if (!this.adapter.sendQueuedMessage) {
