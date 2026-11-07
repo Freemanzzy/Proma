@@ -2397,3 +2397,17 @@
   - Proma 侧没有发现异常：请求按时发出，超时后自动重试，成功后继续。助长因素是请求体很大（会话已 1000+ 条消息、约 2.9 MB，正常 ttfb 也要 30–57 s，离 300 s 余量小）；该会话 07:53Z 压缩后降到 `messages=31`、约 49 KB。
   - 对照 backlog #12c（调整 300 s timeout/retry）：本次请求体 >2 MiB，按该条规则“大请求体导致的超时不靠调参解决，不算触发”；但证据显示是上游慢/断而非上传慢，若再出现小请求体超时再评估。未改任何设置。
 - **同步文档**：`PERSONAL.md`（用户气泡 `/goal` 纯文本显示）、`docs/personal/goal-memory.md`（开启方式与重启电脑后的处理、气泡与失败提示显示）、`docs/personal/backlog.md`（当前安装 `b1f26910`、已合入未安装、#19、#20）、本记录。
+
+## 2026-11-07: 回退 Goal Memory M0，搁置 Goal 模式开发
+
+- **原因**：真实使用中出现严重的提示缓存回归。会话 `f6822a3c` 只读排查会话 `44037658`（Noir网站优化问题记录，同渠道同模型）：登记 Goal 前 208 次请求缓存命中率约 98.8%，登记后 41 次约 15.1%，每次都有超过 30 万 token 的缓存写入，不是一次性冷启动。机制：每次模型请求前重新生成 Goal 恢复包（含不断变化的进度），插在当前用户消息之前、缓存断点之后；包一变，之前缓存的前缀就无法复用。离线检查确认只改一条进度即改变前缀。之前的机制验收和降级演练都没有覆盖真实 provider 的缓存表现。用户决定保留对话记录、回退到不含 M0 的版本，并暂停 Goal 模式开发。
+- **回退方式**：新分支 `revert/goal-memory-m0-20261107`，不改写已推送历史，用一个回退提交把 M0 及其后续 goal 修补涉及的代码恢复到 M0 合入前的 `1c373673`：
+  - 删除 `personal-goal-memory.ts`、`personal-goal-artifact-{protocol,scan,worker,worker-client}.ts`、`renderer/lib/personal-paste.ts`、`renderer/lib/personal-slash-command-display.ts` 及其测试，`scripts/dev-bundle-readiness.test.ts`；
+  - 恢复 `agent-orchestrator.ts`、`pi-agent-adapter.ts`、`pi-utility-adapter.ts`、`utility/agent-runtime*.ts`、`packages/shared/src/types/agent-runtime.ts`、`rich-text-input.tsx`、`message.tsx`、`SDKMessageRenderer.tsx`、`apps/electron/package.json`（worker 构建脚本）、`electron-builder.yml`（worker 解包项）、`scripts/dev-bundle-readiness.ts`、`scripts/personal/mobile-harness.mjs`（`goal-command` 套件）；
+  - **保留** MCP schema 兼容修复（`personal-mcp-schema.ts`、`pi-mcp-tools.ts` 接线及两份测试）：与 Goal 无关，2026-11-05 已在真实 Anthropic 渠道验证，去掉会让启用 nowledge-mem 时请求再次 400。
+  - 回退后代码与 `1c373673` 的差异只剩上述 MCP 修复；`git grep` 无 Goal 残留。
+- **数据**：不删除、不改写任何用户数据。`~/.proma/goal-memory/goals.sqlite`（4 条合同：测试会话 `29a447fc`、`5bd413ec`，真实会话 `44037658`、`835b39c3`）原样保留，回退后的版本不读取它。恢复包从未写入会话 JSONL（`44037658`、`835b39c3` 中 `goal-memory-task-data` 均为 0），对话记录不需要清理；`44037658` 中 3 处 Goal 工具调用作为普通历史保留。11-05 的隔离 dev 降级演练曾验证旧版可读取并续聊含 Goal 记录的会话（当时用本机 stub provider）。
+- **验证**：全量 `bun test` 875 pass / 0 fail（比 902 少 27，正是删除的 5 个 Goal 相关测试文件中的 27 项）；全仓 typecheck、`build:main`、`test-personal-scripts.py` 通过；fixture dev `desktop:smoke`、`iphone:smoke`、`android:smoke` 均 7/7 PASS。
+- **Codex 独立审查**：`--base personal`，focus 为“回退完整、无残留、打包配置无 worker 条目”（报告 `code-review/20261107-141733-base-personal.md`）：未发现问题。
+- **未安装的 `fix/goal-display-20261106`**：被本次回退取代，`install-request-2026-11-06` 撤回（改名为 `.withdrawn.md`）。backlog #19（Goal 开关持久化）随之搁置；#20（富文本下普通消息方括号被渲染成公式）是上游问题，保留观察。
+- **同步文档**：`PERSONAL.md`（与上游差异不再含 Goal 触点）、`docs/personal/goal-memory.md`（顶部标注已回退、搁置及重启开发的前提）、`docs/personal/backlog.md`、本记录。
