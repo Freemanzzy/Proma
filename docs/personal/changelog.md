@@ -2411,3 +2411,20 @@
 - **Codex 独立审查**：`--base personal`，focus 为“回退完整、无残留、打包配置无 worker 条目”（报告 `code-review/20261107-141733-base-personal.md`）：未发现问题。
 - **未安装的 `fix/goal-display-20261106`**：被本次回退取代，`install-request-2026-11-06` 撤回（改名为 `.withdrawn.md`）。backlog #19（Goal 开关持久化）随之搁置；#20（富文本下普通消息方括号被渲染成公式）是上游问题，保留观察。
 - **同步文档**：`PERSONAL.md`（与上游差异不再含 Goal 触点）、`docs/personal/goal-memory.md`（顶部标注已回退、搁置及重启开发的前提）、`docs/personal/backlog.md`、本记录。
+
+## 2026-11-08: 安装 3a2da9d6（回退 Goal Memory M0，Claude Code）
+
+- **安装**：
+  - 用户同意后执行 `launchctl unsetenv PROMA_PERSONAL_GOAL_MEMORY`，之后运行标准 `install-update.sh`，EXIT=0。
+  - 备份 BACKUP VERIFY PASS（44,536 条目），快照比对 `SNAPSHOT MATCH (draft cleanup): removed=1 backups=1`。草稿清理删除 `0f94e33a`（58 h 空草稿，已备份），与预演一致。
+  - 钥匙串弹 1 次。`scheduler-start enabledTasks=20` 紧跟 `web-remote-start`（+2 ms），`[FATAL]`/`[ERROR]` 均为 0。
+  - 定时任务 20/20，ID 一致；无 CDP 端口。
+  - `goals.sqlite` SHA-256 安装前后不变，4 条合同保留。
+  - 会话 JSONL 未被改动：`44037658` 前 561 行哈希不变，只在末尾追加了新消息。
+- **环境变量**：首次启动的进程从维护会话的 shell 继承了 `PROMA_PERSONAL_GOAL_MEMORY=1`（`open` 会传递调用者环境）。新版不读该变量，不影响功能。随后用 `env -u … open` 重启，进程环境中已不含该变量。已作为待办提给 Proma：`install-update.sh` 启动应用时清除个人版开关。
+- **对话记录**：`835b39c3`、`44037658` 打开正常，`44037658` 续聊正常，无报错。`29a447fc` 未经用户目视确认。`5bd413ec` 已被用户删除。
+- **缓存恢复**：
+  - `44037658` 回退后首条为整段重写（read 0 / write 466,391，属预期）；第二条用户未发送，已改用新会话接手。
+  - 同渠道同模型的新会话 `9cccfcc9` 共 8 次请求：第 2 次读取占 94.6%，累计命中率 86%，每次 read 约等于上一次的总输入。M0 期间“读取固定 7.3 万、每次重写约 43 万”的现象已消失。
+- **版本**：previous 为 `b1f26910`；`4fefcd5f` 移入废纸篓；`20261106-012031-49647` 归档到外置硬盘，并复核 SNAPSHOT MATCH。`install-request-2026-11-06` 已撤回，未安装。
+- 详见交接单 `install-result-2026-11-07.md`。
