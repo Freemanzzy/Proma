@@ -4,8 +4,8 @@
 
 ## 待合入分支（已验证、未发布）
 
-- 当前安装：`b1f26910`（2026-11-06 01:20，含 `fix/goal-paste-20261105`；Goal Memory 按用户决定**开启**，靠 `launchctl setenv`，重启电脑后需重设，见 #19；Claude Code 安装，见 install-result-2026-11-05-3），之前已合入的分支均已包含；下表各分支都已发布，保留作记录。
-- 已合入、未安装：`fix/goal-display-20261106`（用户气泡 `/goal` 消息按纯文本显示、复制还原后的文本；失败提示的反斜杠示例与用法改为行内代码），随 install-request-2026-11-06 安装，只需看显示。`goals.sqlite` 中会话 `29a447fc`、`5bd413ec` 的测试合同保留，清理与否由用户决定。
+- 当前安装：`b1f26910`（2026-11-06 01:20，含 Goal Memory M0；Claude Code 安装，见 install-result-2026-11-05-3）。**待回退**：见下一条。
+- 已合入、未安装：`revert/goal-memory-m0-20261107`（2026-11-07，移除 Goal Memory M0 及后续 goal 修补，只保留 MCP schema 兼容修复；原因是 M0 导致提示缓存命中率由约 98.8% 降到约 15%），随 install-request-2026-11-07 安装。`fix/goal-display-20261106` 未安装即被本次回退取代，install-request-2026-11-06 已撤回。`goals.sqlite`（4 条合同，含真实会话 `44037658`、`835b39c3`）保留，当前版本不读取。
 - 待用户日常实测：桌面排队消息（运行中再发、Cmd+R 恢复）；会话内搜索与 minimap（窗口化加载后）。用户 2026-10-31：保持现状，不主动安排，有问题再反馈。
 - 观察：手机 PDF 预览页“省流量”胶囊压住缩放控件（用户 10-19 决定先不做）。
 
@@ -22,6 +22,7 @@
 
 ## 开发中（未验收，不属于已验证分支）
 
+- **Goal Memory M0：已回退、搁置（2026-11-07）**，原因与回退范围见 changelog 2026-11-07 与 `goal-memory.md` 顶部。以下为当时的记录，保留作历史。
 - **Goal Memory M0**（截至2026-11-04 22:19 GMT+8，`feat/goal-memory-m0-20261103`，产品df8ae0fd，基线personal 1c373673）：**当前M0实验计划及三个补充验收全部通过，仍未合入/发布、默认关闭**。此前唯一首次Evidence binding owner阻塞已在beforeCommit同步修复并真实双Worker负向转正：旧A不写CP0，新B首次正常b0/b1，hostseq1/modelseq0及源水位正确，不靠重试。原P2不再为暂缓遗留。B6原9末端/16线程及完整矩阵、876/0/2328/146、typecheck/scripts/五构建/17源一致；唯一定向6实际93秒无可操作缺陷。Astra部分进度+额度错误不算结论；随后真正全新独立Sol role review按源码/原日志/hash判A/B/C/D/E及三补充通过，父采纳。**保留未测**：最终完整GUI/大历史UI、真实自动threshold/overflow故障、图片/provider共存、实际watch/安装包、长期语义和收益比例；SQLite不能Promise硬抢占，旧三长/两短只归各旧版本，300装载非模型压缩。通过不授权后续合并/推送/启用/升版/打包/安装/M1/第七轮，不重做旧清理或自动创建后续任务。SSOT见[goal-memory.md](./goal-memory.md)。
 
   - **追加验证（2026-11-05）**：用户当日明确批准隔离dev降级演练；M0→1286ff19→M0同数据往返通过，已有对话和Goal工具记录完整，旧版可普通续聊/新建会话且sidecar字节不变，回M0合同与Goal能力保留。43项材料断言及三份全目录快照hash通过，17源码/构建输入与最终验收一致。本次已实际运行watch和小样本GUI，未覆盖真实provider、完整GUI/大历史/附件/压缩、菜单退出或安装版降级；不是放开真实模型/发布/M1的许可。具体边界见[Goal SSOT](./goal-memory.md)末节及changelog 2026-11-05。
@@ -95,7 +96,7 @@
     - 切回商业版前，`shared-skills` Skill 的 `check-shared-skills.sh --fix` 只用于为共享模式期间新建的工作区补链接；共享模式不需要运行该脚本。
 
 
-19. **Goal Memory 开关持久化**（2026-11-06 提出，**方案待用户确认，未开工**；编号跳过 18，18 在未合并的 `docs/backlog-superagent-20261102` 分支）：现在只认 `launchctl setenv PROMA_PERSONAL_GOAL_MEMORY 1`，重启电脑后丢失，需重新设置并重启 Proma。
+19. **Goal Memory 开关持久化**（**2026-11-07 随 M0 回退一并搁置**，以下为原记录）（2026-11-06 提出，**方案待用户确认，未开工**；编号跳过 18，18 在未合并的 `docs/backlog-superagent-20261102` 分支）：现在只认 `launchctl setenv PROMA_PERSONAL_GOAL_MEMORY 1`，重启电脑后丢失，需重新设置并重启 Proma。
     - **方案 A：开关文件（推荐）**。在配置目录（正式 `~/.proma/`，dev 为各自的 `.proma-dev*`，互不影响）放 `personal-flags.json`，如 `{"goalMemory": true}`。优先级：环境变量 `PROMA_PERSONAL_GOAL_MEMORY=1` 强制开、`=0` 强制关；未设置时读文件；文件不存在或解析失败按关闭处理并记一条 WARN。启动时读一次并缓存，改文件后需重启 Proma 生效（与现在一致，避免会话中途工具集变化）。改动只在 `personal-goal-memory.ts`，不碰上游文件；文件随 `~/.proma` 备份。缺点：没有界面开关，要手动编辑文件或让 Proma/Claude Code 写入。
     - **方案 B：设置项 + 设置页开关**。`settings.json` 加 `personalGoalMemoryEnabled`，设置页加一个开关。可见、易用；但要改上游的 `types/settings.ts`、`settings-service.ts` 和设置页组件（约 3 处触点），同步上游 tag 时冲突面更大；还要决定切换后是否需要重启。
     - **方案 C：登录项脚本**。用 LaunchAgent 在登录时执行 `launchctl setenv`。不改代码，但在应用之外，与 Proma 开机自启的先后顺序无法保证，且是全局环境变量，排查不直观。不推荐。

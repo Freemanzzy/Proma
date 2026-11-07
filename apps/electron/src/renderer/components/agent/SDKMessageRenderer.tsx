@@ -89,7 +89,6 @@ import {
   isThinkingSignatureError,
 } from '@proma/shared'
 import type { ToolActivity } from '@/atoms/agent-atoms'
-import { formatHostSlashCommandForDisplay } from '@/lib/personal-slash-command-display'
 
 // ===== SDKMessageRenderer Props =====
 
@@ -1078,7 +1077,7 @@ function UserInputMessage({ message, onAgentHistoryQuoteClick }: {
       )}
       {text && (
         <MessageActions className="pl-[46px] mt-0.5">
-          <CopyButton content={formatHostSlashCommandForDisplay(text) ?? replaceAgentHistoryQuoteMentionsWithLabels(text)} />
+          <CopyButton content={replaceAgentHistoryQuoteMentionsWithLabels(text)} />
         </MessageActions>
       )}
     </Message>

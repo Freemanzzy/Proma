@@ -9,12 +9,6 @@ export const ASK_USER_QUESTION_TIMEOUT_MS = 15 * 60_000
  * 仅 AskUserQuestion 延长，避免放宽其他跨进程能力调用的故障检测。
  */
 export function getParentRequestTimeoutMs(method: string, payload: unknown): number {
-  if (method === AGENT_RUNTIME_METHODS.CAPABILITY_GOAL_MEMORY) {
-    const operation=(payload as {operation?:unknown}|null)?.operation
-    // Full bounded artifact scans are async and may process a long session; compaction ack stays short/fail-closed.
-    if(operation==='context'||operation==='evidence_read'||operation==='turn_end')return 60_000
-    return 5_000
-  }
   if (
     method === AGENT_RUNTIME_METHODS.CAPABILITY_CAN_USE_TOOL
     && (payload as { toolName?: unknown } | null)?.toolName === 'AskUserQuestion'
