@@ -63,6 +63,7 @@ Claude Code 接手安装时只做必要复核：包内 marker commit 等于 `per
 - **进程**：禁止 `pkill` / `killall`；只按 PID 结束进程，且先征得用户同意。
 - **输出**：不打印密钥与 API Key；读取配置只取需要的字段。
 - **安装与重启**：安装、替换应用、退出 Proma 只由 Claude Code 在用户在场并同意时执行；Proma 不得运行 `install-update.sh`。
+- **启动环境（2026-11-08 起）**：用 `open` 启动 Proma 时，新进程会继承**调用者 shell 的全部环境变量**，不是 launchd 的环境。所以维护会话若是在 `launchctl setenv PROMA_…` 之后启动的，即使已 `launchctl unsetenv`，它的 shell 里仍有该变量，直接 `open` 启动的 Proma 会带着它（2026-11-08 安装 `3a2da9d6` 时 `PROMA_PERSONAL_GOAL_MEMORY=1` 因此进了新进程）。`install-update.sh` 已改为经 `launch-env.sh` 启动：清除调用者环境中的全部 `PROMA_*` 及已知个人版/开发开关，只沿用 `launchctl getenv` 的值，启动后用 `ps eww` 自检并打印变量名（不打印值），出现非 launchctl 来源的 `PROMA_*` 时打印 `WARN`。**安装之外手动重启 Proma 时**同样不要直接 `open`：用 `env -u <变量> open -na /Applications/Proma.app`，或在一个 `launchctl unsetenv` 之后新开的终端里启动，然后 `ps eww -o command= -p <PID>` 确认。注意：非 `PROMA_*` 的调用者变量（如 Claude Code 的 `CLAUDE_CODE_*`、`ANTHROPIC_BASE_URL`、代理变量）目前仍会被继承，见 backlog #21。
 - **网络**：git 用 `GIT_TERMINAL_PROMPT=0 perl -e 'alarm 120; exec @ARGV' git -c http.proxy=http://127.0.0.1:7897 ...`；其他下载设 `HTTPS_PROXY=http://127.0.0.1:7897`；bun 在 `~/.bun/bin`（先 `export PATH="$HOME/.bun/bin:$PATH"`）；macOS 无 `timeout`，用 `perl -e 'alarm N; exec @ARGV'`。
 
 ## 4.1 同步策略（用户 2026-09-28 决定）

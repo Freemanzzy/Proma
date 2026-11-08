@@ -4,8 +4,8 @@
 
 ## 待合入分支（已验证、未发布）
 
-- 当前安装：`b1f26910`（2026-11-06 01:20，含 Goal Memory M0；Claude Code 安装，见 install-result-2026-11-05-3）。**待回退**：见下一条。
-- 已合入、未安装：`revert/goal-memory-m0-20261107`（2026-11-07，移除 Goal Memory M0 及后续 goal 修补，只保留 MCP schema 兼容修复；原因是 M0 导致提示缓存命中率由约 98.8% 降到约 15%），随 install-request-2026-11-07 安装。`fix/goal-display-20261106` 未安装即被本次回退取代，install-request-2026-11-06 已撤回。`goals.sqlite`（4 条合同，含真实会话 `44037658`、`835b39c3`）保留，当前版本不读取。
+- 当前安装：`3a2da9d6`（2026-11-08 00:01，回退 Goal Memory M0，只保留 MCP schema 兼容修复；Claude Code 安装，见 install-result-2026-11-07）。
+- 已合入、未安装：`fix/install-launch-env-20261108`（`install-update.sh` 启动应用时清除调用者 shell 的 `PROMA_*` 变量、`ps eww` 自检；应用代码不变），随 install-request-2026-11-08 安装。Goal 残留（`~/.proma/goal-memory/`、6 个 goal 分支）已于 2026-11-08 删除。
 - 待用户日常实测：桌面排队消息（运行中再发、Cmd+R 恢复）；会话内搜索与 minimap（窗口化加载后）。用户 2026-10-31：保持现状，不主动安排，有问题再反馈。
 - 观察：手机 PDF 预览页“省流量”胶囊压住缩放控件（用户 10-19 决定先不做）。
 
@@ -102,6 +102,10 @@
     - **方案 C：登录项脚本**。用 LaunchAgent 在登录时执行 `launchctl setenv`。不改代码，但在应用之外，与 Proma 开机自启的先后顺序无法保证，且是全局环境变量，排查不直观。不推荐。
     - 建议先做 A（环境变量仍可覆盖，便于临时关闭/验证），以后若需要界面开关再在 A 的基础上加 B 的 UI。
 20. **（观察，上游问题）富文本模式下普通用户消息里的方括号被渲染成公式**（2026-11-06 排查 `/goal` 气泡时发现，未修）：富文本输入框发送前把 `[` `]` 转义成 `\[` `\]`，用户气泡的 `normalizeLatexDelimiters` 又把 `\[ … \]` 当 LaTeX 块公式，例如“看 [a] 和 [b]”会变成 `$$a$$ 和 $$b$$` 并显示为公式。`/goal` 消息已由个人版按纯文本显示绕开；普通消息未改（用户要求不影响普通消息渲染）。如要修，方向是用户气泡跳过 LaTeX 规范化，或在序列化时不转义方括号；属上游行为，可考虑反馈上游。
+21. **（待用户决定）安装后的 Proma 继承了维护会话的全部环境变量**（2026-11-08 做 `fix/install-launch-env-20261108` 时发现，未改）：`open` 把调用者 shell 的环境整体带给新进程。当前运行的 `3a2da9d6`（PID 73007，由 Claude Code 启动）进程环境里有 83 个变量，包括 Claude Code 的 `CLAUDECODE`、`CLAUDE_CODE_*`（含 `CLAUDE_CODE_MESSAGING_TOKEN`、`CLAUDE_CODE_OAUTH_SCOPES` 等）、`ANTHROPIC_BASE_URL`、`HTTP(S)_PROXY`、`NO_PROXY`、`API_TIMEOUT_MS`，以及其他会话里的访问凭据变量名（只核对了名字，未读取值）。这些会传给 Proma 里 Agent 的 Bash 等子进程：可能让子进程里的 `claude` CLI 误判自己处于嵌套会话，令牌暴露面也变大，还会让行为与从 Dock 启动不一致。`fix/install-launch-env-20261108` 只清 `PROMA_*`。
+    - **方案 A（推荐）**：`launch-env.sh` 改为白名单启动：`env -i` 只保留与 Dock 启动一致的少数变量（`HOME`、`USER`、`LOGNAME`、`SHELL`、`TMPDIR`、`PATH`（系统默认）、`SSH_AUTH_SOCK`、`LANG` 等）加 `launchctl getenv` 的值。需在安装时实测：模型请求、代理（若依赖 `HTTPS_PROXY` 而非应用内代理设置）、终端与 Bash 工具的 PATH、钥匙串。
+    - **方案 B**：在 A 之外扩大黑名单（`CLAUDE*`、`ANTHROPIC_*`、`OPENAI_*`、代理变量），改动小但会漏掉新出现的变量。
+    - 临时做法：安装后若想要干净环境，由用户在 Dock 里退出并重新打开 Proma。
 ## 测试与开发数据约定
 
 - **真实负载测试触发条件**（父会话在派单前判断，并在交接/安装申请写明做了或没做及原因）：改动涉及手机列表数据内容（字段、投影、瘦身）、历史加载（分页、加载更早、按需媒体）、传输层（WebSocket、压缩、分块、超时、重连同步）、首次加载前端资源明显变大、同步官方版本且上游改了会话存储或 Web Remote、用户反馈手机变慢。其余改动用功能回归 + 打包冒烟即可。

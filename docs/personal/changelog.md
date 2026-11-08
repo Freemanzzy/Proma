@@ -2428,3 +2428,35 @@
   - 同渠道同模型的新会话 `9cccfcc9` 共 8 次请求：第 2 次读取占 94.6%，累计命中率 86%，每次 read 约等于上一次的总输入。M0 期间“读取固定 7.3 万、每次重写约 43 万”的现象已消失。
 - **版本**：previous 为 `b1f26910`；`4fefcd5f` 移入废纸篓；`20261106-012031-49647` 归档到外置硬盘，并复核 SNAPSHOT MATCH。`install-request-2026-11-06` 已撤回，未安装。
 - 详见交接单 `install-result-2026-11-07.md`。
+
+## 2026-11-08: 清理 Goal Memory 残留；install-update.sh 启动应用不再继承调用者的 PROMA_* 变量
+
+- **来源**：install-result-2026-11-07 待办 1、8，以及用户 11-08 指令。
+- **删除 Goal 数据（用户明确要求）**：
+  - 删前只读记录：`~/.proma/goal-memory/` 只有 `goals.sqlite`，**172,032 B，SHA-256 `ee04d740936ddbb16aeb0faeec82b9cca3dfbff8f9f7755ac52ab662eb14d20e`**（与 install-result-2026-11-07 记录一致）；内含合同 4 条（会话 `29a447fc`、`5bd413ec`、`44037658`、`835b39c3`），`current_contracts` 0 行，checkpoint 4 条。
+  - 确认当前版本不读写它：安装版 `3a2da9d6` 的 `app.asar` 中 `goal-memory`、`goals.sqlite`、`PROMA_PERSONAL_GOAL_MEMORY`、`personal-goal` 均 0 处；删除时没有进程打开该目录。
+  - 2026-11-08T04:29Z 删除整个 `~/.proma/goal-memory/`。`~/.proma` 下其他文件未动。删后 main.log 无 goal 相关输出、无 `[ERROR]`/`[FATAL]`，目录未被重新创建。重启后复核交给 Claude Code（Proma 不重启应用），写在 install-request-2026-11-08。
+  - 保留未动：本机 `~/.proma-switch-backups/20261108-000054-70557/proma/goal-memory/` 与外置硬盘 `switch-backups/` 中各更新前备份里的副本（maintenance §4）；开发数据 `~/.proma-dev-fixture/goal-memory/`、`~/.proma-dev-m0-rollback-20261105/goal-memory/` 不在本次范围，也未动。
+  - 会话 JSONL 一律未改；`44037658`、`835b39c3`、`29a447fc` 中的 Goal 历史作为普通记录保留（`5bd413ec` 此前已由用户在界面删除）。
+- **删除 6 个已合并的 goal 分支**（删除前逐个确认 `git merge-base --is-ancestor <分支> personal` 为真，本地用 `git branch -d`）：
+
+  | 分支 | 删除前指向 | 本地 | origin | archive |
+  |---|---|---|---|---|
+  | `feat/goal-memory-m0-20261103` | `44740d6a01f8ec2fc0d0a2d8a55c3474145b7442` | 删 | 删 | 删 |
+  | `fix/goal-input-and-mcp-schema-20261105` | `c1b333be0e7f2964e2e5647d0f304e32ed454a8c` | 删 | 删 | 删 |
+  | `fix/goal-test-timeout-20261105` | `8bd5b42c57c355a4a31ff3d98145c95cc213dbdf` | 删 | 删 | 删 |
+  | `fix/goal-paste-20261105` | `d5ab2ea7e011e84a468308a8a007858a8c23a51f` | 删 | — | — |
+  | `fix/goal-display-20261106` | `d2ce2b8db598d354bbbb85babdd117e292e2b2c0` | 删 | — | — |
+  | `revert/goal-memory-m0-20261107` | `dc0d6b5726df392320aae6d79c70c1d71d397c59` | 删 | — | — |
+
+  远端用一条 `git push origin --delete …`：`origin` 配置了两个 push URL（fork 与 `Proma-archive`），两边各删 3 个；之后两个仓库 `ls-remote` 均无 goal 分支，`fetch --prune` 清掉了远端跟踪引用。其他分支（含 `docs/backlog-superagent-20261102`）未动。这些提交仍在 `personal` 历史中，可随时追溯。
+- **worktree**：`git worktree list` 只有主目录，`.git/worktrees` 不存在；`~/Documents` 下也没有 goal 相关的 worktree 目录（`~/Documents/git-worktrees/` 里只有与本仓库无关的 `obsidian-vault`）。无需 `worktree remove`/`prune`。
+- **install-update.sh 环境变量继承修复**：
+  - 原因：`open` 启动的应用继承调用者 shell 的环境变量。11-07 安装时，Claude Code 会话是在 11-06 `launchctl setenv` 之后启动的，即使已 `launchctl unsetenv`，新进程仍带着 `PROMA_PERSONAL_GOAL_MEMORY=1`。
+  - 修复：新文件 `scripts/personal/launch-env.sh`（由 `install-update.sh` source）。`build_launch_env_args` 清除调用者环境中的全部 `PROMA_*` 以及已知的个人版/开发开关（`PROMA_PERSONAL_GOAL_MEMORY`、`PROMA_DEV*`、`PROMA_WEB_REMOTE*`、`PROMA_AGENT_RUNTIME` 等），只沿用 `launchctl getenv` 当前确有的值，并打印清除了哪些、沿用了哪些；`install-update.sh` 改为 `env "${LAUNCH_ENV_ARGS[@]}" open -na "$APP_PATH"`。锁定新 PID 后 `report_launch_env` 用 `ps eww -o command= -p <PID>` 自检，只打印变量名与来源（launchctl / 非预期），不打印值；非预期时打印 `WARN`，不判失败。
+  - 实现中发现：BSD `env` 的 `-u` 必须全部在 `NAME=VALUE` 之前，否则后面的 `-u` 会被当成要执行的命令；已按此排序。另外，`ps eww` 看不到 SIP 保护的系统二进制（如 `/bin/sleep`）的环境，对 Proma 这类普通应用可以看到，已用真实进程验证。
+  - 测试：`test-personal-scripts.py` 新增 `INSTALL LAUNCH ENV`：调用者带 `PROMA_PERSONAL_GOAL_MEMORY=1`、未知 `PROMA_SOMETHING_NEW`、`PROMA_AGENT_RUNTIME=in-process`，假 launchctl 只返回 `PROMA_AGENT_RUNTIME=off` → 子进程无前两者、`PROMA_AGENT_RUNTIME=off`、非 `PROMA_*` 变量与 `PATH` 保留；假 ps 输出验证“不含 / 来自 launchctl / 非预期 WARN / 无法读取”四种自检输出且不打印值；静态检查 `install-update.sh` 不再有裸 `open`。另用真实子进程验证：直接启动时自检报告 5 个继承来的 `PROMA_*`（WARN），经 `env "${LAUNCH_ENV_ARGS[@]}"` 启动时报告不含。
+  - `maintenance.md` §4 新增“启动环境”一条：安装之外手动重启 Proma 也不要直接 `open`。
+- **另记发现（未改，backlog #21，待用户决定）**：当前运行的 `3a2da9d6`（由 Claude Code 启动）进程环境中有 83 个继承来的变量，包括 `CLAUDECODE`、`CLAUDE_CODE_*`（含令牌类变量名）、`ANTHROPIC_BASE_URL`、代理变量等；本次只清 `PROMA_*`，白名单启动方案写在 backlog #21。
+- **其余（只记录，维持现状）**：nowledge-mem MCP 11-07 16:26、16:44（UTC）连接失败后按可选服务器跳过，属外部服务，持续出现再查 Nowledge Mem.app；Node `DEP0169 url.parse()` 来源仍未定位（backlog #15）。
+- **同步文档**：`goal-memory.md` 顶部注明“M0 已回退、数据已删除、开发搁置”；`PERSONAL.md`（Goal 状态、安装脚本启动环境）；`maintenance.md`；`backlog.md`（当前安装 `3a2da9d6`、已合入未安装、#21）；本记录。
