@@ -2460,3 +2460,22 @@
 - **另记发现（未改，backlog #21，待用户决定）**：当前运行的 `3a2da9d6`（由 Claude Code 启动）进程环境中有 83 个继承来的变量，包括 `CLAUDECODE`、`CLAUDE_CODE_*`（含令牌类变量名）、`ANTHROPIC_BASE_URL`、代理变量等；本次只清 `PROMA_*`，白名单启动方案写在 backlog #21。
 - **其余（只记录，维持现状）**：nowledge-mem MCP 11-07 16:26、16:44（UTC）连接失败后按可选服务器跳过，属外部服务，持续出现再查 Nowledge Mem.app；Node `DEP0169 url.parse()` 来源仍未定位（backlog #15）。
 - **同步文档**：`goal-memory.md` 顶部注明“M0 已回退、数据已删除、开发搁置”；`PERSONAL.md`（Goal 状态、安装脚本启动环境）；`maintenance.md`；`backlog.md`（当前安装 `3a2da9d6`、已合入未安装、#21）；本记录。
+
+## 2026-11-08: 安装 bfc6bba6（install-update.sh 启动环境修复，Claude Code）
+
+- **安装**：
+  - 标准 `install-update.sh` EXIT=0，未手动 `env -u`。
+  - 备份 BACKUP VERIFY PASS（44,699 条目）；启动前后均为 SNAPSHOT MATCH。
+  - `draft-cleanup removed=0 skipped=1`，与预演一致。
+  - 钥匙串弹 1 次。
+  - `scheduler-start enabledTasks=20` 紧跟 `web-remote-start`（+3 ms）。
+  - `[FATAL]`/`[ERROR]`/`[WARN]` 均为 0。
+  - 定时任务 20/20，ID 一致；会话 1437 不变；无 CDP 端口。
+- **启动环境修复实测通过**：维护会话 shell 里带有 `PROMA_PERSONAL_GOAL_MEMORY`，`launchctl getenv` 为空。
+  - 脚本输出 `启动环境：清除调用者 shell 中的 PROMA_* 变量: PROMA_PERSONAL_GOAL_MEMORY；沿用 launchctl: 无`。
+  - 自检输出 `PID 8943 进程环境不含 PROMA_* 变量`，无 WARN。
+  - 用 `ps eww` 手动复核，`PROMA_*` 计数为 0。
+- **Goal 残留**：重启后 `~/.proma/goal-memory/` 不存在，也未被重新创建；启动后 main.log 无 goal 相关输出。
+- **backlog #21 数据**：新进程仍继承 82 个非 `PROMA_*` 变量，其中约 40 个是 Claude Code 自身的（含 `CLAUDE_CODE_MESSAGING_TOKEN`、`XYQ_ACCESS_KEY` 等 token 类变量），另有 `ANTHROPIC_BASE_URL` 和代理变量。名单见交接单，只记录名字，未读取值。
+- **版本**：previous 为 `3a2da9d6`；`b1f26910` 移入废纸篓；`20261108-000054-70557` 已归档到外置硬盘，复核 SNAPSHOT MATCH。
+- 详见交接单 `install-result-2026-11-08.md`。
