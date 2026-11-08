@@ -17,8 +17,9 @@
 
 ## 本分支实验（尚未合入）
 
-- **Goal Memory M0：已回退、搁置（2026-11-07）**。M0 曾于 2026-11-05 合入并随 `ea92ba72`/`4fefcd5f`/`b1f26910` 安装；真实会话中提示缓存命中率由约 98.8% 降到约 15%（动态恢复包插在缓存边界之前），用户决定回退并暂停 Goal 模式开发。`revert/goal-memory-m0-20261107` 把相关代码（含 `/命令` 粘贴例外、`/goal` 气泡显示）恢复到 `1c373673`，与上游的差异不再包含 Goal 相关触点。历史设计与验证记录保留在 [`goal-memory.md`](./docs/personal/goal-memory.md)；数据 `~/.proma/goal-memory/goals.sqlite` 保留未删，当前版本不读取。
+- **Goal Memory M0：已回退、数据已删除、开发搁置（截至 2026-11-08）**。M0 曾于 2026-11-05 合入并随 `ea92ba72`/`4fefcd5f`/`b1f26910` 安装；真实会话中提示缓存命中率由约 98.8% 降到约 15%（动态恢复包插在缓存边界之前），用户决定回退并暂停 Goal 模式开发。回退版 `3a2da9d6` 于 2026-11-08 安装：相关代码（含 `/命令` 粘贴例外、`/goal` 气泡显示）恢复到 `1c373673`，与上游的差异不再包含 Goal 相关触点，缓存命中率恢复。2026-11-08 按用户要求删除 `~/.proma/goal-memory/` 与 6 个 goal 分支（本机与外置硬盘的更新前备份中的副本按 maintenance §4 保留）。历史设计与验证记录保留在 [`goal-memory.md`](./docs/personal/goal-memory.md)。
 - MCP 工具 schema 兼容化（2026-11-05）：MCP 工具 `inputSchema` 顶层的 `oneOf`/`anyOf`/`allOf` 从发给模型的 schema 中移出并写入工具描述（Anthropic 拒绝此类 schema，会使整次请求 400），`required` 形状的约束在执行前由本地补回校验。逻辑在 `personal-mcp-schema.ts`；上游接入 `apps/electron/src/main/lib/adapters/pi-mcp-tools.ts`（schema 转换、描述追加、执行前校验，约 7 行）。
+- 安装脚本启动环境（2026-11-08）：`scripts/personal/install-update.sh` 经新文件 `scripts/personal/launch-env.sh` 启动应用，清除调用者 shell 的 `PROMA_*` 变量、只沿用 launchd 的值，启动后 `ps eww` 自检。只涉及个人版脚本，不改应用代码。
 
 ## 同步规则
 

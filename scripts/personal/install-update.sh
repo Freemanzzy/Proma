@@ -2,6 +2,8 @@
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# shellcheck source=launch-env.sh
+source "$ROOT/scripts/personal/launch-env.sh"
 TIMEOUT=120
 HEALTH_SECONDS=60
 DRY_RUN=0
@@ -461,7 +463,9 @@ PY
 else
   APP_BEFORE_PIDS="$(find_app_pids "$APP_PATH/Contents/MacOS/Proma")"
   STARTED_AT_EPOCH="$(python3 -c 'import time; print(f"{time.time():.6f}")')"
-  open -na "$APP_PATH"
+  # 不继承调用者 shell 的 PROMA_* 变量，只沿用 launchd 的值（见 launch-env.sh 与 maintenance.md）
+  build_launch_env_args
+  env "${LAUNCH_ENV_ARGS[@]}" open -na "$APP_PATH"
   # Capture only the new process whose executable path is the bundle just installed.
   start_deadline=$((SECONDS + 30))
   while :; do
@@ -475,6 +479,7 @@ else
   done
   START_PID="$(printf '%s\n' "$NEW_PIDS" | head -1)"
   [[ "$START_PID" =~ ^[0-9]+$ ]] || { echo '健康检查失败：无法锁定新版进程 PID。' >&2; exit 4; }
+  report_launch_env "$START_PID"
   LOG_FILE="$LOGS_DIR/main.log"
   python3 "$ROOT/scripts/personal/wait-startup-marker.py" "$LOG_FILE" "$STARTED_AT_EPOCH" "$TIMEOUT" || exit 4
   echo "个人版主进程日志: $LOG_FILE"

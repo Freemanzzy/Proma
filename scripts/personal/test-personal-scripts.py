@@ -46,6 +46,44 @@ def check_startup_marker_waiter(root: Path):
     print('STARTUP MARKER WAIT PASS: no marker/old marker time out; delayed fresh and rotated markers pass; post-marker FATAL fails')
 
 
+def check_launch_env(root: Path):
+    """install-update.sh 启动应用时不继承调用者 shell 的 PROMA_* 变量（2026-11-08）。"""
+    helper = SCRIPTS / 'launch-env.sh'
+    fake_launchctl = root / 'fake-launchctl'
+    fake_launchctl.write_text('#!/bin/bash\n[[ "$1" == getenv && "$2" == PROMA_AGENT_RUNTIME ]] && echo off\nexit 0\n')
+    fake_launchctl.chmod(0o755)
+    env = {k: v for k, v in os.environ.items() if not k.startswith('PROMA_')}
+    env.update({'PROMA_PERSONAL_GOAL_MEMORY': '1', 'PROMA_SOMETHING_NEW': 'x', 'PROMA_AGENT_RUNTIME': 'in-process', 'KEEP_ME': 'yes', 'LAUNCH_ENV_LAUNCHCTL': str(fake_launchctl)})
+    script = f'set -Eeuo pipefail; source {helper!s}; build_launch_env_args; env "${{LAUNCH_ENV_ARGS[@]}}" /usr/bin/env'
+    result = subprocess.run(['/bin/bash', '-c', script], text=True, capture_output=True, env=env)
+    assert result.returncode == 0, result.stderr
+    child = dict(line.split('=', 1) for line in result.stdout.splitlines() if '=' in line and not line.startswith('启动环境'))
+    assert 'PROMA_PERSONAL_GOAL_MEMORY' not in child and 'PROMA_SOMETHING_NEW' not in child, 'caller PROMA_* must be cleared'
+    assert child.get('PROMA_AGENT_RUNTIME') == 'off', 'launchd value must replace the caller value'
+    assert child.get('KEEP_ME') == 'yes' and 'PATH' in child, 'non-PROMA variables must be kept'
+    summary = result.stdout.splitlines()[0]
+    assert 'PROMA_PERSONAL_GOAL_MEMORY' in summary and 'PROMA_SOMETHING_NEW' in summary and '沿用 launchctl: PROMA_AGENT_RUNTIME' in summary, summary
+    # 自检：用假的 ps 输出新进程环境
+    fake_ps = root / 'fake-ps'
+    def report(ps_output: str) -> str:
+        fake_ps.write_text('#!/bin/bash\nprintf "%s\\n" ' + json.dumps(ps_output) + '\n')
+        fake_ps.chmod(0o755)
+        run_env = dict(env, LAUNCH_ENV_PS=str(fake_ps))
+        r = subprocess.run(['/bin/bash', '-c', f'set -Eeuo pipefail; source {helper!s}; build_launch_env_args >/dev/null; report_launch_env 4242'], text=True, capture_output=True, env=run_env)
+        assert r.returncode == 0, r.stderr
+        return r.stdout
+    clean = report('/Applications/Proma.app/Contents/MacOS/Proma HOME=/Users/x PATH=/usr/bin')
+    assert '不含 PROMA_* 变量' in clean and 'WARN' not in clean, clean
+    mixed = report('/Applications/Proma.app/Contents/MacOS/Proma PATH=/usr/bin PROMA_AGENT_RUNTIME=off PROMA_PERSONAL_GOAL_MEMORY=1')
+    assert '含 PROMA_AGENT_RUNTIME（来自 launchctl' in mixed and 'WARN 启动环境自检：PID 4242 含非预期的 PROMA_PERSONAL_GOAL_MEMORY' in mixed, mixed
+    assert '=1' not in mixed and '=off' not in mixed, 'values must not be printed'
+    unreadable = report('')
+    assert '无法读取 PID 4242' in unreadable, unreadable
+    install = (SCRIPTS / 'install-update.sh').read_text(encoding='utf-8')
+    assert 'env "${LAUNCH_ENV_ARGS[@]}" open -na "$APP_PATH"' in install and 'report_launch_env "$START_PID"' in install
+    assert not [line for line in install.splitlines() if line.strip().startswith('open ')], 'install-update.sh must not call bare open'
+    print('INSTALL LAUNCH ENV PASS: caller PROMA_* cleared, launchd values kept, non-PROMA kept; ps eww self-check reports clean/launchd/unexpected without values')
+
 def check_mobile_preview_stop(root: Path):
     script = SCRIPTS / 'mobile-preview.sh'
     mock_tailscale = root / 'tailscale-mock'
@@ -281,6 +319,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='proma-personal-script-tests-', dir='/tmp') as td:
         root=Path(td)
         check_startup_marker_waiter(root)
+        check_launch_env(root)
         check_mobile_preview_stop(root)
         check_fixture_generator(root)
         check_request_diagnostics_summary(root)
