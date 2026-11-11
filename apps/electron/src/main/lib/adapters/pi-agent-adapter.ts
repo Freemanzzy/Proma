@@ -67,7 +67,7 @@ import { createDeepSeekReasoningRequestExtension } from './pi-deepseek-reasoning
 import { createOpenAIReasoningRequestExtension } from './pi-openai-reasoning-request-settings'
 import { mergeRuntimeEnv, type AgentRuntimeEnv } from '../agent-runtime-env'
 import { sanitizePiMessageImageContent, sanitizeToolResultImageContent } from '../image-content-validation'
-import { classifyProviderErrorKind, createImageContextBudget, PROMA_READ_IMAGE_RESIZE } from '../image-context-budget'
+import { classifyProviderErrorKind, createImageContextBudget, createSdkImageResizer, PROMA_READ_IMAGE_RESIZE } from '../image-context-budget'
 import {
   convertPiMessage,
   convertResultMessage,
@@ -1560,10 +1560,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         const sanitized = sanitizePiMessageImageContent(
           await previousTransformContext?.(messages, signal) ?? messages,
         )
-        const budgeted = await applyImageBudget(sanitized, async (bytes, mimeType, resizeOptions) => {
-          const resized = await sdk.resizeImage(bytes, mimeType, resizeOptions)
-          return resized ? { data: Buffer.from(resized.data).toString('base64'), mimeType: resized.mimeType } : null
-        })
+        const budgeted = await applyImageBudget(sanitized, createSdkImageResizer(sdk.resizeImage))
         if (budgeted.stats.recompressed > 0 || budgeted.stats.newlyRemoved > 0 || budgeted.stats.recompressFailed > 0) {
           input.onDiagnosticEvent?.('image-budget', { session: input.sessionId.slice(0, 8), ...budgeted.stats })
         }

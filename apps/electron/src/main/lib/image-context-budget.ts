@@ -22,6 +22,35 @@ type Block = TextBlock | ImageBlock | { type: string; [key: string]: unknown }
 type PiMessage = { role?: unknown; content?: unknown; toolCallId?: unknown; timestamp?: unknown }
 type Resize = (bytes: Uint8Array, mimeType: string, options?: ModelImageResizeOptions) => Promise<{ data: string; mimeType: string } | null>
 
+/** 按文件头识别图片格式；无法识别时返回 null。 */
+export function detectImageMimeType(bytes: Uint8Array): string | null {
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return 'image/png'
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg'
+  if (bytes.length >= 6 && Buffer.from(bytes.subarray(0, 6)).toString('latin1').startsWith('GIF8')) return 'image/gif'
+  if (bytes.length >= 12 && Buffer.from(bytes.subarray(0, 4)).toString('latin1') === 'RIFF' && Buffer.from(bytes.subarray(8, 12)).toString('latin1') === 'WEBP') return 'image/webp'
+  return null
+}
+
+type SdkResize = (bytes: Uint8Array, mimeType: string, options?: ModelImageResizeOptions) => Promise<{ data: string | Uint8Array; mimeType: string } | null | undefined>
+
+/**
+ * 把 Pi SDK 的 resizeImage 包装成预算用的 Resize。
+ * Pi 0.87 返回的 data 已经是 base64 字符串；2026-10-31 的接线又做了一次 base64，
+ * 导致重压缩后的图片变成“base64 文本的 base64”，OpenAI Codex 报
+ * `input_image image_url unsupported image format: unknown`（2026-11-11）。
+ * 这里兼容字符串与字节两种返回，并校验文件头，识别不了就视为失败、保留原图。
+ */
+export function createSdkImageResizer(sdkResize: SdkResize): Resize {
+  return async (bytes, mimeType, options) => {
+    const resized = await sdkResize(bytes, mimeType, options)
+    if (!resized) return null
+    const data = typeof resized.data === 'string' ? resized.data : Buffer.from(resized.data).toString('base64')
+    const detected = detectImageMimeType(Buffer.from(data.slice(0, 64), 'base64'))
+    if (!detected) return null
+    return { data, mimeType: detected }
+  }
+}
+
 export interface ImageBudgetStats {
   imagesBefore: number
   imageBytesBefore: number
