@@ -2492,3 +2492,21 @@
 - **测试**：`image-context-budget.test.ts` 新增 3 项：用真实 Pi `resizeImage` 处理 1716×995 噪点 PNG（base64 >1 MiB），断言重压缩结果的文件头与 `mimeType` 一致且小于 600 KB；二次 base64 的返回被拒、原图保留；字节返回可用、`mimeType` 以文件头为准；文件头识别。原有假 resize 改为返回带 JPEG 文件头的数据。修复前代码上新测试不存在、旧 10 项照常通过，说明旧测试覆盖不到接线。
 - **验证**：全量 `bun test` 878 pass / 0 fail；typecheck、`build:main` 通过。Codex `--base personal`（`code-review/20261111-171240-base-personal.md`）：未发现问题。
 - **另记**：`home-top.png` 宽 1716 超过 Read 的 `maxWidth 1568`，却以原图 922 KB 存进了历史，说明 Read 工具这次没有按 `PROMA_READ_IMAGE_RESIZE` 缩小，原因未查；有本次修复后，预算会在请求前正确压缩它。
+
+## 2026-11-11: 安装 21234fca（图片上下文预算二次 base64 修复，Claude Code）
+
+- **安装**：
+  - 标准 `install-update.sh` EXIT=0。
+  - 备份 BACKUP VERIFY PASS（66,312 条目）；启动前后都是 SNAPSHOT MATCH。
+  - `draft-cleanup removed=0 skipped=1`，与预演一致。
+  - 钥匙串弹窗 1 次。
+  - `scheduler-start enabledTasks=22` 在 `web-remote-start` 后 +2 ms 出现。
+  - `[FATAL]`、`[ERROR]` 都是 0；`[WARN]` 2 条，都是 nowledge-mem 连接失败（外部服务）。
+  - 定时任务 22/22，ID 一致；会话数 1518，没有变化；没有 CDP 端口。
+  - 启动环境自检显示不含 `PROMA_*`，没有 WARN。
+- **修复验证**：用户验收通过。指定的会话 `204ffc7f` 在新版上没有新请求，改用同渠道、同模型的 `a05fc0ac` 作为证据：
+  - 安装前：`recompressed=1` 之后的请求是 `outcome=error`（11:30:11Z）。
+  - 安装后：`recompressed=1 recompressFailed=0` 之后的请求是 `outcome=done`（13:20:42Z）。
+  - 新版启动后共 75 次 `image-budget`（4 个会话），全部 `recompressFailed=0`；`unsupported image` 0 次；670 次请求中仅 1 次 error，那次不带图片。
+- **版本**：previous 为 `bfc6bba6`；`3a2da9d6` 已移入废纸篓；`20261108-131157-8648` 已归档到外置硬盘，复核 SNAPSHOT MATCH。
+- 详见交接单 `install-result-2026-11-11.md`。
