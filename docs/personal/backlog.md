@@ -4,8 +4,8 @@
 
 ## 待合入分支（已验证、未发布）
 
-- 当前安装：`3a2da9d6`（2026-11-08 00:01，回退 Goal Memory M0，只保留 MCP schema 兼容修复；Claude Code 安装，见 install-result-2026-11-07）。
-- 已合入、未安装：`fix/install-launch-env-20261108`（`install-update.sh` 启动应用时清除调用者 shell 的 `PROMA_*` 变量、`ps eww` 自检；应用代码不变），随 install-request-2026-11-08 安装。Goal 残留（`~/.proma/goal-memory/`、6 个 goal 分支）已于 2026-11-08 删除。
+- 当前安装：`bfc6bba6`（2026-11-08 13:12，`install-update.sh` 启动环境修复；应用代码与 `3a2da9d6` 相同；Claude Code 安装，见 install-result-2026-11-08）。
+- 已合入、未安装：`fix/image-budget-double-base64-20261111`（图片上下文预算重压缩后二次 base64，导致 Codex 报 `unsupported image format: unknown`，会话无法继续），随 install-request-2026-11-11 安装。
 - 待用户日常实测：桌面排队消息（运行中再发、Cmd+R 恢复）；会话内搜索与 minimap（窗口化加载后）。用户 2026-10-31：保持现状，不主动安排，有问题再反馈。
 - 观察：手机 PDF 预览页“省流量”胶囊压住缩放控件（用户 10-19 决定先不做）。
 

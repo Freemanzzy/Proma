@@ -2479,3 +2479,16 @@
 - **backlog #21 数据**：新进程仍继承 82 个非 `PROMA_*` 变量，其中约 40 个是 Claude Code 自身的（含 `CLAUDE_CODE_MESSAGING_TOKEN`、`XYQ_ACCESS_KEY` 等 token 类变量），另有 `ANTHROPIC_BASE_URL` 和代理变量。名单见交接单，只记录名字，未读取值。
 - **版本**：previous 为 `3a2da9d6`；`b1f26910` 移入废纸篓；`20261108-000054-70557` 已归档到外置硬盘，复核 SNAPSHOT MATCH。
 - 详见交接单 `install-result-2026-11-08.md`。
+
+## 2026-11-11: 修复图片上下文预算重压缩后二次 base64（Codex 报 unsupported image format）
+
+- **现象**：会话 `204ffc7f`（小红书账号借鉴分析，渠道 `35b194fa` openai-codex，`gpt-6-astra`）在读取 `research/inchinaplus-20261111/home-top.png` 后，每条消息都失败：`服务繁忙: Codex error: input_image image_url unsupported image format: unknown`。`/compact` 后、用户说“暂不读图”后仍然失败。同一错误此前也出现在 Astra 子会话 `f5a5cbb1`（11-11 08:02Z）和会话 `63fd8c19`（11-07 20:21Z）。
+- **根因**：个人版图片上下文预算（2026-10-31，`0c97d4b2`）会在每次请求前把历史中 base64 超过 1 MiB 的图片重压缩。接线写成 `Buffer.from(resized.data).toString('base64')`，但 Pi 0.87 `resizeImage` 返回的 `data` 本来就是 base64 字符串，于是结果成了“base64 文本的 base64”，解码出来是 `/9j/4AAQ…` 这样的 ASCII，不是图片。
+  - 证据：main.log 中所有 `event=image-budget … recompressed≥1` 之后的那次请求（3 个会话共 6 次）全部 `outcome=error`，没有一次成功；`recompressed=0` 的请求都正常。会话里 5 张图本身都能正常解码（JPEG/PNG），只有 `home-top.png`（922,835 B，base64 1.23 MB）超过阈值、被重压缩。
+  - 用这张原图复现：Pi 返回 `typeof data === 'string'`、内容以 `/9j/` 开头（JPEG 的 base64）；按旧接线再编码一次后，解码头为 `/9j/4AAQ`，无法识别为图片；修复后识别为 `image/jpeg`，base64 274,104 B。
+  - 压缩后仍失败，是因为这张图是最后一次 Read 的结果，被保留在压缩后的上下文里（`imagesBefore=2`，`recompressed=1`）。
+  - 10-31 的 dev 验收没有暴露：单测用的假 resize 返回的是 base64 字符串（直接用，未经接线），dev 验收的图片没有超过 1 MiB 阈值。Anthropic 渠道同样会受影响，只是近期没有出现超过阈值的历史图片。
+- **修复**：`image-context-budget.ts` 新增 `createSdkImageResizer`，兼容 Pi 返回字符串或字节，按文件头（PNG/JPEG/GIF/WebP）确定 `mimeType`，识别不了就视为重压缩失败、保留原图（记 `recompressFailed`）。`pi-agent-adapter.ts` 改用该包装（4 行改 1 行）。会话 JSONL 与图片文件不需要改：重压缩只发生在发请求前的内存里，安装新版后 `204ffc7f` 可直接继续。
+- **测试**：`image-context-budget.test.ts` 新增 3 项：用真实 Pi `resizeImage` 处理 1716×995 噪点 PNG（base64 >1 MiB），断言重压缩结果的文件头与 `mimeType` 一致且小于 600 KB；二次 base64 的返回被拒、原图保留；字节返回可用、`mimeType` 以文件头为准；文件头识别。原有假 resize 改为返回带 JPEG 文件头的数据。修复前代码上新测试不存在、旧 10 项照常通过，说明旧测试覆盖不到接线。
+- **验证**：全量 `bun test` 878 pass / 0 fail；typecheck、`build:main` 通过。Codex `--base personal`（`code-review/20261111-171240-base-personal.md`）：未发现问题。
+- **另记**：`home-top.png` 宽 1716 超过 Read 的 `maxWidth 1568`，却以原图 922 KB 存进了历史，说明 Read 工具这次没有按 `PROMA_READ_IMAGE_RESIZE` 缩小，原因未查；有本次修复后，预算会在请求前正确压缩它。
