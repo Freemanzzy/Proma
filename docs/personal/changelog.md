@@ -2510,3 +2510,21 @@
   - 新版启动后共 75 次 `image-budget`（4 个会话），全部 `recompressFailed=0`；`unsupported image` 0 次；670 次请求中仅 1 次 error，那次不带图片。
 - **版本**：previous 为 `bfc6bba6`；`3a2da9d6` 已移入废纸篓；`20261108-131157-8648` 已归档到外置硬盘，复核 SNAPSHOT MATCH。
 - 详见交接单 `install-result-2026-11-11.md`。
+
+## 2026-11-14: Electron 43.2.0 → 43.8.10（个人版自行升级补丁版，例外）
+
+- **来源**：会话工作台交接 `electron-patch-handoff-2026-11-14.md`。2026-11-11 Node.js 安全补丁（Node 24 修复版 24.22.3）；Proma 内置 Node 来自 Electron，不受本机 nvm 影响。用户判断官方大概率不再更新，2026-11-14 13:11 GMT+8 同意：①个人版可在当前 Electron 大版本内自行升级补丁版（同步原则例外，写入 `PERSONAL.md` 基线与同步规则）；②周检 Automation 增加 Electron 监测。
+- **版本**：43.2.0（2026-07-21，Node 24.18.0，Chromium 150.0.7871.129）→ 43.8.10（2026-11-12，Node 24.22.1，Chromium 150.0.7871.250），中间 29 个补丁版的 Chromium/V8 等安全回移。截至 11-14 没有任何 Electron 稳定版内置 Node 24.22.3，本轮 Node 补丁暂时拿不到（backlog #22b）。
+- **分工**：Proma 父会话定架构、审核、写文档、合并打包；GPT-6.1 Sol 在独立 worktree 执行改动与验证；Codex CLI 独立审查。计划见会话工作台 `plan/electron-43.8.10-20261114.md`，执行报告见 `~/Documents/proma-personal-wt/electron-43810-report.md`。
+- **改动**（`f7974411`，3 文件、4 行）：`apps/electron/package.json` 的 `electron`、`apps/electron/electron-builder.yml` 的 `electronVersion`、`bun.lock` 中对应的 2 行（版本与 integrity）。逐行对照确认 lock 无其他依赖漂移；应用 version 保持 0.19.58；未升级 electron-builder、@electron/rebuild 等。
+- **注意**：`bun install` 不会运行 electron 包的下载脚本，`node_modules/electron/dist` 需要用 `node node_modules/electron/install.js`（官方下载与 checksum 校验）更新到新版本，否则 dev 仍跑旧二进制。打包时 electron-builder 按 `electronVersion` 从 `~/Library/Caches/electron` 取 43.8.10 运行时（已缓存）。
+- **验证**（Sol，worktree）：
+  - 二进制：`CFBundleVersion` 43.8.10；`ELECTRON_RUN_AS_NODE` 实测 `electron 43.8.10 / node 24.22.1 / chrome 150.0.7871.250 / modules(ABI) 148`（与 43.2.0 相同 ABI）。
+  - `patches/` 两个补丁（node-pty、pi-ai）在根与 app 运行时依赖中均已应用；`rebuild:node-pty` 针对新 Electron 重编成功，require 正常，真实 `pty.spawn` 输出并 exit 0。
+  - 全仓 typecheck 6 包通过；`bun test` 878 pass / 0 fail；`test-personal-scripts.py` 通过；`build:main`、`agent-runtime`、`terminal-runtime`、`preload`、`renderer`、`web-preload`、`cli`、`native-helpers` 均成功。
+  - fixture dev（dev 主进程确认来自 worktree 的 43.8.10 二进制）：`desktop:smoke`、`iphone:smoke`、`android:smoke` 7/7，`android:attachments` PASS，`iphone:layout` 11/11 页，均无新异常；真实请求 `outcome=done`。
+  - 未验证（安装后补）：dev 主进程内直接读取 `process.versions`、内置终端完整桌面链路、EgoBrowser 原生工具。
+- **Codex 独立审查**（`--base personal`，focus 版本一致性与硬编码，`code-review/20261114-133901-base-personal.md`）：未发现问题；三处版本一致、integrity 与 registry 一致、运行时 ZIP 校验通过、无遗漏硬编码或 `electronDist` 覆盖。
+- **父会话复核**：diff 只有允许的 3 处；仓库内除 lock/文档外无其他 Electron/Node 版本硬编码；打包脚本的 `bun install` → `rebuild:node-pty` → `electron-builder` 链路对 43.8.10 成立。
+- **周检**：Automation `07439dfd` 新增第 10 步“Electron 补丁监测”：当前大版本最新补丁版内置 Node ≥ 24.22.3（且个人版低于此）或补丁版落后超过 4 周时摘要标“⚠️ 需要关注”；出现比当前大版本 + 2 更新的稳定大版本时提示跨大版本立项。背景中写明个人版 Electron 与官方不同属预期。
+- **同步文档**：`PERSONAL.md`（Electron 例外）、`docs/personal/backlog.md`（当前安装 `21234fca`、已合入未安装、#22）、本记录。安装后需更新 `workspace-files/runtime-maintenance/SSOT.md` 的“Proma 内置 Node”一行。

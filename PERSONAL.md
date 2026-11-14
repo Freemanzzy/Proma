@@ -4,7 +4,7 @@
 
 ### 基线
 - 上游：`proma-ai/Proma`；个人 Fork：`Freemanzzy/Proma`。
-- 基线正式 tag：`v0.19.58`（`f20943edd047ecdc929df67de9412d6e58cd4312`）；Electron 版本必须跟随官方 tag，不自行递增。
+- 基线正式 tag：`v0.19.58`（`f20943edd047ecdc929df67de9412d6e58cd4312`）；应用 version 始终等于所跟随的官方 tag。Electron 原则上跟随官方 tag，**例外（用户 2026-11-14 决定）**：官方大概率不再更新，个人版可在**当前 Electron 大版本内**自行升级补丁版以获得 Chromium/V8/Node 安全修复（当前 `43.8.10`，官方 v0.19.58 为 `43.2.0`）；跨大版本升级须单独立项、经用户批准。周检 Automation（`07439dfd`）第 10 步监测补丁版与内置 Node。
 - 当前主线：`personal`；正式安装版 `76cad12c`（2026-10-01）。已验证未发布的分支见 [`docs/personal/backlog.md`](./docs/personal/backlog.md)。
 - 最新已验证基线：2026-10-01 `personal` 全量 `bun test` 676 pass / 0 fail（打包日志）；待合入分支 `fix/mobile-dedupe-20261001` 为 678 pass / 0 fail。
 
@@ -24,7 +24,7 @@
 ## 同步规则
 
 - `main` 只用于跟随/对照官方；同步只选官方正式 tag。使用 `sync/YYYY-MM-DD` 分支完成合并、冲突处理、验证；功能开发用 `feature/*`。
-- 当前采用完整跟随方案 A，同时尽量缩小上游文件改动面。若最新正式 tag 距今 ≥8 周，或冲突试探冲突文件 >30，周检建议切换为独立维护/选择性引入方案 B，由用户决定。
+- 当前采用完整跟随方案 A，同时尽量缩小上游文件改动面。同步官方新 tag 时，若官方 Electron 低于个人版当前版本，保留个人版版本（见“基线”中的例外）；若官方升了大版本，按跨大版本升级单独评估。若最新正式 tag 距今 ≥8 周，或冲突试探冲突文件 >30，周检建议切换为独立维护/选择性引入方案 B，由用户决定。
 - 数据格式保持上游兼容；不迁移到商业版。变更记录只追加到 `docs/personal/changelog.md`，标题 `## YYYY-MM-DD: ...`；修订事实不得重写历史，追加更正记录。
 - 共同维护分工、数据安全和安装权限以 [`docs/personal/maintenance.md`](./docs/personal/maintenance.md) 为准；操作步骤以 runbook 为准。每次同步按 `CLAUDE.md` §6 验证。
 
