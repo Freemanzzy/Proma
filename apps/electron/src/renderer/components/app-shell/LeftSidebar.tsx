@@ -2049,14 +2049,14 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     }
   }, [setWorkspaces])
 
-  /** 切换工作区“对其他工作区只读”：开启后该工作区的 Agent 只能修改本工作区内的文件。 */
-  const handleToggleExternalReadOnly = React.useCallback(async (workspaceId: string, enabled: boolean): Promise<void> => {
+  /** 切换工作区外部访问限制；只读与客户 Bot 受限模式互斥。 */
+  const handleToggleExternalReadOnly = React.useCallback(async (workspaceId: string, enabled: boolean, mode: 'read-only' | 'confined' = 'read-only'): Promise<void> => {
     try {
-      const updated = await window.electronAPI.updateAgentWorkspace(workspaceId, { externalAccess: enabled ? 'read-only' : 'read-write' })
+      const updated = await window.electronAPI.updateAgentWorkspace(workspaceId, { externalAccess: enabled ? mode : 'read-write' })
       setWorkspaces((prev) => prev.map((w) => (w.id === updated.id ? updated : w)))
-      toast.success(enabled ? '已开启：该工作区对其他工作区只读' : '已关闭：该工作区恢复常规文件访问')
+      toast.success(enabled ? '已更新工作区访问限制' : '已恢复常规文件访问')
     } catch (error) {
-      console.error('[侧边栏] 更新工作区只读设置失败:', error)
+      console.error('[侧边栏] 更新工作区访问设置失败:', error)
       toast.error(error instanceof Error ? error.message : '更新工作区访问设置失败')
     }
   }, [setWorkspaces])
@@ -4776,7 +4776,7 @@ interface AgentProjectGroupItemProps {
   onConfigureProject: (workspaceId: string) => void
   onRenameWorkspace: (workspaceId: string, newName: string) => Promise<void>
   onRelinkProjectRoot: (workspaceId: string) => Promise<void>
-  onToggleExternalReadOnly: (workspaceId: string, enabled: boolean) => Promise<void>
+  onToggleExternalReadOnly: (workspaceId: string, enabled: boolean, mode?: 'read-only' | 'confined') => Promise<void>
   onRequestRestoreProjectRoot: (workspaceId: string) => void
   onRequestDeleteWorkspace: (workspaceId: string) => void
   canDeleteWorkspace: boolean
@@ -5034,6 +5034,13 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
               >
                 <Lock size={14} />
                 对其他工作区只读{group.workspace.externalAccess === 'read-only' ? ' ✓' : ''}
+              </DropdownMenuItem>
+            )}
+            {!isAutomationGroup && (
+              <DropdownMenuItem className="text-xs py-1 [&>svg]:size-3.5" role="menuitemcheckbox"
+                aria-checked={group.workspace.externalAccess === 'confined'}
+                onSelect={() => void onToggleExternalReadOnly(group.workspace.id, group.workspace.externalAccess !== 'confined', 'confined')}>
+                <Lock size={14} />外部受限（客户 Bot）{group.workspace.externalAccess === 'confined' ? ' ✓' : ''}
               </DropdownMenuItem>
             )}
             {hasUnavailableProjectRoot && (

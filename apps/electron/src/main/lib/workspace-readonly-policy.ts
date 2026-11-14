@@ -1,5 +1,4 @@
-import { existsSync, realpathSync } from 'node:fs'
-import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
+import { piPathWithinRoots } from './personal-confined-paths'
 
 export const EXTERNAL_WORKSPACE_READ_ONLY_MESSAGE = '此工作区对外只读：只能修改本工作区内的文件'
 
@@ -38,30 +37,7 @@ export function resolveExternalWorkspaceToolDecision(
 }
 
 export function isPathWithinRoots(filePath: string, roots: string[], cwd: string): boolean {
-  if (!filePath.trim() || roots.length === 0) return false
-  const target = resolve(cwd, filePath)
-  const resolvedTarget = resolveThroughExistingParent(target)
-  return roots.some((root) => {
-    try {
-      const realRoot = resolveThroughExistingParent(root)
-      const rel = relative(realRoot, resolvedTarget)
-      return rel === '' || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`))
-    } catch {
-      return false
-    }
-  })
-}
-
-function resolveThroughExistingParent(targetPath: string): string {
-  let cursor = resolve(targetPath)
-  const missing: string[] = []
-  while (!existsSync(cursor)) {
-    const parent = dirname(cursor)
-    if (parent === cursor) throw new Error('No existing parent for target path')
-    missing.unshift(basename(cursor))
-    cursor = parent
-  }
-  return resolve(realpathSync(cursor), ...missing)
+  return piPathWithinRoots(filePath, roots, cwd)
 }
 
 /** Existing plan-mode classifier; conservative but not a shell parser. */

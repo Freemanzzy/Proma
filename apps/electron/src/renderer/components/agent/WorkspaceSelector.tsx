@@ -35,15 +35,15 @@ export function WorkspaceSelector(): React.ReactElement {
   const selectedWorkspace = workspaces.find((workspace) => workspace.id === currentWorkspaceId)
   const [savingReadOnly, setSavingReadOnly] = React.useState(false)
 
-  const handleExternalReadOnlyChange = async (enabled: boolean): Promise<void> => {
+  const handleExternalReadOnlyChange = async (enabled: boolean, mode: 'read-only' | 'confined' = 'read-only'): Promise<void> => {
     if (!selectedWorkspace || savingReadOnly) return
     setSavingReadOnly(true)
     try {
       const updated = await window.electronAPI.updateAgentWorkspace(selectedWorkspace.id, {
-        externalAccess: enabled ? 'read-only' : 'read-write',
+        externalAccess: enabled ? mode : 'read-write',
       })
       setWorkspaces((previous) => previous.map((item) => item.id === updated.id ? updated : item))
-      toast.success(enabled ? '已限制该工作区修改其他目录' : '已恢复该工作区的常规文件访问')
+      toast.success(enabled ? '已更新工作区访问限制' : '已恢复该工作区的常规文件访问')
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '更新工作区访问设置失败')
     } finally {
@@ -425,7 +425,12 @@ export function WorkspaceSelector(): React.ReactElement {
               />
               <span>对其他工作区只读</span>
             </label>
-            <p className="mt-1 pl-5 text-[10px] leading-4 text-muted-foreground">只允许此工作区内的文件写入；Bash/PowerShell 仅开放只读命令。</p>
+            <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs">
+              <input type="checkbox" aria-label="外部受限（客户 Bot）" checked={selectedWorkspace.externalAccess === 'confined'} disabled={savingReadOnly}
+                onChange={(event) => void handleExternalReadOnlyChange(event.target.checked, 'confined')} />
+              <span>外部受限（客户 Bot）</span>
+            </label>
+            <p className="mt-1 pl-5 text-[10px] leading-4 text-muted-foreground">{selectedWorkspace.externalAccess === 'confined' ? '仅限项目文件与本会话；命令需管理员白名单。' : '只允许此工作区内的文件写入；Bash/PowerShell 仅开放只读命令。'}</p>
           </div>
         )}
 

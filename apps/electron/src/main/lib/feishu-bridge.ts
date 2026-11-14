@@ -40,8 +40,9 @@ import {
   getProjectFilesPath,
   getWorkspaceCapabilities,
 } from './agent-workspace-manager'
-import { getFeishuBotBindingsPath, getFeishuBotMetadataPath } from './config-paths'
-import { writeFileSync, readFileSync, existsSync } from 'node:fs'
+import { confinedBridgeWorkspaceId, isConfinedBridgeCommandAllowed, CONFINED_BRIDGE_DENIED, CONFINED_HELP, isConfinedGroupHistoryAllowed } from './personal-confined-workspace'
+import { getFeishuBotBindingsPath, getFeishuBotMetadataPath, getAgentWorkspacePath } from './config-paths'
+import { readFileSync, existsSync } from 'node:fs'
 import { readJsonFileSafe, writeJsonFileAtomic } from './safe-file'
 import {
   inferImageMediaType as inferImageMediaTypeShared,
@@ -365,6 +366,37 @@ class FeishuBridge {
 
   // ===== 绑定持久化 =====
 
+  // Preserve ignored old bindings on disk; never route them while default is confined.
+  private confinedIgnoredBindings: FeishuChatBinding[] = []
+
+  private effectiveDefaultWorkspaceId(): string | undefined {
+    const requested = this.botConfig.defaultWorkspaceId ?? getSettings().agentWorkspaceId
+    if (requested) return requested
+    const workspaces = listAgentWorkspacesByUpdatedAt()
+    return (workspaces.find(ws => ws.slug === 'default') ?? workspaces[0])?.id
+  }
+
+  private confinedWorkspaceId(chatId: string): string | undefined {
+    // A discarded legacy binding must retain the customer lock until replaced.
+    const binding = this.chatBindings.get(chatId) ?? [...this.confinedIgnoredBindings].reverse().find(b =>
+      b.chatId === chatId && confinedBridgeWorkspaceId(b.workspaceId, getAgentSessionMeta(b.sessionId)?.workspaceId, getAgentWorkspace))
+    const boundId = binding && confinedBridgeWorkspaceId(binding.workspaceId, getAgentSessionMeta(binding.sessionId)?.workspaceId, getAgentWorkspace)
+    return confinedBridgeWorkspaceId(this.effectiveDefaultWorkspaceId(), boundId, getAgentWorkspace)
+  }
+
+  private getScopedBinding(chatId: string): FeishuChatBinding | undefined {
+    const binding = this.chatBindings.get(chatId)
+    const forced = confinedBridgeWorkspaceId(this.effectiveDefaultWorkspaceId(), undefined, getAgentWorkspace)
+    const scoped = forced ?? this.confinedWorkspaceId(chatId)
+    if (binding && scoped && (binding.workspaceId !== scoped || getAgentSessionMeta(binding.sessionId)?.workspaceId !== scoped || getAgentSessionMeta(binding.sessionId)?.confinedOrigin !== true)) {
+      this.confinedIgnoredBindings.push(binding)
+      this.chatBindings.delete(chatId)
+      this.sessionToChat.delete(binding.sessionId)
+      return undefined
+    }
+    return binding
+  }
+
   /** 从磁盘恢复聊天绑定（应用重启后延续之前的会话） */
   private loadBindings(): void {
     const bindingsPath = getFeishuBotBindingsPath(this.botConfig.id)
@@ -375,6 +407,12 @@ class FeishuBridge {
       const bindings = JSON.parse(raw) as FeishuChatBinding[]
 
       for (const b of bindings) {
+        const forced = confinedBridgeWorkspaceId(this.effectiveDefaultWorkspaceId(), undefined, getAgentWorkspace)
+        const scoped = forced ?? confinedBridgeWorkspaceId(b.workspaceId, getAgentSessionMeta(b.sessionId)?.workspaceId, getAgentWorkspace)
+        if (scoped && (b.workspaceId !== scoped || getAgentSessionMeta(b.sessionId)?.workspaceId !== scoped || getAgentSessionMeta(b.sessionId)?.confinedOrigin !== true)) {
+          this.confinedIgnoredBindings.push(b)
+          continue
+        }
         // 验证对应会话仍然存在
         const session = getAgentSessionMeta(b.sessionId)
         if (session) {
@@ -403,9 +441,9 @@ class FeishuBridge {
   /** 持久化聊天绑定到磁盘 */
   private saveBindings(): void {
     try {
-      const bindings = Array.from(this.chatBindings.values())
+      const bindings = [...this.confinedIgnoredBindings, ...this.chatBindings.values()]
       const bindingsPath = getFeishuBotBindingsPath(this.botConfig.id)
-      writeFileSync(bindingsPath, JSON.stringify(bindings, null, 2), 'utf-8')
+      writeJsonFileAtomic(bindingsPath, bindings)
     } catch (error) {
       console.error('[飞书 Bridge] 保存绑定失败:', redactSensitiveLogValue(error))
     }
@@ -462,7 +500,7 @@ class FeishuBridge {
   }
 
   private markBindingUsed(chatId: string): void {
-    const binding = this.chatBindings.get(chatId)
+    const binding = this.getScopedBinding(chatId)
     if (!binding) return
 
     const wasArchived = !!binding.archived
@@ -482,7 +520,7 @@ class FeishuBridge {
 
   /** 更新绑定的工作区/会话（从设置页调用） */
   updateBinding(input: FeishuUpdateBindingInput): FeishuChatBinding | null {
-    const binding = this.chatBindings.get(input.chatId)
+    const binding = this.getScopedBinding(input.chatId)
     if (!binding) return null
 
     if (input.workspaceId !== undefined) {
@@ -514,7 +552,7 @@ class FeishuBridge {
 
   /** 移除绑定（从设置页调用） */
   removeBinding(chatId: string): boolean {
-    const binding = this.chatBindings.get(chatId)
+    const binding = this.getScopedBinding(chatId)
     if (!binding) return false
 
     this.sessionToChat.delete(binding.sessionId)
@@ -776,7 +814,7 @@ class FeishuBridge {
       return
     }
 
-    const existingBinding = this.chatBindings.get(chatId)
+    const existingBinding = this.getScopedBinding(chatId)
     const isSessionMirrorGroup = existingBinding?.source === 'session-mirror'
 
     if (chatType === 'group') {
@@ -1044,6 +1082,17 @@ class FeishuBridge {
     const { chatId } = msgCtx
     const [command, ...args] = text.split(/\s+/)
     const arg = args.join(' ').trim()
+    // Also covers bots whose old binding points at an unrestricted workspace.
+    this.getScopedBinding(chatId)
+    const confinedId = this.confinedWorkspaceId(chatId)
+    if (confinedId && !isConfinedBridgeCommandAllowed(command ?? '')) {
+      await this.sendMessage(chatId, CONFINED_BRIDGE_DENIED)
+      return
+    }
+    if (confinedId && ['/help', '/h'].includes(command?.toLowerCase() ?? '')) {
+      await this.sendMessage(chatId, CONFINED_HELP)
+      return
+    }
 
     switch (command?.toLowerCase()) {
       case '/help':
@@ -1101,7 +1150,7 @@ class FeishuBridge {
   }
 
   private async handleMirrorCommand(msgCtx: FeishuMessageContext, arg: string): Promise<void> {
-    const binding = this.chatBindings.get(msgCtx.chatId)
+    const binding = this.getScopedBinding(msgCtx.chatId)
     if (!binding || binding.source === 'session-mirror') {
       await this.sendMessage(msgCtx.chatId, '当前聊天没有可设置桌面同步的飞书绑定。')
       return
@@ -1134,13 +1183,7 @@ class FeishuBridge {
     const { chatId } = msgCtx
     const appSettings = getSettings()
 
-    // 选择工作区：显式指定 > Bot 默认 > 应用设置 > 第一个工作区
-    let workspaceId = overrideWorkspaceId ?? this.botConfig.defaultWorkspaceId ?? appSettings.agentWorkspaceId
-    if (!workspaceId) {
-      const byTime = listAgentWorkspacesByUpdatedAt()
-      const def = byTime.find((w) => w.slug === 'default')
-      workspaceId = def?.id ?? byTime[0]?.id
-    }
+    const workspaceId = this.confinedWorkspaceId(chatId) ?? overrideWorkspaceId ?? this.effectiveDefaultWorkspaceId()
 
     if (!workspaceId) {
       await this.sendMessage(chatId, '请先在 Proma 设置中创建项目。')
@@ -1155,7 +1198,7 @@ class FeishuBridge {
     }
 
     // 创建会话（使用默认标题，首次对话完成后会自动生成标题）
-    const session = await createAgentSession(title, channelId, workspaceId)
+    const session = await createAgentSession(title, channelId, workspaceId, undefined, undefined, undefined, undefined, { confinedOrigin: true })
 
     // 绑定
     const binding: FeishuChatBinding = {
@@ -1191,7 +1234,7 @@ class FeishuBridge {
 
   private findBindingBySessionId(sessionId: string): FeishuChatBinding | undefined {
     const chatId = this.sessionToChat.get(sessionId)
-    if (chatId) return this.chatBindings.get(chatId)
+    if (chatId) return this.getScopedBinding(chatId)
     return Array.from(this.chatBindings.values()).find((binding) => binding.sessionId === sessionId)
   }
 
@@ -1276,9 +1319,10 @@ class FeishuBridge {
 
   private async handleListCommand(msgCtx: FeishuMessageContext): Promise<void> {
     const { chatId } = msgCtx
-    const sessions = listAgentSessions()
-    const workspaces = listAgentWorkspacesByUpdatedAt()
-    const binding = this.chatBindings.get(chatId)
+    const confinedId = this.confinedWorkspaceId(chatId)
+    const sessions = listAgentSessions().filter((session) => !confinedId || (session.workspaceId === confinedId && session.confinedOrigin === true))
+    const workspaces = listAgentWorkspacesByUpdatedAt().filter((ws) => !confinedId || ws.id === confinedId)
+    const binding = this.getScopedBinding(chatId)
     const currentWorkspaceId = binding?.workspaceId
 
     // 每个工作区最多展示最近 5 个会话
@@ -1323,7 +1367,7 @@ class FeishuBridge {
 
   private async handleStopCommand(msgCtx: FeishuMessageContext): Promise<void> {
     const { chatId } = msgCtx
-    const binding = this.chatBindings.get(chatId)
+    const binding = this.getScopedBinding(chatId)
     if (!binding) {
       await this.sendMessage(chatId, '当前没有绑定的会话。')
       return
@@ -1336,7 +1380,8 @@ class FeishuBridge {
 
   private async handleSwitchCommand(msgCtx: FeishuMessageContext, arg: string): Promise<void> {
     const { chatId } = msgCtx
-    const sessions = listAgentSessions()
+    const confinedId = this.confinedWorkspaceId(chatId)
+    const sessions = listAgentSessions().filter((session) => !confinedId || (session.workspaceId === confinedId && session.confinedOrigin === true))
 
     // 支持序号（如 /switch 1）和 ID 前缀两种方式
     const index = Number(arg)
@@ -1350,7 +1395,7 @@ class FeishuBridge {
     }
 
     // 清理旧绑定的反向索引
-    const oldBinding = this.chatBindings.get(chatId)
+    const oldBinding = this.getScopedBinding(chatId)
     if (oldBinding) {
       this.sessionToChat.delete(oldBinding.sessionId)
     }
@@ -1361,7 +1406,7 @@ class FeishuBridge {
       botId: this.botConfig.id,
       userId: msgCtx.senderOpenId,
       sessionId: match.id,
-      workspaceId: match.workspaceId ?? this.botConfig.defaultWorkspaceId ?? appSettings.agentWorkspaceId ?? '',
+      workspaceId: match.workspaceId ?? this.effectiveDefaultWorkspaceId() ?? '',
       channelId: match.channelId ?? appSettings.agentChannelId ?? '',
       modelId: this.botConfig.defaultModelId ?? appSettings.agentModelId ?? undefined,
       source: 'feishu',
@@ -1381,7 +1426,7 @@ class FeishuBridge {
   private async handleWorkspaceCommand(msgCtx: FeishuMessageContext, arg?: string): Promise<void> {
     const { chatId } = msgCtx
     const workspaces = listAgentWorkspacesByUpdatedAt()
-    const binding = this.chatBindings.get(chatId)
+    const binding = this.getScopedBinding(chatId)
     const currentWorkspaceId = binding?.workspaceId
 
     // 无参数 → 列出所有工作区供选择
@@ -1448,7 +1493,7 @@ class FeishuBridge {
 
   private async handleNowCommand(msgCtx: FeishuMessageContext): Promise<void> {
     const { chatId } = msgCtx
-    const binding = this.chatBindings.get(chatId)
+    const binding = this.getScopedBinding(chatId)
 
     const lines: string[] = []
 
@@ -1576,7 +1621,7 @@ class FeishuBridge {
     }
 
     const parts = arg.split(/\s+/).filter(Boolean)
-    const binding = this.chatBindings.get(chatId)
+    const binding = this.getScopedBinding(chatId)
 
     // /model — 列出渠道
     if (parts.length === 0) {
@@ -1626,7 +1671,7 @@ class FeishuBridge {
     let targetBinding = binding
     if (!targetBinding) {
       await this.createNewSession(msgCtx)
-      targetBinding = this.chatBindings.get(chatId)
+      targetBinding = this.getScopedBinding(chatId)
       if (!targetBinding) {
         await this.sendMessage(chatId, '请先发送一条消息创建会话，或在 Proma 设置中选择 Agent 渠道。')
         return
@@ -1651,12 +1696,12 @@ class FeishuBridge {
     parentMessageId?: string,
   ): Promise<void> {
     const { chatId } = msgCtx
-    let binding = this.chatBindings.get(chatId)
+    let binding = this.getScopedBinding(chatId)
 
     // 自动创建会话
     if (!binding) {
       await this.createNewSession(msgCtx)
-      binding = this.chatBindings.get(chatId)
+      binding = this.getScopedBinding(chatId)
       if (!binding) return
     }
 
@@ -1779,7 +1824,8 @@ class FeishuBridge {
         contextParts.push('[提示: 如需 @某人，请直接使用 @姓名 格式，如 @Alice，系统会自动转换为飞书 @mention]')
       }
 
-      const chatHistory = await this.fetchChatHistory(chatId)
+      const chatHistory = workspace?.externalAccess === 'confined' && !isConfinedGroupHistoryAllowed(getAgentWorkspacePath(workspace.slug))
+        ? [] : await this.fetchChatHistory(chatId)
       const historyContext = this.formatChatHistoryContext(chatHistory)
 
       const parts: string[] = []
@@ -2039,7 +2085,7 @@ class FeishuBridge {
     }
 
     // 群聊时，将 @Name 转换为飞书 <at> 标签
-    const binding = this.chatBindings.get(chatId)
+    const binding = this.getScopedBinding(chatId)
     const processedResult: FormattedAgentResult = {
       ...result,
       text: binding?.chatType === 'group'
@@ -2489,7 +2535,7 @@ class FeishuBridge {
    * 用于在每条回复的飞书消息开头标注来源，方便用户区分。
    */
   private resolveContextPrefix(chatId: string): string {
-    const binding = this.chatBindings.get(chatId)
+    const binding = this.getScopedBinding(chatId)
     if (!binding) return ''
 
     const workspace = binding.workspaceId ? getAgentWorkspace(binding.workspaceId) : undefined
@@ -2503,7 +2549,7 @@ class FeishuBridge {
 
   /** 获取卡片 header subtitle 用的上下文描述 */
   private resolveContextSubtitle(chatId: string): string {
-    const binding = this.chatBindings.get(chatId)
+    const binding = this.getScopedBinding(chatId)
     if (!binding) return ''
 
     const workspace = binding.workspaceId ? getAgentWorkspace(binding.workspaceId) : undefined
@@ -2606,7 +2652,7 @@ class FeishuBridge {
    * 群聊时使用 reply（线程回复），单聊时使用 create。
    */
   private async sendMessage(chatId: string, text: string): Promise<void> {
-    const binding = this.chatBindings.get(chatId)
+    const binding = this.getScopedBinding(chatId)
     const replyToId = binding?.chatType === 'group'
       ? this.lastUserMessageId.get(chatId)
       : undefined
@@ -2622,7 +2668,7 @@ class FeishuBridge {
    * 发送卡片消息到聊天（自动选择回复或新建）
    */
   private async sendCardMessage(chatId: string, card: Record<string, unknown>): Promise<void> {
-    const binding = this.chatBindings.get(chatId)
+    const binding = this.getScopedBinding(chatId)
     const replyToId = binding?.chatType === 'group'
       ? this.lastUserMessageId.get(chatId)
       : undefined

@@ -2528,3 +2528,18 @@
 - **父会话复核**：diff 只有允许的 3 处；仓库内除 lock/文档外无其他 Electron/Node 版本硬编码；打包脚本的 `bun install` → `rebuild:node-pty` → `electron-builder` 链路对 43.8.10 成立。
 - **周检**：Automation `07439dfd` 新增第 10 步“Electron 补丁监测”：当前大版本最新补丁版内置 Node ≥ 24.22.3（且个人版低于此）或补丁版落后超过 4 周时摘要标“⚠️ 需要关注”；出现比当前大版本 + 2 更新的稳定大版本时提示跨大版本立项。背景中写明个人版 Electron 与官方不同属预期。
 - **同步文档**：`PERSONAL.md`（Electron 例外）、`docs/personal/backlog.md`（当前安装 `21234fca`、已合入未安装、#22）、本记录。安装后需更新 `workspace-files/runtime-maintenance/SSOT.md` 的“Proma 内置 Node”一行。
+
+## 2026-11-15: 外部受限工作区（`externalAccess: 'confined'`，客户 Bot 隔离）
+
+- **来源**：BR 多客户会话 `f3156176` 交接（2026-11-14 23:20）。用户要求客户群 Bot 只能做本客户店铺相关操作，读写限制在该工作区，不能用本机浏览器等能力，客户之间隔离，不能经飞书反向操纵电脑。短期方案，以后迁到专用 Mac mini。用户批准方案（会话工作台 `plan/confined-workspace-20261114.md`）与 5 项确认（写入不含工作区根、`env -i` 最小环境、v1 不加载 Skills、飞书与通用 Bridge 锁定、与 Electron 43.8.10 一起安装）。
+- **复核交接时新发现**：①飞书 `/list` 列出全机会话、`/switch` 可绑定任意会话、`/workspace` 可切任意工作区，群成员可借此跳出任何工具层限制；②现有“对其他工作区只读”模式 Write/Edit 的路径检查按 Node `resolve` 判断，`~/.zshrc` 被判为工作区内，Pi 实际写到家目录。两者都在本次修复。
+- **实现**（GPT-6.1 Sol 在 worktree 执行，父会话审核）：规则见 `docs/personal/confined-workspace.md`（SSOT）。7 个提交：`72685e3b` 策略/路径/现有只读修复、`51920802` 接入、`915f5ca7` Skills 隔离回归、`e6ee757e` 与 `18f2a8c0`（第 2 轮修复）、`4719d767` 与 `bbefb43d`（第 3 轮修复）。会话元数据新增可选 `confinedOrigin`（additive，无迁移）。
+- **独立审查**（Codex，maintenance 规定最多 2 轮；因属安全边界且第 2 轮仍有 P1，父会话决定破例做第 3 轮，只审增量）：
+  - 第 1 轮（`code-review/20261115-002438-base-personal.md`）5 条 P1，全部采纳：Bridge 有效默认工作区解析不一致；Bash 相对参数未 realpath；Read 文件名回退被重新归一化；白名单入口可在可写根内被改写；切换前的旧会话上下文可恢复。父会话补充：Grep 正文正则不按路径检查。
+  - 第 2 轮（`20261115-012313-base-personal.md`）4 条 P1，全部采纳：Bash 参数 `escape/../x` 先折叠 `..` 再 realpath；委派子会话被默认授予来源标记；运行中切换模式后插队消息/工作区退出未撤销标记；交给 Pi 的路径被二次 Unicode 归一化。
+  - 第 3 轮（`20261115-034146-base-18f2a8c0.md`，只审增量）：无安全问题；1 条 P2：Slack 新建会话未显式授予来源，在 confined 下无法运行。父会话决定**不修，记为已知限制**（fail closed，Slack 也未做命令锁定；backlog #23a）。
+- **验证**：每轮修复都先写失败测试（第 2 轮 14 失败、第 3 轮 16 失败）再修。最终全量 `bun test` **1035 pass / 0 fail**（基线 878）；typecheck、`build:main`/`renderer`/`web-preload`、`test-personal-scripts.py` 通过；fixture dev 非 confined 桌面/iPhone/Android smoke 各 7/7。真实模型实测（fixture 合成数据，临时把测试工作区加入 Web Remote allowlist，结束已恢复）：12 次越权工具调用被拒（读家目录、读 `~/.proma`、写家目录、`ls ~`、`node -e`、读其他工作区、读工作区根 AGENTS.md/mcp.json/策略文件、入口带外部路径、入口带外部符号链接、改写入口），4 次业务操作成功（回显入口、本项目读写、Grep），EgoBrowser 未注入；confined 之前的旧会话在调用模型前被拒；第 3 轮另复测 `escape/../secret` 两种形式与 Unicode 根目录下读写均被拒。部分中间模型在自身层面拒绝越权、未产生工具拒绝记录，不计入。
+- **执行偏差**：一次临时脚本漏传 `PROMA_DEV_DATA_DIR_NAME`，在 `~/.proma-dev/web-remote/pairing.json` 生成了一次短期配对状态；配对失败、无设备被授权，正式数据未受影响。之后所有 dev 命令先断言该变量。
+- **对其他工作区的影响**：只有标记为 confined 的工作区受限。“对其他工作区只读”的工作区（飞书群 Bot / 小R）只多了 `~`/`@`/`file://` 写入路径修复；飞书/通用 Bridge 的命令只在绑定或有效默认工作区为 confined 时受限；飞书绑定文件改为原子写入。
+- **已知限制**：工具层隔离而非 OS 沙箱；入口及依赖须放在客户工作区之外且由管理员控制；TOCTOU 不处理；Slack 未接入；仅 macOS 验证。详见 SSOT。
+- **同步文档**：新增 `docs/personal/confined-workspace.md`；`PERSONAL.md`（与上游差异）；backlog（已合入未安装、#23）；本记录。
