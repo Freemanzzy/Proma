@@ -49,6 +49,7 @@ import type { Transport as PiAgentTransport } from '@earendil-works/pi-ai'
 import type { AssistantMessageEvent } from '@earendil-works/pi-ai'
 import type { AgentToolResult, AgentToolUpdateCallback } from '@earendil-works/pi-agent-core'
 import type { AssistantMessage } from '@earendil-works/pi-ai/compat'
+import { confinedShellEnvironment, isConfinedToolNameAllowed, createConfinedPromptExtension } from '../personal-confined-workspace'
 import { Type, type TSchema } from 'typebox'
 import {
   appendOutputFormatInstruction,
@@ -156,6 +157,8 @@ export interface PiAgentQueryOptions extends AgentQueryInput {
   /** Proma 聚合的附加目录；Pi 内置工具 factory 不接收多 root 参数，编排层会把它们注入 systemPrompt。 */
   additionalDirectories?: string[]
   additionalSkillPaths?: string[]
+  /** Personal external workspace: no ambient resources or product capabilities. */
+  confined?: boolean
   /** 当前用户输入显式引用的 Skill name（兼容历史 slug 已在编排层归一化） */
   skillMentions?: string[]
   /** Persisted user-message UUID for turn-scoped Skill attribution. */
@@ -1286,12 +1289,13 @@ function buildBuiltinToolDefinitions(
   cwd: string,
   canUseTool: PiAgentQueryOptions['canUseTool'],
   runtimeEnv: AgentRuntimeEnv | undefined,
+  confined = false,
 ): ToolDefinition[] {
   const shellTool = selectPiBuiltinShellTool(process.platform, runtimeEnv)
   const definitions = [
     sdk.createReadToolDefinition(cwd, { resizeOptions: PROMA_READ_IMAGE_RESIZE }),
     ...(shellTool === 'bash'
-      ? [sdk.createBashToolDefinition(cwd, createPromaBashToolOptions(runtimeEnv))]
+      ? [sdk.createBashToolDefinition(cwd, confined ? { shellPath: '/bin/bash', spawnHook: ({ command, cwd }) => ({ command, cwd, env: confinedShellEnvironment() }) } : createPromaBashToolOptions(runtimeEnv))]
       : []),
     ...(shellTool === 'powershell'
       ? [sdk.createPowerShellToolDefinition(cwd, createPromaPowerShellToolOptions(runtimeEnv))]
@@ -1460,10 +1464,11 @@ export class PiAgentAdapter implements AgentProviderAdapter {
           cwd,
           input.canUseTool,
           input.runtimeEnv,
+          input.confined,
         ),
         ...buildPromaProductToolDefinitions(sdk, input.canUseTool),
         ...wrapCustomToolDefinitions(input.customTools, input.canUseTool),
-      ]
+      ].filter((tool) => !input.confined || isConfinedToolNameAllowed(tool.name))
 
       const settingsManager = sdk.SettingsManager.inMemory({
         // 使用 Pi SDK 原生压缩策略：
@@ -1502,6 +1507,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
           })
         : undefined
       const extensionFactories = [
+        ...(input.confined ? [createConfinedPromptExtension()] : []),
         ...(projectInstructionScope ? [projectInstructionScope.createExtension()] : []),
         ...(openAIReasoningProfile
           ? [createOpenAIReasoningRequestExtension({
@@ -1525,8 +1531,9 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         settingsManager,
         ...createPromaManagedResourceLoaderOptions(),
         agentsFilesOverride: createPromaProjectInstructionFilesOverride(input.projectInstructionFiles ?? []),
-        additionalSkillPaths: input.additionalSkillPaths ?? [],
-        skillsOverride: createPromaSkillsOverride(input.additionalSkillPaths),
+        additionalSkillPaths: input.confined ? [] : input.additionalSkillPaths ?? [],
+        skillsOverride: input.confined ? () => ({ skills: [], diagnostics: [] }) : createPromaSkillsOverride(input.additionalSkillPaths),
+        ...(input.confined ? { noPromptTemplates: true } : {}),
         ...(extensionFactories.length > 0 && { extensionFactories }),
         systemPromptOverride: () => appendWindowsBaseModeInstruction(input.systemPrompt, input.runtimeEnv),
       })

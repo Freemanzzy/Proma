@@ -7,6 +7,7 @@
  * 飞书 Bridge 使用独立的卡片消息格式，暂不接入此模块。
  */
 
+import { confinedBridgeWorkspaceId, isConfinedBridgeCommandAllowed, CONFINED_BRIDGE_DENIED, CONFINED_HELP } from './personal-confined-workspace'
 import type { AgentStreamPayload } from '@proma/shared'
 import { getMainWindow } from './main-window-store'
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
@@ -134,7 +135,7 @@ export class BridgeCommandHandler {
     const channelId = settings.agentChannelId
     if (!channelId) return null
 
-    const workspaceId = this.resolveValidWorkspaceId(settings.agentWorkspaceId)
+    const workspaceId = this.confinedWorkspaceId(chatId) ?? this.resolveValidWorkspaceId(settings.agentWorkspaceId)
 
     // 保持默认标题，让首条外部消息复用 Agent 编排器的统一自动命名流程。
     // 平台来源由 binding 保存，不能作为会话标题，否则会被视为用户已命名。
@@ -213,11 +214,22 @@ export class BridgeCommandHandler {
     this.saveBindings()
   }
 
+  private confinedIgnoredBindings: BridgeChatBinding[] = []
+
+  private confinedWorkspaceId(chatId: string): string | undefined {
+    const binding = this.chatBindings.get(chatId)
+    const workspaceId = binding ? getAgentSessionMeta(binding.sessionId)?.workspaceId ?? binding.workspaceId : undefined
+    return confinedBridgeWorkspaceId(this.config.getDefaultWorkspaceId?.(), workspaceId, getAgentWorkspace)
+  }
+
   private loadPersistedBindings(): void {
     const bindings = this.config.bindingStore?.load()
     if (!bindings || bindings.length === 0) return
 
-    const existingBindings = filterExistingBridgeBindings(bindings, (sessionId) => Boolean(getAgentSessionMeta(sessionId)))
+    const forced = confinedBridgeWorkspaceId(this.config.getDefaultWorkspaceId?.(), undefined, getAgentWorkspace)
+    this.confinedIgnoredBindings = bindings.filter((b) => forced && (b.workspaceId !== forced || getAgentSessionMeta(b.sessionId)?.workspaceId !== forced))
+    const eligible = bindings.filter((b) => !this.confinedIgnoredBindings.includes(b))
+    const existingBindings = filterExistingBridgeBindings(eligible, (sessionId) => Boolean(getAgentSessionMeta(sessionId)))
       .filter((binding) => this.isBindingValid(binding))
     for (const binding of existingBindings) {
       this.chatBindings.set(binding.chatId, binding)
@@ -225,7 +237,7 @@ export class BridgeCommandHandler {
     }
 
     if (existingBindings.length !== bindings.length) {
-      this.config.bindingStore?.save(existingBindings)
+      this.config.bindingStore?.save([...this.confinedIgnoredBindings, ...existingBindings])
     }
     if (existingBindings.length > 0) {
       this.log(`已恢复 ${existingBindings.length} 个聊天绑定`)
@@ -233,7 +245,7 @@ export class BridgeCommandHandler {
   }
 
   private saveBindings(): void {
-    this.config.bindingStore?.save(Array.from(this.chatBindings.values()))
+    this.config.bindingStore?.save([...this.confinedIgnoredBindings, ...this.chatBindings.values()])
   }
 
   private resolveValidWorkspaceId(fallbackWorkspaceId?: string): string {
@@ -262,6 +274,12 @@ export class BridgeCommandHandler {
   private getValidBinding(chatId: string): BridgeChatBinding | undefined {
     const binding = this.chatBindings.get(chatId)
     if (!binding) return undefined
+    const forced = confinedBridgeWorkspaceId(this.config.getDefaultWorkspaceId?.(), undefined, getAgentWorkspace)
+    if (forced && (binding.workspaceId !== forced || getAgentSessionMeta(binding.sessionId)?.workspaceId !== forced)) {
+      this.confinedIgnoredBindings.push(binding)
+      this.removeBinding(chatId, binding)
+      return undefined
+    }
     if (this.isBindingValid(binding)) return binding
 
     this.removeBinding(chatId, binding)
@@ -275,6 +293,16 @@ export class BridgeCommandHandler {
   private async handleCommand(chatId: string, text: string, contextData?: unknown): Promise<void> {
     const [command, ...args] = text.split(/\s+/)
     const arg = args.join(' ').trim()
+    this.getValidBinding(chatId)
+    const confinedId = this.confinedWorkspaceId(chatId)
+    if (confinedId && !isConfinedBridgeCommandAllowed(command ?? '')) {
+      await this.send(chatId, CONFINED_BRIDGE_DENIED, contextData)
+      return
+    }
+    if (confinedId && ['/help', '/h'].includes(command?.toLowerCase() ?? '')) {
+      await this.send(chatId, CONFINED_HELP, contextData)
+      return
+    }
 
     switch (command?.toLowerCase()) {
       case '/help':
@@ -352,7 +380,7 @@ export class BridgeCommandHandler {
     }
 
     // 确定工作区；若设置仍指向已删除项目，回退到现存项目而不是创建孤儿会话。
-    const workspaceId = this.resolveValidWorkspaceId(settings.agentWorkspaceId)
+    const workspaceId = this.confinedWorkspaceId(chatId) ?? this.resolveValidWorkspaceId(settings.agentWorkspaceId)
 
     const session = createAgentSession(
       title || '新会话',
@@ -385,8 +413,9 @@ export class BridgeCommandHandler {
   }
 
   private async handleListCommand(chatId: string, contextData?: unknown): Promise<void> {
-    const sessions = listAgentSessions()
-    const workspaces = listAgentWorkspacesByUpdatedAt()
+    const confinedId = this.confinedWorkspaceId(chatId)
+    const sessions = listAgentSessions().filter((session) => !confinedId || session.workspaceId === confinedId)
+    const workspaces = listAgentWorkspacesByUpdatedAt().filter((ws) => !confinedId || ws.id === confinedId)
     const binding = this.chatBindings.get(chatId)
 
     if (sessions.length === 0) {
@@ -446,7 +475,8 @@ export class BridgeCommandHandler {
   }
 
   private async handleSwitchCommand(chatId: string, arg: string, contextData?: unknown): Promise<void> {
-    const sessions = listAgentSessions()
+    const confinedId = this.confinedWorkspaceId(chatId)
+    const sessions = listAgentSessions().filter((session) => !confinedId || session.workspaceId === confinedId)
     const settings = getSettings()
 
     // 支持序号和 ID 前缀两种匹配

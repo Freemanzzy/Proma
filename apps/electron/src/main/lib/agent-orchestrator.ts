@@ -69,6 +69,7 @@ import { askUserService } from './agent-ask-user-service'
 import { exitPlanService, type ExitPlanPermissionResult } from './agent-exit-plan-service'
 import { validateToolInput } from './agent-tool-input-validator'
 import { isSessionPlanMarkdownPath } from './agent-plan-file-policy'
+import { buildConfinedDynamicContext, buildConfinedSystemPrompt, resolveConfinedToolDecision, isConfinedToolNameAllowed } from './personal-confined-workspace'
 import { isBashCommandReadOnly, isPowerShellCommandReadOnly, resolveExternalWorkspaceToolDecision } from './workspace-readonly-policy'
 import { estimateTokenCount, WRITE_CONTENT_TOKEN_THRESHOLD } from './agent-tool-token-estimator'
 import { buildPiBuiltinTools } from './adapters/pi-builtin-tools'
@@ -510,7 +511,8 @@ export class AgentOrchestrator {
     }
     queryOptions.resumeSessionId = undefined
     queryOptions.resumeSessionAt = undefined
-    queryOptions.prompt = buildRecoveryPrompt(sessionId, contextualMessage, { agentCwd, workspaceSlug })
+    const confined = getAgentWorkspace(getAgentSessionMeta(sessionId)?.workspaceId ?? '')?.externalAccess === 'confined'
+    queryOptions.prompt = confined ? contextualMessage : buildRecoveryPrompt(sessionId, contextualMessage, { agentCwd, workspaceSlug })
   }
 
   /**
@@ -678,11 +680,12 @@ export class AgentOrchestrator {
   ): Promise<void> {
     const { sessionId, userMessage, rawUserMessage, userMessageUuid, channelId, modelId, workspaceId: requestedWorkspaceId, additionalDirectories, permissionModeOverride, mentionedSkills, mentionedMcpServers, mentionedSessionIds, mentionedTodoIds, mentionedCalendarEventIds, automationContext, retryOfErrorUuid } = input
     // Capture the focus once per turn. Later UI focus changes must not rewrite this reply's attribution.
-    const initialVaultFocus = getVaultUserContext(sessionId)
+    let sessionMeta = getAgentSessionMeta(sessionId)
+    const initialConfined = getAgentWorkspace(sessionMeta?.workspaceId ?? requestedWorkspaceId ?? '')?.externalAccess === 'confined'
+    const initialVaultFocus = initialConfined ? null : getVaultUserContext(sessionId)
     const streamStartedAt = input.startedAt ?? Date.now()
     let userMessagePersisted = false
     let initialUserMessageUuid: string | undefined
-    let sessionMeta = getAgentSessionMeta(sessionId)
 
     const completeBeforeRun = (options: {
       stoppedByUser?: boolean
@@ -1001,7 +1004,7 @@ export class AgentOrchestrator {
         if (!ws) {
           throw new Error(`指定的 Agent 项目不存在或已删除: ${workspaceId}`)
         }
-        let activeWorktree = sessionMeta?.activeWorktree
+        let activeWorktree = ws.externalAccess === 'confined' ? undefined : sessionMeta?.activeWorktree
         if (activeWorktree) {
           const activeWorktreePath = getActiveWorktreePath(sessionMeta)
           const currentMainRepoRoot = activeWorktreePath ? await getMainRepoRoot(activeWorktreePath) : null
@@ -1011,7 +1014,7 @@ export class AgentOrchestrator {
             activeWorktree = undefined
           }
         }
-        agentCwd = resolveAgentCwd(ws, sessionId, sessionMeta?.agentCwdMode, activeWorktree) ?? homedir()
+        agentCwd = ws.externalAccess === 'confined' ? getProjectFilesPath(ws.slug) : resolveAgentCwd(ws, sessionId, sessionMeta?.agentCwdMode, activeWorktree) ?? homedir()
         workspaceSlug = ws.slug
         workspace = ws
         runtimeEnv.env.PROMA_WORKSPACE_DIR = getAgentWorkspacePath(ws.slug)
@@ -1027,20 +1030,22 @@ export class AgentOrchestrator {
         }
       }
 
+      const confined = workspace?.externalAccess === 'confined'
+
       // 9.4.1 Fork session JSONL 迁移已在 forkAgentSession 中完成；fork 的 cwd 语义
       // 从源会话继承并持久化，避免历史相对路径在恢复时切换到另一文件根。
 
       // 必须与 runtime 接收的附加目录保持一致；视觉助手据此限制允许外发的图片路径。
       const productivityTools = appSettings.productivityTools
-      const vaultUserContext = productivityTools.obsidianEnabled ? getVaultUserContext(sessionId) : null
-      const attachedDirectories = collectAttachedDirectories({
+      const vaultUserContext = !confined && productivityTools.obsidianEnabled ? getVaultUserContext(sessionId) : null
+      const attachedDirectories = confined ? [] : collectAttachedDirectories({
         extraDirs: additionalDirectories,
         sessionMeta,
         workspaceSlug,
       })
       const allAdditionalDirectories = resolveRuntimeAdditionalDirectories(
         attachedDirectories,
-        productivityTools.obsidianEnabled ? getAgentVaultRoots() : [],
+        !confined && productivityTools.obsidianEnabled ? getAgentVaultRoots() : [],
       )
       // 原因：listSessions({ dir }) 基于 cwd 路径哈希查找，但 session 级别的 cwd
       // （如 ~/.proma/agent-workspaces/workspace-xxx/sessionId）与 SDK 内部存储的路径哈希可能不匹配，
@@ -1051,11 +1056,11 @@ export class AgentOrchestrator {
       }
 
       // 10. 构建工作区 MCP 配置与 Pi 基础运行时工具
-      const mcpServers = await this.buildMcpServers(workspaceSlug, proxyUrl)
+      const mcpServers = confined ? {} : await this.buildMcpServers(workspaceSlug, proxyUrl)
       let piBuiltinTools: unknown[] = []
       let piMcpTools: unknown[] = []
       const piSdk = await import('@earendil-works/pi-coding-agent')
-      const builtinMcpResult = await buildPiBuiltinTools(piSdk, {
+      const builtinMcpResult = confined ? { tools: [], collaborationAvailable: false } : await buildPiBuiltinTools(piSdk, {
         sessionId,
         channelId,
         modelId: selectedModelId,
@@ -1084,7 +1089,7 @@ export class AgentOrchestrator {
       }
 
       // 11. 构建动态上下文和最终 prompt
-      const dynamicCtx = buildDynamicContext({
+      const dynamicCtx = confined ? buildConfinedDynamicContext() : buildDynamicContext({
         workspaceName: workspace?.name,
         workspaceSlug,
         agentCwd,
@@ -1092,12 +1097,12 @@ export class AgentOrchestrator {
       })
       // 11.5 注入 mention 引用指令（Skill/MCP/会话）— 仅影响 prompt，不影响持久化
       let enrichedMessage = userMessage
-      const referencedSessionsBlock = buildReferencedSessionsPrompt(sessionId, mentionedSessionIds, workspaceSlug)
+      const referencedSessionsBlock = confined ? '' : buildReferencedSessionsPrompt(sessionId, mentionedSessionIds, workspaceSlug)
       if (referencedSessionsBlock) {
         enrichedMessage = `${referencedSessionsBlock}\n\n${enrichedMessage}`
         console.log(`[Agent 编排] 注入 referenced_sessions: ${mentionedSessionIds?.length ?? 0} sessions`)
       }
-      if (mentionedSkills?.length || mentionedMcpServers?.length) {
+      if (!confined && (mentionedSkills?.length || mentionedMcpServers?.length)) {
         const toolLines: string[] = ['用户在消息中明确引用了以下工具，请在本次回复中主动调用：']
         for (const slug of mentionedSkills ?? []) {
           const qualifiedName = workspaceSlug
@@ -1112,8 +1117,8 @@ export class AgentOrchestrator {
         console.log(`[Agent 编排] 注入 mentioned_tools: ${mentionedSkills?.length ?? 0} skills, ${mentionedMcpServers?.length ?? 0} MCP`)
       }
       const referencedPlanningBlock = buildReferencedPlanningPrompt(
-        productivityTools.todosEnabled ? mentionedTodoIds : undefined,
-        productivityTools.calendarEnabled ? mentionedCalendarEventIds : undefined,
+        !confined && productivityTools.todosEnabled ? mentionedTodoIds : undefined,
+        !confined && productivityTools.calendarEnabled ? mentionedCalendarEventIds : undefined,
         { requireToolRead: true },
       )
       if (referencedPlanningBlock) {
@@ -1128,7 +1133,7 @@ export class AgentOrchestrator {
         ? '/compact'
         : existingSdkSessionId
           ? contextualMessage
-          : buildContextPrompt(sessionId, contextualMessage, { agentCwd, workspaceSlug })
+          : buildContextPrompt(sessionId, contextualMessage, confined ? undefined : { agentCwd, workspaceSlug })
 
       if (existingSdkSessionId) {
         console.log(`[Agent 编排] 使用 resume 模式，SDK session ID: ${existingSdkSessionId}`)
@@ -1246,6 +1251,11 @@ export class AgentOrchestrator {
           console.warn(`[Agent 工具验证] 参数缺失: tool=${toolName}, mode=${currentMode}`)
           return validationFailure
         }
+
+        if (confined) return resolveConfinedToolDecision(toolName, input, {
+          roots: workspaceSlug ? [getProjectFilesPath(workspaceSlug), getAgentSessionWorkspacePath(workspaceSlug, sessionId)] : [],
+          cwd: agentCwd ?? process.cwd(), workspacePath: workspaceSlug ? getAgentWorkspacePath(workspaceSlug) : '',
+        })
 
         // 外部只读策略先于所有 permission-mode 分支（包含 bypassPermissions），并由 workspace 元数据继承到子会话。
         if (workspace?.externalAccess === 'read-only') {
@@ -1422,7 +1432,7 @@ export class AgentOrchestrator {
         : undefined
       const piReasoningCapability = await resolvePiReasoningCapability(channel.provider, selectedModelId)
       const piThinkingLevel = resolvePiThinkingLevel(appSettings, sessionMeta, channel.provider, selectedModelId, piReasoningCapability)
-      const projectInstructions = workspaceSlug
+      const projectInstructions = !confined && workspaceSlug
         ? (() => {
             try {
               const manifest = resolveProjectInstructions({ projectRoot: getProjectFilesPath(workspaceSlug) })
@@ -1454,18 +1464,18 @@ export class AgentOrchestrator {
         projectInstructions?.sources.map(({ path, content }) => ({ path, content })) ?? [],
       )
       // 每次前台对话都基于受管 memory/ 的真实缺口给出渐进引导；自动化、桥接与委派绝不主动追问。
-      const projectKnowledgeMaintenanceApproved = workspaceSlug
+      const projectKnowledgeMaintenanceApproved = !confined && workspaceSlug
         ? isWorkspaceProjectKnowledgeMaintenanceApproved(workspaceSlug)
         : false
-      const memoryGuidance = workspaceSlug && !automationContext && !input.triggeredBy
+      const memoryGuidance = !confined && workspaceSlug && !automationContext && !input.triggeredBy
         ? getWorkspaceMemoryGuidance(workspaceSlug)
         : undefined
       // Historical sessions are supplementary evidence only. Do not invite a scan
       // before a collaboration profile has been established through real dialogue.
-      const memoryRefreshOpportunity = workspaceSlug && !automationContext && !input.triggeredBy && !memoryGuidance?.needsCollaborationProfile
+      const memoryRefreshOpportunity = !confined && workspaceSlug && !automationContext && !input.triggeredBy && !memoryGuidance?.needsCollaborationProfile
         ? claimWorkspaceMemoryRefreshOpportunity(workspaceSlug)
         : undefined
-      const systemPromptAppend = buildSystemPrompt({
+      const systemPromptAppend = confined ? buildConfinedSystemPrompt(managedWorkspaceInstructionFile?.content) : buildSystemPrompt({
         workspaceName: workspace?.name,
         workspaceSlug,
         sessionId,
@@ -1534,7 +1544,7 @@ export class AgentOrchestrator {
           event: { type: 'context_window', contextWindow },
         })
       }
-      const piCustomTools = [...piBuiltinTools, ...piMcpTools, ...(extensions.piCustomTools ?? [])]
+      const piCustomTools = [...piBuiltinTools, ...piMcpTools, ...(extensions.piCustomTools ?? [])].filter((tool) => !confined || isConfinedToolNameAllowed((tool as { name: string }).name))
       let githubCopilotCredentialsSnapshot = githubCopilotOAuthCredentials
       const { feishuBridgeManager } = await import('./feishu-bridge-manager')
       const hasFeishuBinding = feishuBridgeManager.hasSessionBinding(sessionId)
@@ -1557,8 +1567,9 @@ export class AgentOrchestrator {
         ...(maxTurns != null && { maxTurns }),
         permissionMode: initialPermissionMode,
         canUseTool,
-        systemPrompt: systemPromptAppend + buildPiAdditionalDirectoriesPrompt(allAdditionalDirectories),
-        ...(instructionFiles.length > 0 && { projectInstructionFiles: instructionFiles }),
+        confined,
+        systemPrompt: systemPromptAppend + (confined ? '' : buildPiAdditionalDirectoriesPrompt(allAdditionalDirectories)),
+        ...(!confined && instructionFiles.length > 0 && { projectInstructionFiles: instructionFiles }),
         ...(projectInstructions && {
           projectInstructionScope: {
             projectRoot: projectInstructions.projectRoot,
@@ -1570,11 +1581,11 @@ export class AgentOrchestrator {
         piAgentDir: getSdkConfigDir(),
         piSessionDir: join(getSdkConfigDir(), 'sessions'),
         ...(allAdditionalDirectories.length > 0 && { additionalDirectories: allAdditionalDirectories }),
-        ...(workspaceSlug ? {
+        ...(!confined && workspaceSlug ? {
           additionalSkillPaths: [getWorkspaceSkillsDir(workspaceSlug)],
           skillWorkspaceSlug: workspaceSlug,
         } : {}),
-        ...(mentionedSkills?.length ? { skillMentions: mentionedSkills } : {}),
+        ...(!confined && mentionedSkills?.length ? { skillMentions: mentionedSkills } : {}),
         onSkillActivated: recordSkillActivation,
         ...(isCompactCommand ? { compactRequest: true } : {}),
         ...(sessionMeta?.codexFastMode && channel.provider === 'openai-codex' ? { codexFastMode: true } : {}),
@@ -2369,17 +2380,18 @@ export class AgentOrchestrator {
       ? getAgentWorkspace(meta.workspaceId)?.slug
       : undefined
 
-    const userVaultContext = getVaultUserContext(sessionId)
+    const confined = !!meta?.workspaceId && getAgentWorkspace(meta.workspaceId)?.externalAccess === 'confined'
+    const userVaultContext = confined ? null : getVaultUserContext(sessionId)
     // 运行中的 Agent 收到队列消息时也必须看到用户刚刚主动打开的页面。
     // 未打开浏览器时保持既有消息形态，避免给每条插队消息重复注入无关环境块。
     let enrichedText = userVaultContext
       ? `${buildDynamicContext({ userVaultContext })}\n\n${text}`
       : text
-    const referencedSessionsBlock = buildReferencedSessionsPrompt(sessionId, mentionedSessionIds, workspaceSlug)
+    const referencedSessionsBlock = confined ? '' : buildReferencedSessionsPrompt(sessionId, mentionedSessionIds, workspaceSlug)
     if (referencedSessionsBlock) {
       enrichedText = `${referencedSessionsBlock}\n\n${enrichedText}`
     }
-    if (mentionedSkills?.length || mentionedMcpServers?.length) {
+    if (!confined && (mentionedSkills?.length || mentionedMcpServers?.length)) {
       const toolLines: string[] = ['用户在消息中明确引用了以下工具，请在本次回复中主动调用：']
       for (const slug of mentionedSkills ?? []) {
         const qualifiedName = workspaceSlug
@@ -2394,8 +2406,8 @@ export class AgentOrchestrator {
     }
     // Planning read tools are Pi-native. Do not direct Claude sessions to unavailable tools.
     const referencedPlanningBlock = buildReferencedPlanningPrompt(
-      mentionedTodoIds,
-      mentionedCalendarEventIds,
+      confined ? undefined : mentionedTodoIds,
+      confined ? undefined : mentionedCalendarEventIds,
       { requireToolRead: true },
     )
     if (referencedPlanningBlock) {
@@ -2422,7 +2434,7 @@ export class AgentOrchestrator {
     try {
       await this.adapter.sendQueuedMessage(sessionId, sdkMessage, {
         ...(opts?.interrupt ? { interrupt: true } : {}),
-        ...(mentionedSkills?.length ? { skillMentions: mentionedSkills } : {}),
+        ...(!confined && mentionedSkills?.length ? { skillMentions: mentionedSkills } : {}),
       })
       console.log(`[Agent 编排] 追加消息已注入: sessionId=${sessionId}, uuid=${uuid}, interrupt=${!!opts?.interrupt}`)
 

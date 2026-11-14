@@ -355,7 +355,7 @@ export async function updateAgentWorkspace(
     if (duplicate) throw new Error(`项目名称「${trimmedName}」已存在`)
     updates = { ...updates, name: trimmedName }
   }
-  if (updates.externalAccess !== undefined && updates.externalAccess !== 'read-write' && updates.externalAccess !== 'read-only') {
+  if (updates.externalAccess !== undefined && updates.externalAccess !== 'read-write' && updates.externalAccess !== 'read-only' && updates.externalAccess !== 'confined') {
     throw new Error('工作区外部访问模式无效')
   }
 
