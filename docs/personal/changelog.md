@@ -2566,3 +2566,14 @@
 - **版本**：previous 为 `21234fca`（Electron 43.2.0）；`bfc6bba6` 移入废纸篓；`20261111-211734-52367` 已归档到外置硬盘，复核 SNAPSHOT MATCH。
 - **runtime-maintenance SSOT**：Proma 内置 Electron 一行已更新为 43.8.10 / Node 24.22.1（仍待 24.22.3），workspace-files 提交 `6cfb4db`。
 - 详见交接单 `install-result-2026-11-15.md`。
+
+## 2026-11-15: 42b83249 安装结果的后续登记（DEP0187、飞书权限、内置 Node、回滚注意、定时任务核对）
+
+- **来源**：install-result-2026-11-15 待办。只改文档，不打包。
+- **DEP0187**（backlog #15）：安装后 1 次 `fs.existsSync` 参数类型弃用警告。判断为 Node 24.22 新增的运行时警告，旧版对同样调用不报；静态排查未锁定调用点，记录下次 dev 回归用 `--trace-deprecation` 复现的计划。
+- **飞书权限**（新增 backlog #24）：`cardkit:card:write` 与 `contact:contact.base:readonly` 缺失的现状与影响（降级为文本进度、姓名回退 open_id 前 8 位），开通与否由用户决定，不改代码绕过。
+- **内置 Node**（backlog #22b）：仍为 24.22.1，低于 24.22.3；出现满足条件的 43.x 补丁版时提交补丁升级申请。
+- **回滚注意**：`fallback-runbook.md` §3 预先补一条：回退到 `42b83249` 之前的版本前，检查有无 confined 工作区，有则先停用客户 Bot 或改为只读。当前正式数据没有 confined 工作区，此条现在只是提前写好。
+- **定时任务核对**（只读，未启用任何任务）：启用数从 11-11 的 22 降到 14。按任务 `updatedAt` 与会话中的 `update_automation` 调用核对：
+  - BR 侧会话 `f3156176` 于 11-14 02:09/03:56 停用 5 个旧 BR 任务（每日寄样、内容出单、商品分析、周报、Weekly 观察期），同时新建 2 个 Daviena 客户级编排任务；BR 会话 `4a61fa3d`/`a13db437` 于 11-12 停用 API 影子对比；一次性任务“BR 团队跟进 18 位达人定制回复”已执行完毕。均有会话记录。
+  - **没有 Agent 调用记录、可能是在界面手动停用的 8 个**（需用户确认）：Phase A 每日寄样、Phase B 每日视频检查（11-14 05:43）；Weekly 观察期视频刷新、Monthly 长尾刷新、Product Analysis、周报生成、马来西亚热点周报（11-14 05:25）；Reddit 养号每日草稿（11-14 13:12）。

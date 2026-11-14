@@ -95,6 +95,8 @@ ls -lt "/Volumes/Lexar ssd 2tb/proma 备份/" 2>/dev/null | head
 
 > 换应用前先按 §4 第 2 步把当前 `~/.proma` 另存一份（`cp -a`，不移动），再换应用。两边版本相同时通常不需要恢复数据。
 
+> **受限工作区（2026-11-15 起）**：`42b83249` 之前的版本（如 `21234fca`）不认识工作区 `externalAccess: 'confined'`，会把它当普通工作区运行，客户 Bot 将失去全部限制。回退到这类版本前，先检查 `~/.proma/agent-workspaces.json` 中有无 `"externalAccess": "confined"`（只读 `grep -c`）；有则先停用对应客户飞书 Bot（飞书设置中关闭该 Bot），或请用户在界面把该工作区改为“对其他工作区只读”，再换应用。截至 2026-11-15 正式数据中没有 confined 工作区。
+
 1. 退出个人版（让用户手动退出；无响应时，确认 PID 的命令行属于 `/Applications/Proma.app` 后 `kill <PID>`，等待 10 秒）。
 2. 保留坏版本、换回上一版（上一版应用位于 `~/.proma-switch-backups/previous/Proma.app`，不在 `/Applications`）：
 
