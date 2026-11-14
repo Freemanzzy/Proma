@@ -236,3 +236,25 @@ test('actual Pi Bash executes rewritten argv with clean shell startup and no inh
   expect(run.stdout).toContain('SECRET:unset')
   expect(existsSync(marker)).toBe(false)
 })
+
+test('actual Pi resource loader exposes no ambient or explicit Skills in confined configuration', () => {
+  const agentDir = join(home, 'agent')
+  for (const base of [join(agentDir, 'skills'), join(project, '.pi', 'skills')]) {
+    const dir = join(base, 'must-not-load')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'SKILL.md'), '---\nname: must-not-load\ndescription: private ambient skill\n---\nAMBIENT_SECRET_CANARY\n')
+  }
+  const sdkPath = fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent'))
+  const script = `import { DefaultResourceLoader, SettingsManager } from ${JSON.stringify(pathToFileURL(sdkPath).href)};
+    const loader = new DefaultResourceLoader({ cwd: ${JSON.stringify(project)}, agentDir: ${JSON.stringify(agentDir)}, settingsManager: SettingsManager.inMemory(),
+      noContextFiles: true, noExtensions: true, noSkills: true, noPromptTemplates: true, appendSystemPrompt: [], additionalSkillPaths: [],
+      agentsFilesOverride: () => ({ agentsFiles: [] }), skillsOverride: () => ({ skills: [], diagnostics: [] }), systemPromptOverride: () => 'Confined assistant' });
+    await loader.reload(); console.log(JSON.stringify({ skills: loader.getSkills().skills, agents: loader.getAgentsFiles().agentsFiles, systemPrompt: loader.getSystemPrompt() }));`
+  const run = spawnSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, HOME: home }, encoding: 'utf8' })
+  expect(run.status).toBe(0)
+  const result = JSON.parse(run.stdout.trim().split('\n').at(-1)!)
+  expect(result.skills).toEqual([])
+  expect(result.agents).toEqual([])
+  expect(result.systemPrompt).toBe('Confined assistant')
+  expect(run.stdout).not.toContain('AMBIENT_SECRET_CANARY')
+})
