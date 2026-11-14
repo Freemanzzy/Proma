@@ -476,6 +476,7 @@ export function createAgentSession(
   agentCwdMode?: AgentCwdMode,
   sessionWorkbenchLayout?: SessionWorkbenchLayout,
   isDraft?: boolean,
+  source?: Pick<AgentSessionMeta, 'confinedOrigin'>,
 ): AgentSessionMeta {
   const index = readIndex()
   const now = Date.now()
@@ -489,6 +490,7 @@ export function createAgentSession(
     channelId,
     modelId,
     workspaceId,
+    confinedOrigin: workspaceId && getAgentWorkspace(workspaceId)?.externalAccess === 'confined' && (!source || source.confinedOrigin === true) ? true : undefined,
     agentCwdMode: workspaceId ? agentCwdMode ?? 'project' : undefined,
     sessionWorkbenchLayout: workspaceId ? sessionWorkbenchLayout ?? 'root' : undefined,
     // 仅由会话入口显式创建的临时输入会话设置；必须跨重启保留。
@@ -714,7 +716,7 @@ function sessionMetadataProjection(session: AgentSessionMeta): AgentSessionMetad
  */
 export function updateAgentSessionMeta(
   id: string,
-  updates: Partial<Pick<AgentSessionMeta, 'title' | 'channelId' | 'modelId' | 'sdkSessionId' | 'piSessionFile' | 'piEntryBindings' | 'codexFastMode' | 'reasoningLevel' | 'openAIThinkingLevel' | 'workspaceId' | 'activeWorktree' | 'pinned' | 'starred' | 'archived' | 'isDraft' | 'attachedDirectories' | 'attachedFiles' | 'forkSourceDir' | 'explorationParentSessionId' | 'explorationSourceMessageId' | 'explorationSourceLabel' | 'explorationTitleInitializedAt' | 'stoppedByUser' | 'permissionMode' | 'completedButUnconfirmed' | 'sourceAutomationId' | 'automationGraduated' | 'parentSessionId' | 'rootSessionId' | 'sourceDelegationId' | 'delegationRole' | 'delegationStatus' | 'delegationDepth' | 'delegationGoal'>>,
+  updates: Partial<Pick<AgentSessionMeta, 'title' | 'channelId' | 'modelId' | 'sdkSessionId' | 'piSessionFile' | 'piEntryBindings' | 'codexFastMode' | 'reasoningLevel' | 'openAIThinkingLevel' | 'workspaceId' | 'confinedOrigin' | 'activeWorktree' | 'pinned' | 'starred' | 'archived' | 'isDraft' | 'attachedDirectories' | 'attachedFiles' | 'forkSourceDir' | 'explorationParentSessionId' | 'explorationSourceMessageId' | 'explorationSourceLabel' | 'explorationTitleInitializedAt' | 'stoppedByUser' | 'permissionMode' | 'completedButUnconfirmed' | 'sourceAutomationId' | 'automationGraduated' | 'parentSessionId' | 'rootSessionId' | 'sourceDelegationId' | 'delegationRole' | 'delegationStatus' | 'delegationDepth' | 'delegationGoal'>>,
 ): AgentSessionMeta {
   const index = readIndex()
   const idx = index.sessions.findIndex((s) => s.id === id)
@@ -888,6 +890,7 @@ export function moveSessionToWorkspace(sessionId: string, targetWorkspaceId: str
     const updated: AgentSessionMeta = {
       ...current,
       workspaceId: targetWorkspaceId,
+      confinedOrigin: undefined,
       // Pi artifact 与 entry bindings 都以原 cwd 为根；跨工作区复用会造成错误 resume/fork/rewind。
       sdkSessionId: undefined,
       piSessionFile: undefined,
@@ -918,6 +921,8 @@ export function moveSessionToWorkspace(sessionId: string, targetWorkspaceId: str
  * 工具活动、推理、附件等 Chat 特有字段不迁移。
  */
 export function migrateChatToAgentSession(conversationId: string, agentSessionId: string): void {
+  // Imported text has no confined provenance, even if the destination was empty.
+  updateAgentSessionMeta(agentSessionId, { confinedOrigin: undefined })
   const chatMessages = getConversationMessages(conversationId)
 
   if (chatMessages.length === 0) {
@@ -989,6 +994,8 @@ async function forkPiAgentSession(sourceMeta: AgentSessionMeta, input: ForkSessi
     forkModelId,
     sourceCwdMode,
     sourceWorkbenchLayout,
+    undefined,
+    sourceMeta,
   )
   const destDir = resolveAgentCwd(workspace, newMeta.id, newMeta.agentCwdMode, sourceActiveWorktree)
   const destWorkbenchDir = resolveAgentWorkbenchDir(workspace, newMeta.id)

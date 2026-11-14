@@ -369,16 +369,26 @@ class FeishuBridge {
   // Preserve ignored old bindings on disk; never route them while default is confined.
   private confinedIgnoredBindings: FeishuChatBinding[] = []
 
+  private effectiveDefaultWorkspaceId(): string | undefined {
+    const requested = this.botConfig.defaultWorkspaceId ?? getSettings().agentWorkspaceId
+    if (requested) return requested
+    const workspaces = listAgentWorkspacesByUpdatedAt()
+    return (workspaces.find(ws => ws.slug === 'default') ?? workspaces[0])?.id
+  }
+
   private confinedWorkspaceId(chatId: string): string | undefined {
-    const binding = this.chatBindings.get(chatId)
-    const workspaceId = binding ? getAgentSessionMeta(binding.sessionId)?.workspaceId ?? binding.workspaceId : undefined
-    return confinedBridgeWorkspaceId(this.botConfig.defaultWorkspaceId, workspaceId, getAgentWorkspace)
+    // A discarded legacy binding must retain the customer lock until replaced.
+    const binding = this.chatBindings.get(chatId) ?? [...this.confinedIgnoredBindings].reverse().find(b =>
+      b.chatId === chatId && confinedBridgeWorkspaceId(b.workspaceId, getAgentSessionMeta(b.sessionId)?.workspaceId, getAgentWorkspace))
+    const boundId = binding && confinedBridgeWorkspaceId(binding.workspaceId, getAgentSessionMeta(binding.sessionId)?.workspaceId, getAgentWorkspace)
+    return confinedBridgeWorkspaceId(this.effectiveDefaultWorkspaceId(), boundId, getAgentWorkspace)
   }
 
   private getScopedBinding(chatId: string): FeishuChatBinding | undefined {
     const binding = this.chatBindings.get(chatId)
-    const forced = confinedBridgeWorkspaceId(this.botConfig.defaultWorkspaceId, undefined, getAgentWorkspace)
-    if (binding && forced && (binding.workspaceId !== forced || getAgentSessionMeta(binding.sessionId)?.workspaceId !== forced)) {
+    const forced = confinedBridgeWorkspaceId(this.effectiveDefaultWorkspaceId(), undefined, getAgentWorkspace)
+    const scoped = forced ?? this.confinedWorkspaceId(chatId)
+    if (binding && scoped && (binding.workspaceId !== scoped || getAgentSessionMeta(binding.sessionId)?.workspaceId !== scoped || getAgentSessionMeta(binding.sessionId)?.confinedOrigin !== true)) {
       this.confinedIgnoredBindings.push(binding)
       this.chatBindings.delete(chatId)
       this.sessionToChat.delete(binding.sessionId)
@@ -397,8 +407,9 @@ class FeishuBridge {
       const bindings = JSON.parse(raw) as FeishuChatBinding[]
 
       for (const b of bindings) {
-        const forced = confinedBridgeWorkspaceId(this.botConfig.defaultWorkspaceId, undefined, getAgentWorkspace)
-        if (forced && (b.workspaceId !== forced || getAgentSessionMeta(b.sessionId)?.workspaceId !== forced)) {
+        const forced = confinedBridgeWorkspaceId(this.effectiveDefaultWorkspaceId(), undefined, getAgentWorkspace)
+        const scoped = forced ?? confinedBridgeWorkspaceId(b.workspaceId, getAgentSessionMeta(b.sessionId)?.workspaceId, getAgentWorkspace)
+        if (scoped && (b.workspaceId !== scoped || getAgentSessionMeta(b.sessionId)?.workspaceId !== scoped || getAgentSessionMeta(b.sessionId)?.confinedOrigin !== true)) {
           this.confinedIgnoredBindings.push(b)
           continue
         }
@@ -1172,13 +1183,7 @@ class FeishuBridge {
     const { chatId } = msgCtx
     const appSettings = getSettings()
 
-    // 选择工作区：显式指定 > Bot 默认 > 应用设置 > 第一个工作区
-    let workspaceId = this.confinedWorkspaceId(chatId) ?? overrideWorkspaceId ?? this.botConfig.defaultWorkspaceId ?? appSettings.agentWorkspaceId
-    if (!workspaceId) {
-      const byTime = listAgentWorkspacesByUpdatedAt()
-      const def = byTime.find((w) => w.slug === 'default')
-      workspaceId = def?.id ?? byTime[0]?.id
-    }
+    const workspaceId = this.confinedWorkspaceId(chatId) ?? overrideWorkspaceId ?? this.effectiveDefaultWorkspaceId()
 
     if (!workspaceId) {
       await this.sendMessage(chatId, '请先在 Proma 设置中创建项目。')
@@ -1315,7 +1320,7 @@ class FeishuBridge {
   private async handleListCommand(msgCtx: FeishuMessageContext): Promise<void> {
     const { chatId } = msgCtx
     const confinedId = this.confinedWorkspaceId(chatId)
-    const sessions = listAgentSessions().filter((session) => !confinedId || session.workspaceId === confinedId)
+    const sessions = listAgentSessions().filter((session) => !confinedId || (session.workspaceId === confinedId && session.confinedOrigin === true))
     const workspaces = listAgentWorkspacesByUpdatedAt().filter((ws) => !confinedId || ws.id === confinedId)
     const binding = this.getScopedBinding(chatId)
     const currentWorkspaceId = binding?.workspaceId
@@ -1376,7 +1381,7 @@ class FeishuBridge {
   private async handleSwitchCommand(msgCtx: FeishuMessageContext, arg: string): Promise<void> {
     const { chatId } = msgCtx
     const confinedId = this.confinedWorkspaceId(chatId)
-    const sessions = listAgentSessions().filter((session) => !confinedId || session.workspaceId === confinedId)
+    const sessions = listAgentSessions().filter((session) => !confinedId || (session.workspaceId === confinedId && session.confinedOrigin === true))
 
     // 支持序号（如 /switch 1）和 ID 前缀两种方式
     const index = Number(arg)
@@ -1401,7 +1406,7 @@ class FeishuBridge {
       botId: this.botConfig.id,
       userId: msgCtx.senderOpenId,
       sessionId: match.id,
-      workspaceId: match.workspaceId ?? this.botConfig.defaultWorkspaceId ?? appSettings.agentWorkspaceId ?? '',
+      workspaceId: match.workspaceId ?? this.effectiveDefaultWorkspaceId() ?? '',
       channelId: match.channelId ?? appSettings.agentChannelId ?? '',
       modelId: this.botConfig.defaultModelId ?? appSettings.agentModelId ?? undefined,
       source: 'feishu',

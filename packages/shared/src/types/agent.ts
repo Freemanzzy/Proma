@@ -467,6 +467,7 @@ export type ErrorCode =
   | 'api_key_decrypt_failed'
   | 'agent_runtime_not_found'
   | 'workspace_not_found'
+  | 'confined_session_origin_required'
   | 'local_project_root_unavailable'
   | 'session_busy'
   | 'unknown_error'
@@ -784,6 +785,8 @@ export interface AgentSessionMeta {
   openAIThinkingLevel?: AgentThinkingLevel
   /** 所属工作区 ID */
   workspaceId?: string
+  /** 仅在受限工作区新建的空会话（或其安全分叉）；旧会话不补标记。 */
+  confinedOrigin?: boolean
   /**
    * Agent 执行 cwd 的持久化语义。新会话使用 project；缺失字段兼容升级前的
    * session workbench cwd。

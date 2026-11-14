@@ -81,6 +81,7 @@ function writeAgentSessionsIndex(sessions: Array<{
   workspaceId: string
   createdAt: number
   updatedAt: number
+  confinedOrigin?: boolean
   agentRuntime?: string
   sdkSessionId?: string
   piSessionFile?: string
@@ -97,6 +98,7 @@ function writeAgentWorkspacesIndex(workspaces: Array<{
   id: string
   name: string
   slug: string
+  externalAccess?: 'confined' | 'read-write'
   createdAt: number
   updatedAt: number
 }>): void {
@@ -655,4 +657,41 @@ describe('Agent 会话删除墓碑', () => {
     expect(manager.getAgentSessionMeta(id)).toBeUndefined()
     expect(existsSync(join(tempHome, '.proma', 'agent-sessions', `${id}.jsonl`))).toBe(false)
   })
+})
+
+
+describe('R2 confined origin provenance', () => {
+  function setup() {
+    writeAgentSessionsIndex([])
+    writeAgentWorkspacesIndex([{ id: 'customer', name: 'Customer', slug: 'customer', externalAccess: 'confined', createdAt: 1, updatedAt: 1 }, { id: 'normal', name: 'Normal', slug: 'normal', createdAt: 1, updatedAt: 1 }])
+  }
+  test('only fresh sessions created under confined are marked, persisted, and not granted by moving', () => {
+    setup()
+    const fresh = manager.createAgentSession('Fresh', undefined, 'customer')
+    expect((fresh as { confinedOrigin?: boolean }).confinedOrigin).toBe(true)
+    expect((manager.getAgentSessionMeta(fresh.id) as { confinedOrigin?: boolean }).confinedOrigin).toBe(true)
+    const normal = manager.createAgentSession('Normal', undefined, 'normal')
+    expect((normal as { confinedOrigin?: boolean }).confinedOrigin).toBeUndefined()
+    const moved = manager.moveSessionToWorkspace(normal.id, 'customer')
+    expect((moved as { confinedOrigin?: boolean }).confinedOrigin).not.toBe(true)
+    manager.moveSessionToWorkspace(fresh.id, 'normal')
+    expect((manager.moveSessionToWorkspace(fresh.id, 'customer') as { confinedOrigin?: boolean }).confinedOrigin).not.toBe(true)
+  })
+  test('importing Chat history revokes origin even for a fresh confined destination', () => {
+    setup()
+    const fresh = manager.createAgentSession('Import destination', undefined, 'customer')
+    manager.updateAgentSessionMeta(fresh.id, { confinedOrigin: true } as Parameters<AgentSessionManager['updateAgentSessionMeta']>[1])
+    manager.migrateChatToAgentSession('nonexistent-conversation', fresh.id)
+    expect((manager.getAgentSessionMeta(fresh.id) as { confinedOrigin?: boolean }).confinedOrigin).not.toBe(true)
+  })
+  for (const origin of [undefined, true]) {
+    test(`fork inherits only an existing origin marker (${origin})`, async () => {
+      setup()
+      const artifact = join(tempHome, 'origin-pi.jsonl'); writeFileSync(artifact, '')
+      writeAgentSessionsIndex([{ id: 'source-origin', title: 'Source', workspaceId: 'customer', agentRuntime: 'pi', confinedOrigin: origin, piSessionFile: artifact, piEntryBindings: { 'assistant-origin': 'entry-keep' }, createdAt: 1, updatedAt: 1 }])
+      const forked = await manager.forkAgentSession({ sessionId: 'source-origin', upToMessageUuid: 'assistant-origin' })
+      expect((forked as { confinedOrigin?: boolean }).confinedOrigin).toBe(origin)
+      expect((manager.getAgentSessionMeta(forked.id) as { confinedOrigin?: boolean }).confinedOrigin).toBe(origin)
+    })
+  }
 })

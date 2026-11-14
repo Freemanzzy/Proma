@@ -97,7 +97,7 @@ function actualBridgeMethods(file: string, names: string[], dependencies: Record
 for (const file of ['./feishu-bridge.ts', './bridge-command-handler.ts']) {
   test(`real Bridge list/switch/new methods cannot leave confined workspace: ${file}`, async () => {
     const feishu = file.includes('feishu')
-    const sessions = [{ id: 'admin-session', title: 'PRIVATE ADMIN TITLE', workspaceId: 'admin' }, { id: 'customer-session', title: 'Customer conversation', workspaceId: 'customer' }]
+    const sessions = [{ id: 'admin-session', title: 'PRIVATE ADMIN TITLE', workspaceId: 'admin' }, { id: 'customer-session', title: 'Customer conversation', workspaceId: 'customer', confinedOrigin: true }]
     const workspaces = [{ id: 'admin', name: 'PRIVATE ADMIN WORKSPACE' }, { id: 'customer', name: 'Customer' }]
     const sent: unknown[] = []; const created: string[] = []
     const bridge = actualBridgeMethods(file, ['handleListCommand', 'handleSwitchCommand', 'createNewSession'], {
@@ -117,7 +117,7 @@ for (const file of ['./feishu-bridge.ts', './bridge-command-handler.ts']) {
       sendMessage: async (_chat: string, message: unknown) => { sent.push(message) },
       sendCardMessage: async (_chat: string, message: unknown) => { sent.push(message) },
       saveBindings: () => {}, updateStatus: () => {}, getActiveBindingCount: () => 1, notifySessionCreated: () => {},
-      resolveValidWorkspaceId: () => 'admin',
+      resolveValidWorkspaceId: () => 'admin', effectiveDefaultWorkspaceId: () => 'admin',
     })
     const arg = feishu ? { chatId: 'group', senderOpenId: 'sender', chatType: 'group' } : 'group'
     await bridge.handleListCommand(arg)
@@ -139,7 +139,7 @@ for (const file of ['./feishu-bridge.ts', './bridge-command-handler.ts']) {
       getAgentSessionMeta: () => ({ workspaceId: 'admin' }),
     })
     Object.assign(bridge, {
-      botConfig: { defaultWorkspaceId: 'customer' }, config: { getDefaultWorkspaceId: () => 'customer' },
+      effectiveDefaultWorkspaceId: () => 'customer', botConfig: { defaultWorkspaceId: 'customer' }, config: { getDefaultWorkspaceId: () => 'customer' },
       chatBindings: new Map([['group', old]]), sessionToChat: new Map([['admin-session', 'group']]), confinedIgnoredBindings: [],
       removeBinding(chatId: string, binding: { sessionId: string }) { this.chatBindings.delete(chatId); this.sessionToChat.delete(binding.sessionId) },
     })
@@ -190,3 +190,90 @@ for (const file of ['./feishu-bridge.ts', './bridge-command-handler.ts']) {
     expect(JSON.parse(readFileSync(target, 'utf8'))).toEqual([old, active])
   })
 }
+
+for (const file of ['./feishu-bridge.ts', './bridge-command-handler.ts']) {
+  for (const fallback of (file.includes('feishu') ? ['settings', 'first', 'default-slug'] : ['settings', 'first'])) {
+    test(`R2 real Bridge fallback ${fallback} confines unbound group: ${file}`, async () => {
+      const feishu = file.includes('feishu')
+      const workspaces = [{ id: 'customer', slug: 'default', name: 'Customer', externalAccess: 'confined' }, { id: 'admin', slug: 'admin', name: 'PRIVATE ADMIN' }]
+      const sessions = [{ id: 'admin-session', workspaceId: 'admin', title: 'PRIVATE ADMIN' }, { id: 'legacy-session', workspaceId: 'customer', title: 'LEGACY SECRET' }, { id: 'customer-session', workspaceId: 'customer', title: 'Customer', confinedOrigin: true }]
+      if (fallback === 'default-slug') workspaces.reverse()
+      const settings = { agentChannelId: 'api', agentWorkspaceId: fallback === 'settings' ? 'customer' : undefined }
+      const text = readFileSync(new URL(file, import.meta.url), 'utf8')
+      const names = ['confinedWorkspaceId', 'handleListCommand', 'handleSwitchCommand', 'createNewSession']
+      // Use the existing method before the fix and the shared resolver once added.
+      if (text.includes('private effectiveDefaultWorkspaceId(')) names.push('effectiveDefaultWorkspaceId')
+      if (!feishu) names.push('resolveValidWorkspaceId')
+      const sent: unknown[] = []; const created: unknown[] = []
+      const bridge = actualBridgeMethods(file, names, {
+        confinedBridgeWorkspaceId, getSettings: () => settings,
+        getAgentWorkspace: (id: string) => workspaces.find(w => w.id === id),
+        getAgentSessionMeta: (id: string) => sessions.find(s => s.id === id),
+        listAgentSessions: () => sessions, listAgentWorkspacesByUpdatedAt: () => workspaces,
+        createAgentSession: (_title: unknown, _channel: unknown, workspaceId: string) => { created.push(workspaceId); return { id: 'new', title: 'New' } },
+        getMainWindow: () => null, buildSessionListCard: (items: unknown) => items,
+      })
+      Object.assign(bridge, { botConfig: {}, config: {}, chatBindings: new Map(), sessionToChat: new Map(), confinedIgnoredBindings: [],
+        getScopedBinding: () => undefined, send: async (_chat: string, msg: unknown) => sent.push(msg),
+        sendMessage: async (_chat: string, msg: unknown) => sent.push(msg), sendCardMessage: async (_chat: string, msg: unknown) => sent.push(msg),
+        saveBindings: () => {}, updateStatus: () => {}, getActiveBindingCount: () => 1, notifySessionCreated: () => {} })
+      const arg = feishu ? { chatId: 'group', senderOpenId: 'sender', chatType: 'group' } : 'group'
+      await bridge.handleListCommand(arg)
+      expect(JSON.stringify(sent)).not.toContain('PRIVATE ADMIN')
+      expect(JSON.stringify(sent)).not.toContain('LEGACY SECRET')
+      await bridge.handleSwitchCommand(arg, 'admin-session')
+      expect(bridge.chatBindings.size).toBe(0)
+      await bridge.handleSwitchCommand(arg, 'legacy-session')
+      expect(bridge.chatBindings.size).toBe(0)
+      await bridge.createNewSession(arg)
+      expect(created).toEqual(['customer'])
+    })
+  }
+}
+test('R2 real orchestrator preflight rejects legacy confined session before model or transcript use', async () => {
+  const begin = source.indexOf('    const workspaceId = sessionMeta?.workspaceId ?? requestedWorkspaceId')
+  const finish = source.indexOf('    // Windows 缺少', begin)
+  const run = new Function('sessionMeta', 'requestedWorkspaceId', 'getAgentWorkspace', 'getLocalProjectRootStatus', 'reportPreflightError', transpiler.transformSync(`return (async()=>{${source.slice(begin, finish)};return 'model';})()`))
+  for (const meta of [{ workspaceId: 'customer' }, { workspaceId: 'customer', confinedOrigin: false }, { workspaceId: 'customer', confinedOrigin: true }]) {
+    const errors: unknown[] = []
+    const result = await run(meta, 'customer', () => ({ externalAccess: 'confined' }), async () => undefined, (error: unknown) => errors.push(error))
+    expect(errors.length).toBe(meta.confinedOrigin ? 0 : 1)
+    expect(result).toBe(meta.confinedOrigin ? 'model' : undefined)
+  }
+})
+test('R2 confined first prompt and recovery never backfill old transcript text', () => {
+  const begin = source.indexOf('      const finalPrompt = isCompactCommand')
+  const finish = source.indexOf('\n\n', begin)
+  const prompt = new Function('isCompactCommand', 'existingSdkSessionId', 'contextualMessage', 'sessionId', 'confined', 'agentCwd', 'workspaceSlug', 'buildContextPrompt', `${transpiler.transformSync(source.slice(begin, finish))};return finalPrompt`)
+  expect(prompt(false, undefined, 'CURRENT', 'session', true, '.', 'customer', () => 'OLD PRIVATE CANARY')).toBe('CURRENT')
+  expect(source).toContain('queryOptions.prompt = confined ? contextualMessage : buildRecoveryPrompt')
+})
+
+for (const file of ['./feishu-bridge.ts', './bridge-command-handler.ts']) {
+  for (const currentWorkspace of ['customer', 'admin']) {
+  test(`R2 legacy binding (${currentWorkspace}) keeps confined workspace lock after being ignored: ${file}`, () => {
+    const feishu = file.includes('feishu')
+    const old = { chatId: 'group', sessionId: 'legacy', workspaceId: 'customer' }
+    const bridge = actualBridgeMethods(file, ['confinedWorkspaceId', feishu ? 'getScopedBinding' : 'getValidBinding'], {
+      confinedBridgeWorkspaceId,
+      getAgentWorkspace: (id: string) => ({ id, externalAccess: id === 'customer' ? 'confined' : 'read-write' }),
+      getAgentSessionMeta: () => ({ workspaceId: currentWorkspace }),
+    })
+    Object.assign(bridge, { effectiveDefaultWorkspaceId: () => 'admin', chatBindings: new Map([['group', old]]), sessionToChat: new Map(), confinedIgnoredBindings: [],
+      removeBinding(chatId: string) { this.chatBindings.delete(chatId) },
+    })
+    expect(bridge[feishu ? 'getScopedBinding' : 'getValidBinding']('group')).toBeUndefined()
+    expect((bridge as unknown as { confinedWorkspaceId(id: string): string }).confinedWorkspaceId('group')).toBe('customer')
+  })
+}
+}
+
+test('R2 running a formerly confined session in ordinary mode revokes provenance before later reuse', async () => {
+  const begin = source.indexOf('    const workspaceId = sessionMeta?.workspaceId ?? requestedWorkspaceId')
+  const finish = source.indexOf('    // Windows 缺少', begin)
+  const code = transpiler.transformSync(`return (async()=>{${source.slice(begin, finish)}})()`)
+  const meta = { id: 'safe-origin', workspaceId: 'customer', confinedOrigin: true as boolean | undefined }
+  const run = new Function('sessionMeta', 'requestedWorkspaceId', 'getAgentWorkspace', 'getLocalProjectRootStatus', 'reportPreflightError', 'updateAgentSessionMeta', code)
+  await run(meta, 'customer', () => ({ externalAccess: 'read-write' }), async () => undefined, () => { throw new Error('Unexpected rejection') }, (_id: string, updates: object) => Object.assign(meta, updates))
+  expect(meta.confinedOrigin).toBeUndefined()
+})

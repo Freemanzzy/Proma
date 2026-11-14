@@ -817,6 +817,21 @@ export class AgentOrchestrator {
         return
       }
 
+      if (workspace.externalAccess === 'confined' && sessionMeta?.confinedOrigin !== true) {
+        reportPreflightError({
+          code: 'confined_session_origin_required',
+          title: '请新建受限会话',
+          message: '外部受限工作区不能继续旧会话，请在本工作区新建会话。',
+          actions: [], canRetry: false,
+        })
+        return
+      }
+
+      // Once run with ordinary access, this transcript is no longer confined.
+      if (workspace.externalAccess !== 'confined' && sessionMeta?.confinedOrigin) {
+        sessionMeta = updateAgentSessionMeta(sessionMeta.id, { confinedOrigin: undefined })
+      }
+
       const projectRootStatus = await getLocalProjectRootStatus(workspace.projectRootPath)
       if (projectRootStatus && projectRootStatus !== 'available') {
         reportPreflightError({
@@ -1131,7 +1146,7 @@ export class AgentOrchestrator {
       const isCompactCommand = userMessage.trim() === '/compact'
       const finalPrompt = isCompactCommand
         ? '/compact'
-        : existingSdkSessionId
+        : existingSdkSessionId || confined
           ? contextualMessage
           : buildContextPrompt(sessionId, contextualMessage, confined ? undefined : { agentCwd, workspaceSlug })
 
