@@ -134,7 +134,7 @@ test('Bash denies nonallowlisted executable and external argument paths includin
   for (const command of ['cat ~/.zshrc', 'ls ~', 'node -e "1"', 'entry ok', '/approved/entry-other ok', '/approved/entry ~/x', '/approved/entry --file=/etc/x', '/approved/entry --file=~/x', '/approved/entry ../../x']) {
     expect(decision('Bash', { command }).behavior).toBe('deny')
   }
-  for (const arg of [join(project, 'file'), join(session, 'file'), `--file=${join(project, 'file')}`, 'sub/../file', '@~/x', 'file:///etc/x']) {
+  for (const arg of [join(project, 'file'), join(session, 'file'), `--file=${join(project, 'file')}`, '@~/x', 'file:///etc/x']) {
     expect(decision('Bash', { command: `/approved/entry ${quoteConfinedWord(arg)}` }).behavior).toBe('allow')
   }
 })
@@ -306,5 +306,67 @@ test('R2 Grep body regex is not a filesystem path', () => {
     expect(decision('Grep', { path: project, pattern }).behavior).toBe('allow')
     expect(decision('Grep', { path: project, pattern, glob: '../*' }).behavior).toBe('deny')
     expect(decision('Glob', { path: project, pattern }).behavior).toBe('deny')
+  }
+})
+
+// Review round 3: run against 18f2a8c0 before changing the guard.
+test('R3 Bash rejects every parent path segment before lexical normalization', () => {
+  policy()
+  mkdirSync(join(outside, 'child'))
+  symlinkSync(join(outside, 'child'), join(project, 'escape'))
+  for (const arg of ['escape/../secret', '--file=escape/../secret', '..', 'sub/../file', 'a\\..\\file', '--file=a\\..\\file']) {
+    expect(decision('Bash', { command: `/approved/entry ${quoteConfinedWord(arg)}` }).behavior).toBe('deny')
+  }
+  expect(decision('Bash', { command: '/approved/entry a..b' }).behavior).toBe('allow')
+})
+test('R3 file traversal matches the path the real Pi Read actually opens', () => {
+  mkdirSync(join(outside, 'child'))
+  symlinkSync(join(outside, 'child'), join(project, 'escape'))
+  writeFileSync(join(project, 'x'), 'INSIDE_CANARY')
+  writeFileSync(join(outside, 'x'), 'OUTSIDE_CANARY')
+  const result = decision('Read', { file_path: 'escape/../x' })
+  expect(result.behavior).toBe('allow')
+  if (result.behavior !== 'allow') throw new Error('Expected lexical Pi path')
+  expect(result.updatedInput.file_path).toBe(join(project, 'x'))
+  const sdkPath = fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent'))
+  const script = `import {createReadToolDefinition} from ${JSON.stringify(pathToFileURL(sdkPath).href)};
+    const tool=createReadToolDefinition(${JSON.stringify(project)});
+    const raw=await tool.execute('raw',{path:'escape/../x'},new AbortController().signal);
+    const updated=await tool.execute('updated',{path:${JSON.stringify(result.updatedInput.file_path)}},new AbortController().signal);
+    console.log(JSON.stringify({raw,updated}));`
+  const run = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', env: { ...process.env, HOME: home } })
+  expect(run.status).toBe(0)
+  expect(run.stdout.match(/INSIDE_CANARY/g)?.length).toBe(2)
+  expect(run.stdout).not.toContain('OUTSIDE_CANARY')
+})
+for (const tool of ['Read', 'Write', 'Edit', 'MultiEdit', 'LS', 'Grep', 'Glob']) {
+  test(`R3 ${tool} fails closed when updatedInput Unicode root resolves to a different Pi path`, () => {
+    const narrow = join(home, 'client\u202Ffiles'); const spaced = join(home, 'client files')
+    mkdirSync(narrow); mkdirSync(spaced)
+    writeFileSync(join(narrow, 'x'), 'INSIDE_CANARY'); writeFileSync(join(spaced, 'x'), 'OUTSIDE_CANARY')
+    const result = resolveConfinedToolDecision(tool, { path: 'x', file_path: 'x', pattern: 'x', content: 'bad' }, { ...ctx(), cwd: narrow, roots: [narrow, session] })
+    expect(result.behavior).toBe('deny')
+  })
+}
+
+test('R3 real Pi resolves updated absolute Unicode root into its ordinary-space sibling', () => {
+  const narrow = join(home, 'client\u202Ffiles'); const spaced = join(home, 'client files')
+  mkdirSync(narrow); mkdirSync(spaced)
+  writeFileSync(join(narrow, 'x'), 'INSIDE_CANARY'); writeFileSync(join(spaced, 'x'), 'OUTSIDE_CANARY')
+  const sdkPath = fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent'))
+  const script = `import { createReadToolDefinition, createWriteToolDefinition } from ${JSON.stringify(pathToFileURL(sdkPath).href)};
+    import {readFileSync} from 'node:fs';
+    const candidate=${JSON.stringify(join(narrow, 'x'))};
+    const read=await createReadToolDefinition(${JSON.stringify(narrow)}).execute('read',{path:candidate},new AbortController().signal);
+    await createWriteToolDefinition(${JSON.stringify(narrow)}).execute('write',{path:candidate,content:'PI_WRITE_CANARY'},new AbortController().signal);
+    console.log(JSON.stringify({read,ordinary:readFileSync(${JSON.stringify(join(spaced, 'x'))},'utf8'),narrow:readFileSync(candidate,'utf8')}));`
+  const run = spawnSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, HOME: home }, encoding: 'utf8' })
+  expect(run.status).toBe(0)
+  const actual = JSON.parse(run.stdout)
+  expect(JSON.stringify(actual.read)).toContain('OUTSIDE_CANARY')
+  expect(actual.ordinary).toBe('PI_WRITE_CANARY')
+  expect(actual.narrow).toBe('INSIDE_CANARY')
+  for (const tool of ['Read', 'Write']) {
+    expect(resolveConfinedToolDecision(tool, { file_path: 'x', content: 'must-not-run' }, { ...ctx(), cwd: narrow, roots: [narrow, session] }).behavior).toBe('deny')
   }
 })

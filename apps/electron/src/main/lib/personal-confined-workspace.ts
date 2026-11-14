@@ -70,7 +70,8 @@ function pathArgumentAllowed(arg: string, ctx: ConfinedToolContext): boolean {
   const value = /^--[^=]+=/.test(arg) ? arg.slice(arg.indexOf('=') + 1) : arg
   // Bash executes raw argv, not Pi tool paths. Even ordinary text may name a
   // relative symlink; resolve every argument (and option value) as a path.
-  return !value.startsWith('~') && absolutePathWithinRoots(resolve(ctx.cwd, value), ctx.roots)
+  return !value.startsWith('~') && !value.split(/[\\/]/).includes('..')
+    && absolutePathWithinRoots(resolve(ctx.cwd, value), ctx.roots)
 }
 
 function writableEntrypoint(command: string, roots: string[]): boolean {
@@ -104,7 +105,10 @@ export function resolveConfinedToolDecision(tool: string, input: Record<string, 
     try {
       const path = tool === 'Read' ? resolvePiReadPath(rawPath, ctx.cwd) : resolvePiPath(rawPath, ctx.cwd)
       if (['Write', 'Edit', 'MultiEdit'].includes(tool) && protectedEntrypoint(path, ctx.workspacePath)) return deny(CONFINED_ENTRY_DENIED)
-      if (!absolutePathWithinRoots(path, ctx.roots)) return deny()
+      // updatedInput is parsed by Pi again. Require a fixed point, including
+      // Read's filename fallback, before authorizing the actual opened path.
+      const finalPath = tool === 'Read' ? resolvePiReadPath(path, ctx.cwd) : resolvePiPath(path, ctx.cwd)
+      if (finalPath !== path || !absolutePathWithinRoots(finalPath, ctx.roots)) return deny()
       return allow({ ...input, path, ...(['Read', 'Write', 'Edit', 'MultiEdit', 'LS'].includes(tool) ? { file_path: path } : {}) })
     } catch { return deny() }
   }
