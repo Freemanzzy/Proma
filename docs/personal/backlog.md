@@ -4,8 +4,8 @@
 
 ## 待合入分支（已验证、未发布）
 
-- 当前安装：`21234fca`（2026-11-11 21:18，图片预算二次 base64 修复；Claude Code 安装，见 install-result-2026-11-11）。
-- 已合入、未安装：`chore/electron-43.8.10-20261114`（Electron 43.2.0 → 43.8.10）与 `feat/confined-workspace-20261114`（外部受限工作区，客户 Bot 隔离），合并随 install-request-2026-11-15 安装（install-request-2026-11-14 已撤回并入）。
+- 当前安装：`42b83249`（2026-11-15 04:22，Electron 43.8.10 + 外部受限工作区；正式数据尚无 confined 工作区；Claude Code 安装，见 install-result-2026-11-15）。
+- 已合入、未安装：无。
 - 待用户日常实测：桌面排队消息（运行中再发、Cmd+R 恢复）；会话内搜索与 minimap（窗口化加载后）。用户 2026-10-31：保持现状，不主动安排，有问题再反馈。
 - 观察：手机 PDF 预览页“省流量”胶囊压住缩放控件（用户 10-19 决定先不做）。
 
@@ -90,7 +90,9 @@
     - 共同约束：不修改 Pi SDK（node_modules / patches），除非新设计经用户重新批准。
 13. **成本与缓存看板**：只读脚本 `python3 scripts/personal/usage-cost-report.py`，默认统计最近 7 天；可用 `--days 30`、`--format json`、`--top 20` 调整窗口、格式与 Top N。按天、定时任务、交互/root 会话、渠道/模型汇总 token、缓存与相对成本指数。只读、手动运行；是否加入周检由用户决定。
 14. **`file:resolve-path` 目录路径的 WARN**（✅ 2026-11-02 修复，`feat/shared-skills-unify-20261102`，父会话复核与 Codex 审查通过，用户 2026-11-02 dev 体验确认，随 `1286ff19` 安装（2026-11-02））：目录路径在注册前直接返回 `null`，不再记录包含完整路径的 WARN；文件路径保持原行为。
-15. **Node 弃用警告 `DEP0169 url.parse()`、`DEP0180 fs.Stats`**（install-result-2026-11-01 / 2026-11-02 遗留，仅观察）：main.log 启动后各出现 1 次，来源未定位（可能在依赖中）。同步上游或升级依赖时留意，不单独处理。
+15. **Node 弃用警告（仅观察，修复走正常分支 + 测试 + 打包，不单独为此装包）**：
+    - `DEP0169 url.parse()`、`DEP0180 fs.Stats`（install-result-2026-11-01 / 2026-11-02 遗留）：main.log 启动后各出现 1 次，来源未定位（可能在依赖中）。
+    - `DEP0187 Passing invalid argument types to fs.existsSync`（2026-11-15 新增，install-result-2026-11-15）：`42b83249` 安装后 main.log 出现 1 次（2026-11-14T20:31:22Z，PID 7702，scope=main），安装前无。判断：这是 Node 24.22（Electron 43.8.10）新加的运行时警告，旧 Node 24.18 对同样的调用不报，所以不是本次代码改动引入的新调用。出现时刻在一次协作子会话结束、父会话被自动唤醒约 30 秒后，没有对应的错误或功能失败。静态排查：`apps/electron/src/main` 有 250 处 `existsSync`，未找到可确认传入 `undefined`/数字的调用点；依赖（`@earendil-works/pi-coding-agent` 约 100 处）同样可能。下一步：下次做 dev 回归时用 `NODE_OPTIONS=--trace-deprecation` 启动 dev 实例，执行“委派子会话 → 完成 → 父会话唤醒”，从栈定位；确认在个人版代码后再修（参数先做类型判断）。
 16. **会话用量 IPC 汇总子会话时未逐个校验远程授权**（✅ 2026-11-02 修复，`feat/shared-skills-unify-20261102`，父会话复核与 Codex 审查通过，用户 2026-11-02 dev 体验确认，随 `1286ff19` 安装（2026-11-02））：`personal-session-usage.ts` 按 `parentSessionId/rootSessionId` 汇总子会话用量；Web Remote 对 `agent:get-personal-session-usage` 只校验入参的父会话（`web-remote-ipc.ts` 的 session 作用域）。子会话可以单独迁移到另一工作区（上游 `moveSessionToWorkspace` 保留父子关系，迁移 IPC 不拦截子会话），此后限定了工作区（`allowedWorkspaceIds`）的远程客户端仍能看到该子会话的 token/缓存聚合数字（不含消息正文）。三个前提已按代码核实，未在真机复现。Codex 标 P1；中控核实后定为 P2：只泄露聚合数字，且需同时满足“远程限定工作区”与“单独迁移过子会话”。修复：Web Remote 调用用量模块时传入逐个子会话授权过滤器；桌面行为不变。新增用量汇总过滤单测；`full-ui-security.test.ts` 覆盖 Web Remote 逐个过滤授权回调，待父会话复核。证据见 changelog 2026-11-01「引入 Proma 专用的 Codex 独立代码审查」。
 17. **Skill 全局统一（路径重定向）**（✅ 2026-11-02 实现，`feat/shared-skills-unify-20261102`，父会话复核与 Codex 两轮审查通过，用户 2026-11-02 dev 体验确认，随 `1286ff19` 安装（2026-11-02）；方案经用户确认由“新建工作区建链接”改为路径重定向）：配置目录下 `shared-skills/` 与 `shared-skills-inactive/` 同时为目录时，共享模式下所有工作区直接重定向至两目录；新建工作区跳过模板复制；目录变化广播能力刷新。若任一目录缺失/非目录则回退上游行为。涉及的上游文件清单见 `PERSONAL.md`“与上游的差异”；个人版模块提供解析和监听。保留旧工作区链接，不迁移数据。
     - 切回商业版前，`shared-skills` Skill 的 `check-shared-skills.sh --fix` 只用于为共享模式期间新建的工作区补链接；共享模式不需要运行该脚本。
@@ -108,12 +110,16 @@
     - 临时做法：安装后若想要干净环境，由用户在 Dock 里退出并重新打开 Proma。
 22. **Electron 补丁跟进**（2026-11-14 起，用户批准个人版在当前大版本内自行升级补丁版）：
     - a. ✅ 43.2.0 → 43.8.10（`chore/electron-43.8.10-20261114`，Chromium 150.0.7871.250、Node 24.22.1）。
-    - b. **待上游**：2026-11-11 Node 安全公告的 Node 24 修复版是 24.22.3，截至 11-14 没有内置该版本的 Electron 稳定版。周检 `07439dfd` 第 10 步发现 43.x 补丁版内置 Node ≥ 24.22.3 时提醒，届时再升一次补丁版（流程同 a）。
+    - b. **待上游（截至 2026-11-15 仍未满足）**：安装版内置 Node 24.22.1，仍低于 2026-11-11 Node 安全公告的修复版 24.22.3（本机 nvm 已是 24.22.3）。出现内置 Node ≥ 24.22.3 的 Electron 43.x 稳定版时，按 a 的流程升级并**提交补丁升级安装申请**。周检 `07439dfd` 第 10 步会提醒。本机运行时 SSOT（`workspace-files/runtime-maintenance/SSOT.md`）已由 Claude Code 更新为 43.8.10 / 24.22.1（workspace-files 提交 `6cfb4db`）。
     - c. **计划性**：Electron 46 稳定版发布后 43.x 停止维护（只维护最新 3 个大版本），需单独立项跨大版本升级（43 → 45/46），周检会提示。
 23. **外部受限工作区后续**（2026-11-15）：
     - a. Slack Bridge 未接入 confined（新建会话无来源标记、fail closed）；如需 Slack 客户 Bot 再补。
     - b. 精简系统提示不列出白名单命令，可考虑从策略文件生成“可用命令”说明。
     - c. 专用 Mac mini 上线后，评估 OS 级隔离（独立系统用户/沙箱）替代或补充工具层隔离。
+24. **（记录，用户决定）飞书应用权限缺失**（既有，非 2026-11-15 安装引入；install-result-2026-11-15）：
+    - `cardkit:card:write` 未开通 → `feishu-bridge.ts` 创建流式卡片失败（main.log `[ERROR] 飞书 Bridge 流式卡片创建失败，降级为文本进度提示`），回复改用文本进度显示，内容不受影响；安装前已出现 16 次。
+    - `contact:contact.base:readonly` 未开通 → `getUserName()` 取不到姓名（`[WARN] 获取用户信息失败`），回退显示 open_id 前 8 位；安装前已出现 4 次。
+    - 是否开通由用户在飞书开放平台决定，**不改代码绕过**。开通后需要重新发布应用版本，再看 main.log 不再出现这两条。客户 Bot 应用按 BR 设计只开“接收群内 @ 消息”和“发消息”，这两条在客户 Bot 上属于预期。
 
 ## 测试与开发数据约定
 
