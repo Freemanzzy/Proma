@@ -37,15 +37,23 @@ export function realPathThroughParent(path: string): string {
   return resolve(realpathSync(cursor), ...missing)
 }
 
-export function piPathWithinRoots(path: string, roots: string[], cwd: string): boolean {
-  if (!path.trim() || path.includes('\0') || roots.length === 0) return false
+/** Validate a final absolute filesystem path without Pi input normalization. */
+export function absolutePathWithinRoots(path: string, roots: string[]): boolean {
+  if (!isAbsolute(path) || path.includes('\0') || roots.length === 0) return false
   try {
-    const target = realPathThroughParent(resolvePiPath(path, cwd))
-    return roots.some((root) => {
-      const rel = relative(realPathThroughParent(root), target)
-      return rel === '' || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`))
-    })
+    const target = realPathThroughParent(path)
+    return roots.some((root) => pathWithinRoot(target, realPathThroughParent(root)))
   } catch { return false }
+}
+
+export function pathWithinRoot(path: string, root: string): boolean {
+  const rel = relative(root, path)
+  return rel === '' || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`))
+}
+
+export function piPathWithinRoots(path: string, roots: string[], cwd: string): boolean {
+  if (!path.trim() || path.includes('\0')) return false
+  try { return absolutePathWithinRoots(resolvePiPath(path, cwd), roots) } catch { return false }
 }
 
 // Pi Read also tries macOS screenshot filename variants before opening a file.

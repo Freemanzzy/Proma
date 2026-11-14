@@ -51,7 +51,7 @@ for (const tool of ['Read', 'Write', 'Edit', 'MultiEdit', 'Grep', 'Glob', 'LS'])
 }
 for (const tool of ['Grep', 'Glob']) {
   test(`${tool}: checks both path and pattern/glob escape forms`, () => {
-    for (const key of ['pattern', 'glob']) {
+    for (const key of (tool === 'Grep' ? ['glob'] : ['pattern', 'glob'])) {
       for (const pattern of ['/etc/*', '~/*', '../*', 'a/../../x', '@~/x', 'file:///etc/x']) {
         expect(decision(tool, { path: project, pattern: 'test', [key]: pattern }).behavior).toBe('deny')
       }
@@ -131,10 +131,10 @@ for (const command of ['', 'X=y /approved/entry', '/approved/entry $HOME', '/app
 }
 test('Bash denies nonallowlisted executable and external argument paths including --key=value', () => {
   policy()
-  for (const command of ['cat ~/.zshrc', 'ls ~', 'node -e "1"', 'entry ok', '/approved/entry-other ok', '/approved/entry ~/x', '/approved/entry @~/x', '/approved/entry file:///etc/x', '/approved/entry --file=/etc/x', '/approved/entry --file=~/x', '/approved/entry ../../x']) {
+  for (const command of ['cat ~/.zshrc', 'ls ~', 'node -e "1"', 'entry ok', '/approved/entry-other ok', '/approved/entry ~/x', '/approved/entry --file=/etc/x', '/approved/entry --file=~/x', '/approved/entry ../../x']) {
     expect(decision('Bash', { command }).behavior).toBe('deny')
   }
-  for (const arg of [join(project, 'file'), join(session, 'file'), `--file=${join(project, 'file')}`, 'sub/../file']) {
+  for (const arg of [join(project, 'file'), join(session, 'file'), `--file=${join(project, 'file')}`, 'sub/../file', '@~/x', 'file:///etc/x']) {
     expect(decision('Bash', { command: `/approved/entry ${quoteConfinedWord(arg)}` }).behavior).toBe('allow')
   }
 })
@@ -257,4 +257,54 @@ test('actual Pi resource loader exposes no ambient or explicit Skills in confine
   expect(result.agents).toEqual([])
   expect(result.systemPrompt).toBe('Confined assistant')
   expect(run.stdout).not.toContain('AMBIENT_SECRET_CANARY')
+})
+
+// Review round 2: these cases were first run against 915f5ca7 and failed.
+test('R2 Bash validates every raw relative argv and option value through realpath', () => {
+  policy()
+  symlinkSync(outside, join(project, 'escape'))
+  symlinkSync(join(outside, 'absent'), join(project, 'dangling'))
+  symlinkSync(outside, join(project, 'narrow\u202Fspace'))
+  for (const arg of ['escape/secret', '--file=escape/secret', 'dangling/child', 'narrow\u202Fspace/secret', '~literal']) {
+    expect(decision('Bash', { command: `/approved/entry ${quoteConfinedWord(arg)}` }).behavior).toBe('deny')
+  }
+  for (const arg of ['hello world', "SELECT COUNT(*) FROM t WHERE d >= '2026-11-01'", '--file=local']) {
+    expect(decision('Bash', { command: `/approved/entry ${JSON.stringify(arg)}` }).behavior).toBe('allow')
+  }
+})
+test('R2 Read validates final macOS fallback name without renormalizing Unicode spaces', () => {
+  writeFileSync(join(outside, 'secret.txt'), 'secret')
+  symlinkSync(join(outside, 'secret.txt'), join(project, 'capture\u202FPM.txt'))
+  expect(decision('Read', { file_path: 'capture PM.txt' }).behavior).toBe('deny')
+})
+test('R2 Read returns the selected final Unicode path in updatedInput', () => {
+  const actual = join(project, 'ok\u202FPM.txt')
+  writeFileSync(actual, 'ok')
+  const result = decision('Read', { file_path: 'ok PM.txt' })
+  expect(result.behavior).toBe('allow')
+  if (result.behavior === 'allow') expect(result.updatedInput.file_path).toBe(actual)
+})
+test('R2 entrypoint cannot be executable from or overwritten inside either writable root', () => {
+  for (const root of [project, session]) {
+    const entry = join(root, 'entry.sh')
+    writeFileSync(entry, '#!/bin/sh\nprintf ok', { mode: 0o755 })
+    policy({ commands: [entry] })
+    for (const [tool, input] of [['Bash', { command: entry }], ['Write', { file_path: entry, content: 'bad' }], ['Edit', { file_path: entry, old_string: 'ok', new_string: 'bad' }], ['MultiEdit', { file_path: entry, edits: [] }]] as Array<[string, Record<string, unknown>]>) {
+      const result = decision(tool, input)
+      expect(result.behavior).toBe('deny')
+      if (result.behavior === 'deny') expect(result.message).toContain('入口及其依赖必须放在客户工作区之外')
+    }
+    const alias = join(outside, `entry-${root === project ? 'project' : 'session'}`)
+    symlinkSync(entry, alias)
+    policy({ commands: [alias] })
+    expect(decision('Bash', { command: alias }).behavior).toBe('deny')
+    expect(decision('Write', { file_path: entry, content: 'bad' }).behavior).toBe('deny')
+  }
+})
+test('R2 Grep body regex is not a filesystem path', () => {
+  for (const pattern of ['/etc/passwd', '../', '~/', 'file:///etc/x']) {
+    expect(decision('Grep', { path: project, pattern }).behavior).toBe('allow')
+    expect(decision('Grep', { path: project, pattern, glob: '../*' }).behavior).toBe('deny')
+    expect(decision('Glob', { path: project, pattern }).behavior).toBe('deny')
+  }
 })

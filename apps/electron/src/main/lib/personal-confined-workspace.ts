@@ -1,11 +1,12 @@
 import type { ExtensionFactory } from '@earendil-works/pi-coding-agent'
 import { readFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { isAbsolute, join } from 'node:path'
-import { normalizePiPath, piPathWithinRoots, resolvePiPath, resolvePiReadPath } from './personal-confined-paths'
+import { isAbsolute, join, resolve } from 'node:path'
+import { absolutePathWithinRoots, normalizePiPath, pathWithinRoot, piPathWithinRoots, realPathThroughParent, resolvePiPath, resolvePiReadPath } from './personal-confined-paths'
 
 export const CONFINED_DENIED = '外部受限工作区：不允许此工具或路径'
 export const CONFINED_COMMAND_DENIED = '外部受限工作区：工作区命令白名单缺失或无效'
+export const CONFINED_ENTRY_DENIED = '外部受限工作区：入口及其依赖必须放在客户工作区之外，且禁止改写白名单入口'
 export const CONFINED_BRIDGE_DENIED = '此群不支持该命令'
 export interface ConfinedPolicy { version: 1; commands: string[]; env?: string[]; allowGroupChatHistory?: boolean }
 export type ConfinedDecision = { behavior: 'allow'; updatedInput: Record<string, unknown> } | { behavior: 'deny'; message: string }
@@ -67,10 +68,20 @@ function safePattern(value: unknown): boolean {
 
 function pathArgumentAllowed(arg: string, ctx: ConfinedToolContext): boolean {
   const value = /^--[^=]+=/.test(arg) ? arg.slice(arg.indexOf('=') + 1) : arg
-  // Treat Pi aliases and file URLs as paths too, stricter than the shell needs.
-  let path: string
-  try { path = normalizePiPath(value) } catch { return false }
-  return !(isAbsolute(path) || value.startsWith('~') || path.split(/[\\/]/).includes('..')) || piPathWithinRoots(value, ctx.roots, ctx.cwd)
+  // Bash executes raw argv, not Pi tool paths. Even ordinary text may name a
+  // relative symlink; resolve every argument (and option value) as a path.
+  return !value.startsWith('~') && absolutePathWithinRoots(resolve(ctx.cwd, value), ctx.roots)
+}
+
+function writableEntrypoint(command: string, roots: string[]): boolean {
+  const real = realPathThroughParent(command)
+  return roots.some(root => pathWithinRoot(command, resolve(root)) || pathWithinRoot(real, realPathThroughParent(root)))
+}
+
+function protectedEntrypoint(path: string, workspacePath: string): boolean {
+  return readConfinedPolicy(workspacePath)?.commands.some(command => {
+    try { return resolve(command) === path || realPathThroughParent(command) === realPathThroughParent(path) } catch { return true }
+  }) ?? false
 }
 
 export const CONFINED_SESSION_TOOLS = new Set(['TaskCreate', 'TaskUpdate', 'TaskGet', 'TaskList', 'TodoRead', 'CompactContext'])
@@ -89,10 +100,11 @@ export function resolveConfinedToolDecision(tool: string, input: Record<string, 
   if (['Read', 'Write', 'Edit', 'MultiEdit', 'LS', 'Grep', 'Glob'].includes(tool)) {
     const rawPath = ['Read', 'Write', 'Edit', 'MultiEdit'].includes(tool) ? input.file_path : input.path ?? '.'
     if (typeof rawPath !== 'string') return deny()
-    if ((tool === 'Grep' || tool === 'Glob') && (!safePattern(input.pattern) || !safePattern(input.glob))) return deny()
+    if ((tool === 'Glob' && !safePattern(input.pattern)) || ((tool === 'Grep' || tool === 'Glob') && !safePattern(input.glob))) return deny()
     try {
       const path = tool === 'Read' ? resolvePiReadPath(rawPath, ctx.cwd) : resolvePiPath(rawPath, ctx.cwd)
-      if (!piPathWithinRoots(path, ctx.roots, ctx.cwd)) return deny()
+      if (['Write', 'Edit', 'MultiEdit'].includes(tool) && protectedEntrypoint(path, ctx.workspacePath)) return deny(CONFINED_ENTRY_DENIED)
+      if (!absolutePathWithinRoots(path, ctx.roots)) return deny()
       return allow({ ...input, path, ...(['Read', 'Write', 'Edit', 'MultiEdit', 'LS'].includes(tool) ? { file_path: path } : {}) })
     } catch { return deny() }
   }
@@ -105,6 +117,7 @@ export function resolveConfinedToolDecision(tool: string, input: Record<string, 
   if (!piPathWithinRoots(ctx.cwd, ctx.roots, ctx.cwd)) return deny()
   const words = tokenizeConfinedCommand(input.command)
   if (!words || !policy.commands.includes(words[0]!) || !words.slice(1).every((arg) => pathArgumentAllowed(arg, ctx))) return deny()
+  try { if (writableEntrypoint(words[0]!, ctx.roots)) return deny(CONFINED_ENTRY_DENIED) } catch { return deny(CONFINED_COMMAND_DENIED) }
   const env = confinedShellEnvironment()
   for (const name of policy.env ?? []) {
     if (!(name in env) && Object.prototype.hasOwnProperty.call(process.env, name)) env[name] = process.env[name]
