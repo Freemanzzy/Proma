@@ -377,19 +377,38 @@ function sortSessionsByUpdatedAtDesc(sessions: AgentSessionMeta[]): AgentSession
 /** 获取所有会话（按 updatedAt 降序） */
 export function listAgentSessions(): AgentSessionMeta[] {
   const index = readIndex()
-  return sortSessionsByUpdatedAtDesc(index.sessions)
+  return sortSessionsByUpdatedAtDesc(index.sessions.map(session => effectiveConfinedOrigin(index, session)))
+}
+
+/** Delegated provenance is valid only while the entire persisted parent chain is valid. */
+function hasConfinedOrigin(index: AgentSessionsIndex, session: AgentSessionMeta | undefined): boolean {
+  const seen = new Set<string>()
+  while (session?.confinedOrigin === true) {
+    if (seen.has(session.id)) return false
+    seen.add(session.id)
+    if (!session.parentSessionId) return true
+    const parentId = session.parentSessionId
+    const parent = index.sessions.find(s => s.id === parentId)
+    if (!parent || !session.workspaceId || parent.workspaceId !== session.workspaceId) return false
+    session = parent
+  }
+  return false
+}
+
+function effectiveConfinedOrigin(index: AgentSessionsIndex, session: AgentSessionMeta): AgentSessionMeta {
+  return session.confinedOrigin && !hasConfinedOrigin(index, session) ? { ...session, confinedOrigin: undefined } : session
 }
 
 /** 获取未归档会话，供侧栏 active 视图按需读取。 */
 export function listActiveAgentSessions(): AgentSessionMeta[] {
   const index = readIndex()
-  return sortSessionsByUpdatedAtDesc(index.sessions.filter((session) => !session.archived))
+  return sortSessionsByUpdatedAtDesc(index.sessions.filter((session) => !session.archived).map(session => effectiveConfinedOrigin(index, session)))
 }
 
 /** 获取归档会话，只有用户进入归档视图时才调用。 */
 export function listArchivedAgentSessions(): AgentSessionMeta[] {
   const index = readIndex()
-  return sortSessionsByUpdatedAtDesc(index.sessions.filter((session) => session.archived && !session.isDraft))
+  return sortSessionsByUpdatedAtDesc(index.sessions.filter((session) => session.archived && !session.isDraft).map(session => effectiveConfinedOrigin(index, session)))
 }
 
 /** 获取归档数量，不把归档会话元数据传到 renderer。 */
@@ -403,7 +422,8 @@ export function countArchivedAgentSessions(): number {
  */
 export function getAgentSessionMeta(id: string): AgentSessionMeta | undefined {
   const index = readIndex()
-  return index.sessions.find((s) => s.id === id)
+  const session = index.sessions.find((s) => s.id === id)
+  return session ? effectiveConfinedOrigin(index, session) : undefined
 }
 
 /** 缺少标记的存量会话必须保持升级前的私有 workbench cwd。 */
@@ -476,12 +496,18 @@ export function createAgentSession(
   agentCwdMode?: AgentCwdMode,
   sessionWorkbenchLayout?: SessionWorkbenchLayout,
   isDraft?: boolean,
-  source?: Pick<AgentSessionMeta, 'confinedOrigin'>,
+  source?: Pick<AgentSessionMeta, 'confinedOrigin' | 'parentSessionId'>,
 ): AgentSessionMeta {
   const index = readIndex()
   const now = Date.now()
 
   const settings = getSettings()
+  const parent = source?.parentSessionId ? index.sessions.find(s => s.id === source.parentSessionId) : undefined
+  // Creation is untrusted unless the caller explicitly grants a fresh origin,
+  // or this child inherits its persisted parent's same-workspace origin.
+  const origin = source?.parentSessionId
+    ? parent?.workspaceId === workspaceId && hasConfinedOrigin(index, parent)
+    : source?.confinedOrigin === true
   const defaultThinkingLevel = settings.defaultOpenAIThinkingLevel
     ?? resolvePiThinkingLevel(settings, undefined, 'openai-codex')
   const meta: AgentSessionMeta = {
@@ -490,7 +516,8 @@ export function createAgentSession(
     channelId,
     modelId,
     workspaceId,
-    confinedOrigin: workspaceId && getAgentWorkspace(workspaceId)?.externalAccess === 'confined' && (!source || source.confinedOrigin === true) ? true : undefined,
+    confinedOrigin: workspaceId && getAgentWorkspace(workspaceId)?.externalAccess === 'confined' && origin ? true : undefined,
+    parentSessionId: source?.parentSessionId,
     agentCwdMode: workspaceId ? agentCwdMode ?? 'project' : undefined,
     sessionWorkbenchLayout: workspaceId ? sessionWorkbenchLayout ?? 'root' : undefined,
     // 仅由会话入口显式创建的临时输入会话设置；必须跨重启保留。
@@ -739,11 +766,39 @@ export function updateAgentSessionMeta(
     updatedAt: isStarredOnly ? existing.updatedAt : Date.now(),
   }
 
+  if (updated.parentSessionId) {
+    const parent = index.sessions.find(s => s.id === updated.parentSessionId)
+    updated.confinedOrigin = updated.confinedOrigin === true && !!parent && hasConfinedOrigin(index, parent)
+      && parent.id !== updated.id && parent.workspaceId === updated.workspaceId && !!updated.workspaceId
+      && getAgentWorkspace(updated.workspaceId)?.externalAccess === 'confined' ? true : undefined
+  }
+
   index.sessions[idx] = updated
   writeIndex(index)
 
   console.log(`[Agent 会话] 已更新会话: ${updated.title} (${updated.id})`)
   return updated
+}
+
+/** Revoke before any ordinary context can be read or appended. */
+export function revokeConfinedOriginForOrdinaryContext(meta: AgentSessionMeta | undefined): AgentSessionMeta | undefined {
+  if (meta?.confinedOrigin && (!meta.workspaceId || getAgentWorkspace(meta.workspaceId)?.externalAccess !== 'confined')) {
+    return updateAgentSessionMeta(meta.id, { confinedOrigin: undefined })
+  }
+  return meta
+}
+
+/** One additive, atomic session-index write; do not change ordering or history. */
+export function revokeConfinedOriginsForWorkspace(workspaceId: string): void {
+  const index = readIndex()
+  let changed = false
+  for (const session of index.sessions) {
+    if (session.workspaceId === workspaceId && session.confinedOrigin !== undefined) {
+      delete session.confinedOrigin
+      changed = true
+    }
+  }
+  if (changed) writeIndex(index)
 }
 
 /**
@@ -995,7 +1050,7 @@ async function forkPiAgentSession(sourceMeta: AgentSessionMeta, input: ForkSessi
     sourceCwdMode,
     sourceWorkbenchLayout,
     undefined,
-    sourceMeta,
+    { confinedOrigin: sourceMeta.confinedOrigin },
   )
   const destDir = resolveAgentCwd(workspace, newMeta.id, newMeta.agentCwdMode, sourceActiveWorktree)
   const destWorkbenchDir = resolveAgentWorkbenchDir(workspace, newMeta.id)

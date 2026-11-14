@@ -785,7 +785,7 @@ export interface AgentSessionMeta {
   openAIThinkingLevel?: AgentThinkingLevel
   /** 所属工作区 ID */
   workspaceId?: string
-  /** 仅在受限工作区新建的空会话（或其安全分叉）；旧会话不补标记。 */
+  /** 受限工作区中显式新建的空会话或安全继承的来源；旧会话和自动化不补标记。 */
   confinedOrigin?: boolean
   /**
    * Agent 执行 cwd 的持久化语义。新会话使用 project；缺失字段兼容升级前的

@@ -50,7 +50,7 @@ import { getAdapter, fetchTitle } from '@proma/core'
 import pkg from '../../../package.json' with { type: 'json' }
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
-import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, removeSDKErrorMessage, updateSDKUserMessageSkillActivations, rewindPiAgentSession, resolveAgentCwd, getActiveWorktreePath, getAgentCwdMode, getSessionWorkbenchLayout, resolveSessionWorkbenchContextDir, isAgentSessionDeleting, DEFAULT_AGENT_SESSION_TITLE } from './agent-session-manager'
+import { appendSDKMessages, revokeConfinedOriginForOrdinaryContext, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, removeSDKErrorMessage, updateSDKUserMessageSkillActivations, rewindPiAgentSession, resolveAgentCwd, getActiveWorktreePath, getAgentCwdMode, getSessionWorkbenchLayout, resolveSessionWorkbenchContextDir, isAgentSessionDeleting, DEFAULT_AGENT_SESSION_TITLE } from './agent-session-manager'
 import { getAgentWorkspace, getProjectFilesPath, getWorkspaceMcpConfig, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles, getWorkspaceAgentsMdPath, readWorkspaceAgentsMd, getWorkspaceMemoryGuidance, isWorkspaceProjectKnowledgeMaintenanceApproved } from './agent-workspace-manager'
 import { getLocalProjectRootStatus } from './project-root-health'
 import { getMcpApiKeyEnvironment, getMcpOAuthHeaders } from './mcp-oauth-service'
@@ -828,9 +828,7 @@ export class AgentOrchestrator {
       }
 
       // Once run with ordinary access, this transcript is no longer confined.
-      if (workspace.externalAccess !== 'confined' && sessionMeta?.confinedOrigin) {
-        sessionMeta = updateAgentSessionMeta(sessionMeta.id, { confinedOrigin: undefined })
-      }
+      sessionMeta = revokeConfinedOriginForOrdinaryContext(sessionMeta)
 
       const projectRootStatus = await getLocalProjectRootStatus(workspace.projectRootPath)
       if (projectRootStatus && projectRootStatus !== 'available') {
@@ -2390,7 +2388,7 @@ export class AgentOrchestrator {
     }
 
     // 注入 mention 引用指令（Skill/MCP/会话）— 与 sendMessage 路径保持一致的 prompt 加工
-    const meta = getAgentSessionMeta(sessionId)
+    const meta = revokeConfinedOriginForOrdinaryContext(getAgentSessionMeta(sessionId))
     const workspaceSlug = meta?.workspaceId
       ? getAgentWorkspace(meta.workspaceId)?.slug
       : undefined

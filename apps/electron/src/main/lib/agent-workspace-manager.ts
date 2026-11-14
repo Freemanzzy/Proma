@@ -9,6 +9,7 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync, cpSync, mkdirSync, statSync, lstatSync, openSync, readSync, closeSync, realpathSync } from 'node:fs'
 import { cp as cpAsync, readFile as readFileAsync, realpath as realpathAsync, writeFile as writeFileAsync } from 'node:fs/promises'
 import type { Dirent } from 'node:fs'
+import { revokeConfinedOriginsForWorkspace } from './agent-session-manager'
 import { writeExistingSkillFile } from './skill-file-write'
 import { rmSyncWithRetry, renameIfDestinationAbsentWithRetry, renameWithRetry } from './fs-retry'
 import { getLocalProjectRootStatus } from './project-root-health'
@@ -357,6 +358,11 @@ export async function updateAgentWorkspace(
   }
   if (updates.externalAccess !== undefined && updates.externalAccess !== 'read-write' && updates.externalAccess !== 'read-only' && updates.externalAccess !== 'confined') {
     throw new Error('工作区外部访问模式无效')
+  }
+
+  // Revoke first, synchronously: a failed workspace write remains fail-closed.
+  if (existing.externalAccess === 'confined' && updates.externalAccess !== undefined && updates.externalAccess !== 'confined') {
+    revokeConfinedOriginsForWorkspace(id)
   }
 
   const updated: AgentWorkspace = {

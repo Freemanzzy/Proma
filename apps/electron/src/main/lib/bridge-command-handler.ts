@@ -143,7 +143,8 @@ export class BridgeCommandHandler {
       undefined,
       channelId,
       workspaceId || undefined,
-      undefined,
+      undefined, undefined, undefined, undefined,
+      { confinedOrigin: true },
     )
 
     const binding: BridgeChatBinding = {
@@ -396,7 +397,8 @@ export class BridgeCommandHandler {
       title || '新会话',
       channelId,
       workspaceId || undefined,
-      undefined
+      undefined, undefined, undefined, undefined,
+      { confinedOrigin: true },
     )
 
     // 清理旧绑定

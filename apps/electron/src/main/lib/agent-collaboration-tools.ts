@@ -730,7 +730,7 @@ function startDelegation(
 
   const { completion, resolveCompletion } = createDelegationCompletion()
 
-  const child = createAgentSession(title, effectiveChannelId, ctx.workspaceId, effectiveModelId)
+  const child = createAgentSession(title, effectiveChannelId, ctx.workspaceId, effectiveModelId, undefined, undefined, undefined, { parentSessionId: ctx.sessionId })
   const childThinkingLevel: AgentThinkingLevel = thinkingLevel ?? child.reasoningLevel ?? 'high'
   const rootSessionId = parent?.rootSessionId ?? parent?.id ?? ctx.sessionId
   updateAgentSessionMeta(child.id, {

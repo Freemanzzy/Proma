@@ -82,6 +82,7 @@ function writeAgentSessionsIndex(sessions: Array<{
   createdAt: number
   updatedAt: number
   confinedOrigin?: boolean
+  parentSessionId?: string
   agentRuntime?: string
   sdkSessionId?: string
   piSessionFile?: string
@@ -667,7 +668,7 @@ describe('R2 confined origin provenance', () => {
   }
   test('only fresh sessions created under confined are marked, persisted, and not granted by moving', () => {
     setup()
-    const fresh = manager.createAgentSession('Fresh', undefined, 'customer')
+    const fresh = manager.createAgentSession('Fresh', undefined, 'customer', undefined, undefined, undefined, undefined, { confinedOrigin: true })
     expect((fresh as { confinedOrigin?: boolean }).confinedOrigin).toBe(true)
     expect((manager.getAgentSessionMeta(fresh.id) as { confinedOrigin?: boolean }).confinedOrigin).toBe(true)
     const normal = manager.createAgentSession('Normal', undefined, 'normal')
@@ -694,4 +695,66 @@ describe('R2 confined origin provenance', () => {
       expect((manager.getAgentSessionMeta(forked.id) as { confinedOrigin?: boolean }).confinedOrigin).toBe(origin)
     })
   }
+})
+
+describe('R3 explicit confined origin and delegated inheritance', () => {
+  const setup = () => {
+    writeAgentSessionsIndex([])
+    writeAgentWorkspacesIndex([{ id: 'customer', name: 'Customer', slug: 'customer', externalAccess: 'confined', createdAt: 1, updatedAt: 1 }, { id: 'normal', name: 'Normal', slug: 'normal', createdAt: 1, updatedAt: 1 }])
+  }
+  test('ordinary low-level and automation creation never implicitly grants origin', () => {
+    setup()
+    expect(manager.createAgentSession('Low level', undefined, 'customer').confinedOrigin).toBeUndefined()
+    const automation = manager.createAgentSession('Scheduled context', undefined, 'customer')
+    expect(manager.updateAgentSessionMeta(automation.id, { sourceAutomationId: 'existing-schedule' }).confinedOrigin).toBeUndefined()
+  })
+  for (const marked of [false, true]) {
+    test(`delegation inherits the persisted parent, not a caller grant (${marked})`, () => {
+      setup()
+      const parent = manager.createAgentSession('Parent', undefined, 'customer', undefined, undefined, undefined, undefined, { confinedOrigin: marked })
+      const child = manager.createAgentSession('Child', undefined, 'customer', undefined, undefined, undefined, undefined, { confinedOrigin: true, parentSessionId: parent.id })
+      const linked = manager.updateAgentSessionMeta(child.id, { parentSessionId: parent.id, confinedOrigin: true })
+      expect(child.confinedOrigin).toBe(marked ? true : undefined)
+      expect(linked.confinedOrigin).toBe(marked ? true : undefined)
+      if (marked) {
+        manager.updateAgentSessionMeta(parent.id, { confinedOrigin: undefined })
+        expect(manager.updateAgentSessionMeta(child.id, { title: 'After parent revocation', confinedOrigin: true }).confinedOrigin).toBeUndefined()
+      }
+    })
+  }
+})
+
+test('R3 persisted workspace-wide revocation clears origins without changing other workspaces', () => {
+  writeAgentSessionsIndex([])
+  writeAgentWorkspacesIndex([{ id: 'customer', name: 'Customer', slug: 'customer', externalAccess: 'confined', createdAt: 1, updatedAt: 1 }, { id: 'other', name: 'Other', slug: 'other', externalAccess: 'confined', createdAt: 1, updatedAt: 1 }])
+  const one = manager.createAgentSession('One', undefined, 'customer', undefined, undefined, undefined, undefined, { confinedOrigin: true })
+  const two = manager.createAgentSession('Two', undefined, 'customer', undefined, undefined, undefined, undefined, { confinedOrigin: true })
+  const other = manager.createAgentSession('Other', undefined, 'other', undefined, undefined, undefined, undefined, { confinedOrigin: true })
+  manager.revokeConfinedOriginsForWorkspace('customer')
+  expect(manager.getAgentSessionMeta(one.id)?.confinedOrigin).toBeUndefined()
+  expect(manager.getAgentSessionMeta(two.id)?.confinedOrigin).toBeUndefined()
+  expect(manager.getAgentSessionMeta(other.id)?.confinedOrigin).toBe(true)
+})
+
+test('R3 shared ordinary-context revoker persists before returning and preserves confined sessions', () => {
+  writeAgentSessionsIndex([])
+  writeAgentWorkspacesIndex([{ id: 'customer', name: 'Customer', slug: 'customer', externalAccess: 'confined', createdAt: 1, updatedAt: 1 }])
+  const fresh = manager.createAgentSession('Fresh', undefined, 'customer', undefined, undefined, undefined, undefined, { confinedOrigin: true })
+  expect(manager.revokeConfinedOriginForOrdinaryContext(fresh)?.confinedOrigin).toBe(true)
+  writeAgentWorkspacesIndex([{ id: 'customer', name: 'Customer', slug: 'customer', externalAccess: 'read-write', createdAt: 1, updatedAt: 2 }])
+  expect(manager.revokeConfinedOriginForOrdinaryContext(fresh)?.confinedOrigin).toBeUndefined()
+  expect(manager.getAgentSessionMeta(fresh.id)?.confinedOrigin).toBeUndefined()
+})
+
+test('R3 existing delegated markers cannot outlive or bypass their parent origin', () => {
+  writeAgentWorkspacesIndex([{ id: 'customer', name: 'Customer', slug: 'customer', externalAccess: 'confined', createdAt: 1, updatedAt: 1 }])
+  writeAgentSessionsIndex([
+    { id: 'ordinary-parent', title: 'Parent', workspaceId: 'customer', createdAt: 1, updatedAt: 1 },
+    { id: 'stale-child', title: 'Child', workspaceId: 'customer', parentSessionId: 'ordinary-parent', confinedOrigin: true, createdAt: 1, updatedAt: 1 },
+    { id: 'stale-grandchild', title: 'Grandchild', workspaceId: 'customer', parentSessionId: 'stale-child', confinedOrigin: true, createdAt: 1, updatedAt: 1 },
+  ])
+  expect(manager.getAgentSessionMeta('stale-child')?.confinedOrigin).toBeUndefined()
+  expect(manager.listAgentSessions().find(s => s.id === 'stale-grandchild')?.confinedOrigin).toBeUndefined()
+  const child = manager.createAgentSession('Descendant', undefined, 'customer', undefined, undefined, undefined, undefined, { parentSessionId: 'stale-child' })
+  expect(child.confinedOrigin).toBeUndefined()
 })

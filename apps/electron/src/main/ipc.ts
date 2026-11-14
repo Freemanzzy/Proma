@@ -2558,7 +2558,7 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.CREATE_SESSION,
     async (_, title?: string, channelId?: string, workspaceId?: string, modelId?: string, isDraft?: boolean): Promise<AgentSessionMeta> => {
       if (isDraft !== undefined && typeof isDraft !== 'boolean') throw new Error('Agent 草稿状态非法')
-      const session = createAgentSession(title, channelId, workspaceId, modelId, undefined, undefined, isDraft)
+      const session = createAgentSession(title, channelId, workspaceId, modelId, undefined, undefined, isDraft, { confinedOrigin: true })
       feishuBridgeManager.ensureSessionMirror(session).catch((error) => {
         console.error('[飞书 Session 镜像] 新会话建群失败:', error)
       })
@@ -2862,7 +2862,7 @@ export function registerIpcHandlers(): void {
       if (workspace.projectRootPath) watchAttachedDirectory(workspace.projectRootPath)
 
       try {
-        const session = createAgentSession(undefined, channelId, workspace.id, modelId)
+        const session = createAgentSession(undefined, channelId, workspace.id, modelId, undefined, undefined, undefined, { confinedOrigin: true })
         feishuBridgeManager.ensureSessionMirror(session).catch((error) => {
           console.error('[飞书 Session 镜像] 项目首个会话建群失败:', error)
         })

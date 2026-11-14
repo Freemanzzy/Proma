@@ -1198,7 +1198,7 @@ class FeishuBridge {
     }
 
     // 创建会话（使用默认标题，首次对话完成后会自动生成标题）
-    const session = await createAgentSession(title, channelId, workspaceId)
+    const session = await createAgentSession(title, channelId, workspaceId, undefined, undefined, undefined, undefined, { confinedOrigin: true })
 
     // 绑定
     const binding: FeishuChatBinding = {
