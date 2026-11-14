@@ -2543,3 +2543,26 @@
 - **对其他工作区的影响**：只有标记为 confined 的工作区受限。“对其他工作区只读”的工作区（飞书群 Bot / 小R）只多了 `~`/`@`/`file://` 写入路径修复；飞书/通用 Bridge 的命令只在绑定或有效默认工作区为 confined 时受限；飞书绑定文件改为原子写入。
 - **已知限制**：工具层隔离而非 OS 沙箱；入口及依赖须放在客户工作区之外且由管理员控制；TOCTOU 不处理；Slack 未接入；仅 macOS 验证。详见 SSOT。
 - **同步文档**：新增 `docs/personal/confined-workspace.md`；`PERSONAL.md`（与上游差异）；backlog（已合入未安装、#23）；本记录。
+
+## 2026-11-15: 安装 42b83249（Electron 43.8.10 + 外部受限工作区，Claude Code）
+
+- **安装**：
+  - 标准 `install-update.sh` EXIT=0。
+  - 备份 BACKUP VERIFY PASS（85,975 条目）；启动前后均为 SNAPSHOT MATCH。
+  - `draft-cleanup removed=0 skipped=1`，与预演一致。
+  - **钥匙串只弹了 1 次**，换 Electron Framework 后没有增加。
+  - `scheduler-start enabledTasks=14` 紧随 `web-remote-start` 之后（+2 ms）；启动时 `[FATAL]`/`[ERROR]`/`[WARN]` 均为 0。
+  - 定时任务 14/14，ID 一致；会话数 1609 不变；没有 CDP 端口。
+  - 启动环境自检显示不含 `PROMA_*`，没有 WARN。
+  - `install-request-2026-11-14` 已撤回，并入本次安装。
+- **运行时**：
+  - Framework `CFBundleVersion` 为 43.8.10。
+  - 用 `env -i … ELECTRON_RUN_AS_NODE=1` 运行安装版可执行文件，输出 electron 43.8.10 / node 24.22.1 / chrome 150.0.7871.250。
+- **回归**：用户全部通过。
+  - 覆盖项：桌面对话与读图、内置终端、EgoBrowser、手机 Web Remote、飞书 `/list` 与 `/workspace` 列出全部工作区、小R 回复。
+  - 18 次 provider-request 全部 `outcome=done`，读图时重压缩成功。
+- **受限工作区**：本次未开启，正式数据中没有 confined 工作区。
+- **新出现的告警**：Node `DEP0187`（`fs.existsSync` 收到非法参数类型）1 次，来源未定位。其余 ERROR/WARN 都在安装前出现过：飞书应用缺 `cardkit:card:write`、`contact` 权限；`消息截断后仍超限`；`anyOf`；`DEP0169`、`DEP0180`。
+- **版本**：previous 为 `21234fca`（Electron 43.2.0）；`bfc6bba6` 移入废纸篓；`20261111-211734-52367` 已归档到外置硬盘，复核 SNAPSHOT MATCH。
+- **runtime-maintenance SSOT**：Proma 内置 Electron 一行已更新为 43.8.10 / Node 24.22.1（仍待 24.22.3），workspace-files 提交 `6cfb4db`。
+- 详见交接单 `install-result-2026-11-15.md`。
