@@ -1504,6 +1504,8 @@ export class PiAgentAdapter implements AgentProviderAdapter {
             projectRoot: input.projectInstructionScope.projectRoot,
             cwd,
             initialSources: input.projectInstructionScope.initialSources,
+            ownerSessionId: input.sessionId,
+            sessionState: sessionManager,
           })
         : undefined
       const extensionFactories = [
@@ -1604,6 +1606,8 @@ export class PiAgentAdapter implements AgentProviderAdapter {
       // AsyncLocalStorage 会把 MCP/产品工具等同一 Agent loop 中的 fetch 也错误地送进 Codex 代理。
       const providerStreamFn = session.agent.streamFunction
       session.agent.streamFunction = async (requestModel, context, options) => {
+        // Pi catches extension-hook errors; never silently continue after failed rule restoration.
+        projectInstructionScope?.assertReadyForProvider()
         const startedAt = Date.now()
         let firstEventAt: number | undefined
         let outcome: 'done' | 'error' | 'aborted' = 'done'

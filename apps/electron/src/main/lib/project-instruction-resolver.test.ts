@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { hasRootProjectAgentsInstruction, resolveProjectInstructions } from './project-instruction-resolver'
+import { hasRootProjectAgentsInstruction, resolveProjectInstructions, MAX_TOTAL_BYTES } from './project-instruction-resolver'
 
 const temporaryProjects: string[] = []
 
@@ -63,5 +63,33 @@ describe('项目根 AGENTS 指令状态', () => {
     })
 
     expect(hasRootProjectAgentsInstruction(manifest)).toBe(true)
+  })
+})
+
+
+describe('项目指令字节上限', () => {
+  test('accepts exactly 64 KB per source and 128 KB total, not one byte more', () => {
+    const root = createProject()
+    mkdirSync(join(root, 'child'))
+    writeFileSync(join(root, 'AGENTS.md'), 'r'.repeat(64 * 1024))
+    writeFileSync(join(root, 'child/AGENTS.md'), 'c'.repeat(64 * 1024))
+    const exact = resolveProjectInstructions({ projectRoot: root, targetPath: join(root, 'child') })
+    expect(MAX_TOTAL_BYTES).toBe(128 * 1024)
+    expect(exact.sources).toHaveLength(2)
+    expect(exact.totalBytes).toBe(MAX_TOTAL_BYTES)
+    writeFileSync(join(root, 'child/AGENTS.md'), 'c'.repeat(64 * 1024 + 1))
+    const oversized = resolveProjectInstructions({ projectRoot: root, targetPath: join(root, 'child') })
+    expect(oversized.sources).toHaveLength(1)
+    expect(oversized.diagnostics[0]?.message).toContain('64 KB')
+  })
+
+  test('total limit is enforced across nested distinct sources', () => {
+    const root = createProject()
+    mkdirSync(join(root, 'a/b'), { recursive: true })
+    for (const dir of ['', 'a', 'a/b']) writeFileSync(join(root, dir, 'AGENTS.md'), 'x'.repeat(48 * 1024))
+    const manifest = resolveProjectInstructions({ projectRoot: root, targetPath: join(root, 'a/b') })
+    expect(manifest.sources).toHaveLength(2)
+    expect(manifest.totalBytes).toBe(96 * 1024)
+    expect(manifest.diagnostics[0]?.message).toContain('128 KB')
   })
 })

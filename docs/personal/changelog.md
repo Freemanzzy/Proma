@@ -2577,3 +2577,21 @@
 - **定时任务核对**（只读，未启用任何任务）：启用数从 11-11 的 22 降到 14。按任务 `updatedAt` 与会话中的 `update_automation` 调用核对：
   - BR 侧会话 `f3156176` 于 11-14 02:09/03:56 停用 5 个旧 BR 任务（每日寄样、内容出单、商品分析、周报、Weekly 观察期），同时新建 2 个 Daviena 客户级编排任务；BR 会话 `4a61fa3d`/`a13db437` 于 11-12 停用 API 影子对比；一次性任务“BR 团队跟进 18 位达人定制回复”已执行完毕。均有会话记录。
   - **没有 Agent 调用记录、可能是在界面手动停用的 8 个**（需用户确认）：Phase A 每日寄样、Phase B 每日视频检查（11-14 05:43）；Weekly 观察期视频刷新、Monthly 长尾刷新、Product Analysis、周报生成、马来西亚热点周报（11-14 05:25）；Reddit 养号每日草稿（11-14 13:12）。
+
+## 2026-11-17: 项目子目录指令跨请求恢复（修复“下一轮重试”循环）
+
+- **现象**：业务会话首次读取含 `AGENTS.md` 的项目子目录时被门禁阻断并提示“下一轮收到指令后重试”，此后每一轮都同样阻断，会话无法继续。
+- **根因**：adapter 每个外层请求新建 `ProjectInstructionScopeController`；工具发现的子目录规则只存在内存 `pending`，要等下一次 `before_agent_start` 注入，但新请求已换成新 controller，`pending` 丢失。合成复现 3 轮全部阻断，正式安装包逻辑一致。
+- **修复**：
+  - 新增 `adapters/pi-project-instruction-state.ts`：用 Pi SessionManager custom entry `proma-project-instruction-scopes-v1` 保存已发现的目录引用，只含版本、owner 会话 ID、规范项目根、项目相对目录；不存规则正文、hash 或放行标记。只读当前活动分支 `getBranch()`；owner/根不匹配的 entry 忽略；schema、版本、目录数（256）、大小（64 KB）、路径穿越、符号链接改向均严格校验，失败即阻断。仅在发现新目录时追加，不随每次工具调用写入。
+  - `pi-project-instruction-scope.ts`：每次 agent start 从会话状态重新解析根规则与所有已记录目录，合并去重、受现有 128 KB 总上限约束，真正注入可信系统提示后才标记 delivered；规则内容变化、删除、legacy 替换按 resolver 重新判断。首次发现仍阻断本次工具调用。解析失败、符号链接离开项目根、状态损坏、保存失败改为明确阻断（原先解析失败静默放行）。
+  - `pi-agent-adapter.ts`：传入 owner 会话 ID 与 SessionManager；provider 调用前 `assertReadyForProvider()`，防止 SDK 吞掉恢复 hook 异常后在无规则的情况下继续请求。
+  - `project-instruction-resolver.ts`：仅导出既有 `MAX_TOTAL_BYTES`。
+- **审查**：Codex 初审 1 条 P2（Windows 下目录引用大小写比较），核实采纳并修正为只比较已解析的相对路径字符串、不二次 realpath，符号链接改向仍拒绝；针对性复审无问题。
+- **验证**：
+  - 全量 `bun test` 1040 pass / 0 fail（基线 1035；含隔离子进程中 56 项真实 Pi SDK 回归：独立外层请求重开会话文件、分支/owner/根隔离、压缩与重开、规则变化、上限、保存失败、SDK 吞异常）；`bun run typecheck` 与完整构建通过。
+  - 开发实例（`.proma-dev-fixture`，最终代码）：已有会话中访问新合成子目录，第 1 个外层请求门禁、第 2 个读取成功且回复只由子目录规则给出的标记、第 3 个仍成功；SDK 会话文件中该 entry 共 2 条（第二条累积两个目录），owner 与会话 ID 一致，第 3 轮未重复追加；根目录普通文件一次读取成功无门禁。修 P2 之前另做过一次新会话三步实测，结果相同。
+  - 手机：iPhone smoke 7/7、layout 11/11，Android smoke 7/7、attachments 通过。
+- **未覆盖**：原生 Electron 窗口键鼠操作（macOS 未授予辅助功能权限，开发实例实测经 Web Remote 完成）；Windows 实机。
+- **兼容与回退**：custom entry 不进入模型上下文；旧版本忽略该 entry，回退后恢复原有（会循环的）行为，不损坏会话。
+- **安装后验收**：在原业务会话 `e9ff4758` 正常读取生产项目子目录规则：允许首次阻断，下一个外层请求必须注入规则并放行，不得关闭门禁验证。
