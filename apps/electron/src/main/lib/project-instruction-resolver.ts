@@ -10,7 +10,7 @@ const INSTRUCTION_FILE_CANDIDATES = [
 ] as const
 
 const MAX_SOURCE_BYTES = 64 * 1024
-const MAX_TOTAL_BYTES = 128 * 1024
+export const MAX_TOTAL_BYTES = 128 * 1024
 
 export type ProjectInstructionKind = (typeof INSTRUCTION_FILE_CANDIDATES)[number]['kind']
 
